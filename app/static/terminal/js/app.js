@@ -2740,14 +2740,13 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   }
 
   renderWith(async () => {
-    const [strat, mkt] = await Promise.all([
-      fetch(endpoint).then(r => r.json()),
-      API.marketOverview().catch(() => null),
-    ]);
-    return { strat, mkt };
+    const r = await fetch(endpoint);
+    if (!r.ok) throw new Error("Strategy endpoint failed: " + r.status);
+    const strat = await r.json();
+    return { strat };
   }, (data) => {
     const d = data.strat || {};
-    const price = d.live_price || data.mkt?.current_price || 4428.0;
+    const price = d.live_price || 4428.0;
     const tfData = d.timeframes?.[selectedTf] || {};
     const activeCascadeTf = d.cascading_active_tf;
 
