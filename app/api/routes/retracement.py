@@ -382,5 +382,160 @@ async def advance_forward(symbol: str = "XAUUSD", timeframe: str = "15m"):
 
     # Only advance active signals — no new signal creation here (kept read-only
     # and deterministic).  Returns current active status.
-    return {"status": "ok", "active": len(fo.active_signals()),
-            "summary": fo.summary()}
+    return {\"status\": \"ok\", \"active\": len(fo.active_signals()),
+            \"summary\": fo.summary()}
+
+
+# ---------------------------------------------------------------------------
+# Strategy Dashboard Endpoints — SMC With Fib & Fib With Retracement panels
+# ---------------------------------------------------------------------------
+# These endpoints power the two new dedicated sidebar panels.  They consume the
+# same RETRACEMENT_BOS_V1 multi-TF engine (5m/15m/30m/1h/4h) and add a
+# "cascading_active_tf" field so the UI can highlight which timeframe currently
+# has a live entry setup.  The engine and persistence are NOT duplicated —
+# these are lightweight VIEW endpoints only.
+# ---------------------------------------------------------------------------
+
+def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict,
+                               slots: dict, strategy_label: str) -> dict:
+    """Build the unified strategy dashboard payload for either strategy panel."""
+    TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h", "4h"]
+
+    tf_cards = {}
+    cascading_active_tf = None  # First TF with an active entry-ready setup
+
+    for tf in TIMEFRAMES_ORDER:
+        setup = states.get(tf)
+        slot = slots.get(tf)
+        s = _serialize_setup(setup, live_price=live_price,
+                             data_status=data_status, symbol=symbol, timeframe=tf)
+        # Determine entry readiness for cascading logic
+        is_entry_ready = (
+            setup is not None
+            and setup.point_2_price is not None
+            and not getattr(setup, "entry_touched", False)
+            and s.get("state") not in ("NO_SETUP", "INVALIDATED", "COMPLETED")
+        )
+        is_entry_touched = setup is not None and getattr(setup, "entry_touched", False)
+        is_trade_active = is_entry_touched and not getattr(setup, "outcome", None)
+
+        if cascading_active_tf is None and (is_entry_ready or is_trade_active):
+            cascading_active_tf = tf
+
+        s["is_entry_ready"] = is_entry_ready
+        s["is_trade_active"] = is_trade_active
+        s["has_live_data"] = slot.has_live_data if slot else False
+        tf_cards[tf] = s
+
+    return {
+        "strategy": strategy_label,
+        "symbol": symbol,
+        "live_price": live_price,
+        "data_status": data_status,
+        "timeframes_order": TIMEFRAMES_ORDER,
+        "cascading_active_tf": cascading_active_tf,
+        "timeframes": tf_cards,
+    }
+
+
+@router.get("/strategy/fib-retracement/{symbol}")
+async def get_fib_retracement_dashboard(
+    symbol: str = "XAUUSD",
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Dashboard endpoint for the 'Fib With Retracement' strategy panel.
+
+    Returns the multi-TF cascading scanner state (5m→15m→30m→1h→4h) with
+    entry-readiness and active-trade status for each timeframe.  Powers the
+    dedicated left-sidebar 'Fib With Retracement' dashboard section.
+    """
+    live_price = None
+    data_status = "NO_DATA"
+    try:
+        ls = get_live_service()
+        live_price = await ls.get_latest_price(symbol)
+        dq = await ls.data_quality()
+        data_status = "HEALTHY" if (dq.connected and not dq.degraded) else (
+            "HISTORICAL" if dq.historical_available else "NO_DATA")
+    except Exception:  # noqa: BLE001
+        pass
+
+    multi_svc = get_retracement_multi_tf_service(symbol)
+    try:
+        states = await multi_svc.advance(db)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[STRATEGY] fib-retracement advance failed: %s", exc)
+        states = multi_svc.current_state()
+
+    # Persist fallback: fill None slots from DB when feed is unavailable
+    for tf in multi_svc.timeframes:
+        if states.get(tf) is None and not multi_svc.slots[tf].has_live_data:
+            states[tf] = await RetracementRepository(db).load_latest_active(
+                symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
+
+    return _build_strategy_dashboard(
+        symbol, live_price, data_status, states, multi_svc.slots,
+        strategy_label="FIB_WITH_RETRACEMENT")
+
+
+@router.get("/strategy/smc-fib/{symbol}")
+async def get_smc_fib_dashboard(
+    symbol: str = "XAUUSD",
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Dashboard endpoint for the 'SMC With Fib' strategy panel.
+
+    Returns the same multi-TF cascading state (5m→15m→30m→1h→4h) annotated
+    with SMC context (premium/discount zone relative to live price, Fib
+    Golden Pocket proximity, and BOS/CHoCH flags).  Powers the dedicated
+    left-sidebar 'SMC With Fib' dashboard section.
+    """
+    live_price = None
+    data_status = "NO_DATA"
+    try:
+        ls = get_live_service()
+        live_price = await ls.get_latest_price(symbol)
+        dq = await ls.data_quality()
+        data_status = "HEALTHY" if (dq.connected and not dq.degraded) else (
+            "HISTORICAL" if dq.historical_available else "NO_DATA")
+    except Exception:  # noqa: BLE001
+        pass
+
+    multi_svc = get_retracement_multi_tf_service(symbol)
+    try:
+        states = await multi_svc.advance(db)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[STRATEGY] smc-fib advance failed: %s", exc)
+        states = multi_svc.current_state()
+
+    for tf in multi_svc.timeframes:
+        if states.get(tf) is None and not multi_svc.slots[tf].has_live_data:
+            states[tf] = await RetracementRepository(db).load_latest_active(
+                symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
+
+    base = _build_strategy_dashboard(
+        symbol, live_price, data_status, states, multi_svc.slots,
+        strategy_label="SMC_WITH_FIB")
+
+    # Annotate each TF card with SMC context (premium/discount zone, golden pocket)
+    for tf, card in base["timeframes"].items():
+        setup = states.get(tf)
+        smc_ctx: dict = {}
+        if setup is not None and setup.point_2_price is not None and live_price is not None:
+            hi = getattr(setup, "current_high_price", None) or setup.point_1_price
+            lo = setup.point_2_price
+            if hi and lo and hi != lo:
+                equilibrium = round((hi + lo) / 2, 2)
+                zone = "PREMIUM" if live_price > equilibrium else "DISCOUNT"
+                entry_pct = round(abs(live_price - setup.entry_price) / (hi - lo) * 100, 1) \
+                    if setup.entry_price else None
+                smc_ctx = {
+                    "equilibrium_50": equilibrium,
+                    "zone": zone,
+                    "golden_pocket_hi": round(lo + (hi - lo) * 0.79, 2),
+                    "golden_pocket_lo": round(lo + (hi - lo) * 0.618, 2),
+                    "distance_to_entry_pct": entry_pct,
+                }
+        card["smc"] = smc_ctx
+
+    return base

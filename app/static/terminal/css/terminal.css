@@ -124,6 +124,11 @@ button { font-family: inherit; }
   box-shadow: var(--glow-blue);
 }
 .nav-ico { width: 18px; text-align: center; font-size: 14px; opacity: 0.9; }
+.nav-section-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+  color: var(--text-muted); text-transform: uppercase;
+  padding: 10px 12px 4px; margin-top: 4px;
+}
 
 .sidebar-footer { padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border); }
 .sys-line { display: flex; align-items: center; gap: var(--sp-2); font-size: 11px; color: var(--text-dim); margin: 3px 0; }
