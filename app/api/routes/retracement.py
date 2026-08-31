@@ -607,8 +607,8 @@ async def get_smc_fib_dashboard(
                 "break_price": latest_break.break_price if latest_break else None,
                 "order_block": {
                     "type": active_ob.ob_type,
-                    "high": active_ob.high,
-                    "low": active_ob.low,
+                    "top": active_ob.top,
+                    "bottom": active_ob.bottom,
                 } if active_ob else None,
                 "fvg": {
                     "type": active_fvg.gap_type,
