@@ -382,8 +382,8 @@ async def advance_forward(symbol: str = "XAUUSD", timeframe: str = "15m"):
 
     # Only advance active signals — no new signal creation here (kept read-only
     # and deterministic).  Returns current active status.
-    return {\"status\": \"ok\", \"active\": len(fo.active_signals()),
-            \"summary\": fo.summary()}
+    return {"status": "ok", "active": len(fo.active_signals()),
+            "summary": fo.summary()}
 
 
 # ---------------------------------------------------------------------------
