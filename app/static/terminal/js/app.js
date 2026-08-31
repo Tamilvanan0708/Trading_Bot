@@ -2790,17 +2790,6 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <!-- BIG ACTIVE SIGNAL BOX -->
       ${renderActiveSignalBox(tfData, price, selectedTf)}
 
-      <!-- INTERACTIVE CHART -->
-      <div class="card" style="padding:0">
-        <div class="card-head">
-          <span>${strategyName} LIVE CHART</span>
-          <span class="muted">XAU/USD ${TF_LABELS[selectedTf]} · ${tfData.direction || "LONG"}</span>
-        </div>
-        <div class="card-body" style="padding:0">
-          <div class="chart-box" style="height:420px"><canvas id="strat-live-chart" class="chart"></canvas></div>
-        </div>
-      </div>
-
       <!-- METRICS & FIBONACCI TABLE -->
       ${renderPointsMetrics(tfData)}
 
@@ -2832,28 +2821,6 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         Routes[location.hash.slice(1)](mount);
       };
     });
-
-    // Draw live chart
-    const cv = mount.querySelector("#strat-live-chart");
-    if (!cv) return;
-    API.marketCandles(selectedTf === "4h" ? "4h" : selectedTf === "1h" ? "1h" : selectedTf === "30m" ? "30m" : selectedTf === "5m" ? "5m" : "15m", 80).then(cData => {
-      const candles = cData.candles || [];
-      if (!candles.length) return;
-      const tfData = res.strat?.timeframes?.[selectedTf] || {};
-      const lv = tfData.levels || {};
-      const levels = [];
-      const add = (label, price, color) => {
-        if (price != null) levels.push({ label, price: Number(price), color });
-      };
-      add("TP 0.000", tfData.tp?.locked || tfData.tp?.price, "#22c55e");
-      add("ENTRY 0.680", tfData.entry?.price, "#4d9fff");
-      add("0.500", lv["0.500"]?.price, "rgba(255,255,255,0.3)");
-      add("0.790", lv["0.790"]?.price, "rgba(251,191,36,0.5)");
-      add("SL 0.920", tfData.sl?.price, "#ef4444");
-      add("1.000 ANCHOR", tfData.point_1?.price, "#a855f7");
-      const lastPrice = res.strat?.live_price || candles[candles.length - 1].close;
-      Charts.candles(cv, candles, { window: 80, volume: true, levels, lastPrice, showLatest: true });
-    }).catch(() => {});
   });
 }
 
