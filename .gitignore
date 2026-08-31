@@ -13,12 +13,17 @@ build/
 
 # Database
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
+data/*.db
+data/*.db-shm
+data/*.db-wal
 
 # Data
 data/raw/*.csv
 data/processed/*.json
-data/*.db
+data/research/*.json
 
 # IDE
 .vscode/
