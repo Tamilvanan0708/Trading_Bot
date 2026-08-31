@@ -2626,17 +2626,21 @@ Routes["/smc-fib"] = (mount) => {
   function renderSmcCard(tf, card, isActive) {
     const s = card;
     const smc = s.smc || {};
+    const lvl = s.levels || {};
+    const str = s.structure || {};
     const state = s.state || "NO_SETUP";
     const stateColor = s.is_trade_active ? "badge-green" : s.is_entry_ready ? "badge-amber" : "badge-muted";
     const borderColor = s.is_trade_active ? "rgba(52,211,153,0.35)" : s.is_entry_ready ? "rgba(251,191,36,0.35)" : "rgba(255,255,255,0.07)";
     const price = v => v != null ? `<b>$${Number(v).toFixed(2)}</b>` : `<span class="muted">—</span>`;
     const zoneColor = smc.zone === "DISCOUNT" ? "badge-green" : smc.zone === "PREMIUM" ? "badge-red" : "badge-muted";
+    const dirBadge = s.direction === "SHORT" ? '<span class="badge badge-red">SHORT (SELL)</span>' : '<span class="badge badge-green">LONG (BUY)</span>';
     return `<div class="card" style="border-color:${borderColor};margin-bottom:var(--sp-2)">
       <div class="card-head">
         <span style="font-weight:700;font-size:13px">${TF_LABELS[tf]} — SMC With Fib</span>
         <div style="display:flex;gap:4px;flex-wrap:wrap">
+          ${s.direction ? dirBadge : ""}
           <span class="badge ${stateColor}">${state}</span>
-          ${smc.zone ? `<span class="badge ${zoneColor}">${smc.zone}</span>` : ""}
+          ${smc.zone ? `<span class="badge ${zoneColor}">${smc.zone} ZONE</span>` : ""}
           ${isActive ? `<span class="badge badge-green" style="animation:pulse 1.5s infinite">● ACTIVE TF</span>` : ""}
         </div>
       </div>
@@ -2644,26 +2648,25 @@ Routes["/smc-fib"] = (mount) => {
         <div class="grid grid-2" style="gap:var(--sp-2)">
           <div>
             ${UI.kv([
-              ["BOS Level", price(s.bos?.price)],
-              ["Anchor Low (0.0)", price(s.point_2?.price)],
-              ["Entry 0.618", price(s.entry?.price)],
-              ["SL 0.236", price(s.sl?.price)],
-              ["TP (Dynamic)", price(s.tp?.dynamic)],
-              ["TP (Locked)", s.tp?.is_locked ? price(s.tp.locked) : '<span class="muted">Trailing…</span>'],
+              ["Direction", s.direction || "—"],
+              ["Anchor (1.0 Fib)", price(lvl.anchor_1_0)],
+              ["Target TP (0.0 Fib)", price(lvl.target_0_0)],
+              ["Entry (0.68 Fib)", price(lvl.entry_0_68)],
+              ["Pocket (0.79 Fib)", price(lvl.pocket_0_79)],
+              ["Stop Loss (0.92 Fib)", price(lvl.sl_0_92)],
             ])}
           </div>
           <div>
             ${UI.kv([
               ["50% Equilibrium", price(smc.equilibrium_50)],
-              ["Golden Pocket Hi (0.79)", price(smc.golden_pocket_hi)],
-              ["Golden Pocket Lo (0.618)", price(smc.golden_pocket_lo)],
-              ["Dist to Entry", smc.distance_to_entry_pct != null ? `<b>${smc.distance_to_entry_pct}%</b>` : '<span class="muted">—</span>'],
-              ["Entry Touched", s.entry_touched ? '<span class="badge badge-green">YES</span>' : '<span class="badge badge-muted">NO</span>'],
-              ["Has Live Data", s.has_live_data ? '<span class="badge badge-green">LIVE</span>' : '<span class="badge badge-muted">NO FEED</span>'],
+              ["Structure Break", str.break_type || "NONE"],
+              ["Break Price", price(str.break_price)],
+              ["Order Blocks Active", smc.active_obs_count != null ? `<b>${smc.active_obs_count}</b>` : '<span class="muted">—</span>'],
+              ["FVG Imbalances", smc.active_fvgs_count != null ? `<b>${smc.active_fvgs_count}</b>` : '<span class="muted">—</span>'],
+              ["Live Data Feed", s.has_live_data ? '<span class="badge badge-green">LIVE</span>' : '<span class="badge badge-muted">NO FEED</span>'],
             ])}
           </div>
         </div>
-        ${s.invalidation_reason ? `<div style="margin-top:var(--sp-2);font-size:11px;color:var(--text-muted)">${s.invalidation_reason}</div>` : ""}
       </div>
     </div>`;
   }

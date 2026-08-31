@@ -483,59 +483,165 @@ async def get_smc_fib_dashboard(
     symbol: str = "XAUUSD",
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Dashboard endpoint for the 'SMC With Fib' strategy panel.
+    """Dashboard endpoint for the dedicated 'SMC With Fib' strategy panel.
 
-    Returns the same multi-TF cascading state (5m→15m→30m→1h→4h) annotated
-    with SMC context (premium/discount zone relative to live price, Fib
-    Golden Pocket proximity, and BOS/CHoCH flags).  Powers the dedicated
-    left-sidebar 'SMC With Fib' dashboard section.
+    Runs true Smart Money Concepts (SMC) analysis across 5 timeframes:
+    - 4H/1H Market Bias + CHoCH/BOS detection
+    - Premium (Sell) vs Discount (Buy) 50% Equilibrium Zone
+    - Order Blocks & Fair Value Gaps (FVG)
+    - Exact User Fibonacci Model:
+        * Entry: 0.68 - 0.79 Golden Pocket (Retracement inside Order Block)
+        * Stop Loss (SL): 0.92 Fib (Above/Below Order Block invalidation)
+        * Take Profit (TP): 0.0 Fib (Previous Major Swing Liquidity)
+        * Extension: 1.0 Fib (Swing Anchor)
     """
     live_price = None
     data_status = "NO_DATA"
+    snap = None
     try:
         ls = get_live_service()
         live_price = await ls.get_latest_price(symbol)
         dq = await ls.data_quality()
         data_status = "HEALTHY" if (dq.connected and not dq.degraded) else (
             "HISTORICAL" if dq.historical_available else "NO_DATA")
+        snap = await ls.get_multi_timeframe_snapshot(symbol, include_forming=False, m15_limit=500)
     except Exception:  # noqa: BLE001
         pass
 
-    multi_svc = get_retracement_multi_tf_service(symbol)
-    try:
-        states = await multi_svc.advance(db)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("[STRATEGY] smc-fib advance failed: %s", exc)
-        states = multi_svc.current_state()
+    from app.core.constants import TimeFrame, ZoneType, StructureType
+    from app.smc.detector import SMCEngine
 
-    for tf in multi_svc.timeframes:
-        if states.get(tf) is None and not multi_svc.slots[tf].has_live_data:
-            states[tf] = await RetracementRepository(db).load_latest_active(
-                symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
+    TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h", "4h"]
+    tf_enum_map = {
+        "5m": TimeFrame.M5,
+        "15m": TimeFrame.M15,
+        "30m": TimeFrame.M30,
+        "1h": TimeFrame.H1,
+        "4h": TimeFrame.H4,
+    }
 
-    base = _build_strategy_dashboard(
-        symbol, live_price, data_status, states, multi_svc.slots,
-        strategy_label="SMC_WITH_FIB")
+    smc_engine = SMCEngine(left_bars=3, right_bars=3)
+    tf_cards = {}
+    cascading_active_tf = None
 
-    # Annotate each TF card with SMC context (premium/discount zone, golden pocket)
-    for tf, card in base["timeframes"].items():
-        setup = states.get(tf)
-        smc_ctx: dict = {}
-        if setup is not None and setup.point_2_price is not None and live_price is not None:
-            hi = getattr(setup, "current_high_price", None) or setup.point_1_price
-            lo = setup.point_2_price
-            if hi and lo and hi != lo:
-                equilibrium = round((hi + lo) / 2, 2)
-                zone = "PREMIUM" if live_price > equilibrium else "DISCOUNT"
-                entry_pct = round(abs(live_price - setup.entry_price) / (hi - lo) * 100, 1) \
-                    if setup.entry_price else None
-                smc_ctx = {
-                    "equilibrium_50": equilibrium,
-                    "zone": zone,
-                    "golden_pocket_hi": round(lo + (hi - lo) * 0.79, 2),
-                    "golden_pocket_lo": round(lo + (hi - lo) * 0.618, 2),
-                    "distance_to_entry_pct": entry_pct,
-                }
-        card["smc"] = smc_ctx
+    for tf in TIMEFRAMES_ORDER:
+        candles = []
+        if snap is not None:
+            candles = list(snap.get_series(tf_enum_map[tf]))
 
-    return base
+        if not candles or len(candles) < 15:
+            tf_cards[tf] = {
+                "strategy": "SMC_WITH_FIB",
+                "symbol": symbol,
+                "timeframe": tf,
+                "state": "NO_SETUP",
+                "has_live_data": bool(candles),
+                "is_entry_ready": false if False else False,
+                "is_trade_active": False,
+            }
+            continue
+
+        smc_res = smc_engine.analyze(candles, tf_enum_map[tf])
+
+        # Swing Range over recent structure (last 50 bars)
+        recent_high = max(c.high for c in candles[-50:])
+        recent_low = min(c.low for c in candles[-50:])
+        range_span = recent_high - recent_low if recent_high > recent_low else 1.0
+        equilibrium = round((recent_high + recent_low) / 2.0, 2)
+
+        # Detect direction from latest BOS/CHoCH or Zone
+        latest_break = smc_res.latest_break
+        is_bearish = (
+            latest_break and latest_break.break_type in [StructureType.BOS_BEARISH, StructureType.CHOCH_BEARISH]
+        ) or (live_price and live_price > equilibrium)
+
+        # Exact User Fib Levels:
+        # For SHORT (Sell in Premium):
+        # Anchor Top: 1.0 (recent_high)
+        # Target TP: 0.0 (recent_low)
+        # Entry: 0.68 Fib (4667.07 on user chart)
+        # Golden Pocket Hi: 0.79 Fib (4677.11)
+        # SL: 0.92 Fib (4688.98 - above order block)
+        if is_bearish:
+            direction = "SHORT"
+            anchor_price = recent_high
+            tp_price = recent_low
+            entry_068 = round(recent_low + range_span * 0.68, 2)
+            entry_079 = round(recent_low + range_span * 0.79, 2)
+            sl_092 = round(recent_low + range_span * 0.92, 2)
+            zone = "PREMIUM" if live_price and live_price > equilibrium else "DISCOUNT"
+            # Ready for entry if price is in or near Golden Pocket
+            is_entry_ready = live_price is not None and (entry_068 <= live_price <= sl_092)
+            is_trade_active = live_price is not None and (entry_068 <= live_price < sl_092)
+        else:
+            direction = "LONG"
+            anchor_price = recent_low
+            tp_price = recent_high
+            entry_068 = round(recent_low + range_span * 0.32, 2)
+            entry_079 = round(recent_low + range_span * 0.21, 2)
+            sl_092 = round(recent_low + range_span * 0.08, 2)
+            zone = "DISCOUNT" if live_price and live_price < equilibrium else "PREMIUM"
+            is_entry_ready = live_price is not None and (sl_092 <= live_price <= entry_068)
+            is_trade_active = is_entry_ready
+
+        # Active Order Blocks & FVGs summary
+        active_ob = smc_res.active_order_blocks[-1] if smc_res.active_order_blocks else None
+        active_fvg = smc_res.active_fvgs[-1] if smc_res.active_fvgs else None
+
+        if cascading_active_tf is None and (is_entry_ready or is_trade_active):
+            cascading_active_tf = tf
+
+        state_label = "TRADE_ACTIVE" if is_trade_active else "PREMIUM_PULLBACK" if is_entry_ready else "SCANNING_ZONE"
+
+        tf_cards[tf] = {
+            "strategy": "SMC_WITH_FIB",
+            "symbol": symbol,
+            "timeframe": tf,
+            "direction": direction,
+            "state": state_label,
+            "has_live_data": True,
+            "is_entry_ready": is_entry_ready,
+            "is_trade_active": is_trade_active,
+            "structure": {
+                "break_type": latest_break.break_type.value if latest_break else "NONE",
+                "break_price": latest_break.break_price if latest_break else None,
+                "order_block": {
+                    "type": active_ob.ob_type,
+                    "high": active_ob.high,
+                    "low": active_ob.low,
+                } if active_ob else None,
+                "fvg": {
+                    "type": active_fvg.gap_type,
+                    "top": active_fvg.top,
+                    "bottom": active_fvg.bottom,
+                } if active_fvg else None,
+            },
+            "levels": {
+                "anchor_1_0": anchor_price,
+                "target_0_0": tp_price,
+                "entry_0_68": entry_068,
+                "pocket_0_79": entry_079,
+                "sl_0_92": sl_092,
+                "equilibrium_50": equilibrium,
+            },
+            "smc": {
+                "zone": zone,
+                "equilibrium_50": equilibrium,
+                "golden_pocket_lo": entry_068,
+                "golden_pocket_hi": entry_079,
+                "sl_092": sl_092,
+                "target_00": tp_price,
+                "active_obs_count": len(smc_res.active_order_blocks),
+                "active_fvgs_count": len(smc_res.active_fvgs),
+            },
+        }
+
+    return {
+        "strategy": "SMC_WITH_FIB",
+        "symbol": symbol,
+        "live_price": live_price,
+        "data_status": data_status,
+        "timeframes_order": TIMEFRAMES_ORDER,
+        "cascading_active_tf": cascading_active_tf,
+        "timeframes": tf_cards,
+    }
