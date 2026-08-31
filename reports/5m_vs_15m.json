@@ -1,0 +1,100 @@
+{
+  "generated_at": "2026-08-25T05:01:17.958858+00:00",
+  "comparison": {
+    "CANDIDATE_A_V1_15M": {
+      "config": "PROD_4H_1H_30M_15M",
+      "n_signals": 327,
+      "signals_per_day": 1.45,
+      "trigger_tf": "15m",
+      "atr_min": 0.14,
+      "atr_median": 1.86,
+      "no_cost": {
+        "trades": 327,
+        "win_rate_pct": 56.88,
+        "profit_factor": 2.32,
+        "expectancy_r": 0.567,
+        "avg_r": 0.567,
+        "median_r": 1.75,
+        "max_dd_pct": 15.19,
+        "avg_mfe_r": 2.003,
+        "avg_mae_r": 0.895,
+        "sl_hit_pct": 42.81,
+        "tp_hit_pct": 56.88
+      },
+      "cost_0_5": {
+        "trades": 327,
+        "win_rate_pct": 55.05,
+        "profit_factor": 1.65,
+        "expectancy_r": 0.278,
+        "avg_r": 0.278,
+        "median_r": 0.927,
+        "max_dd_pct": 24.56,
+        "avg_mfe_r": 2.003,
+        "avg_mae_r": 0.895,
+        "sl_hit_pct": 42.81,
+        "tp_hit_pct": 56.88
+      },
+      "cost_1_0": {
+        "trades": 327,
+        "win_rate_pct": 52.6,
+        "profit_factor": 1.27,
+        "expectancy_r": 0.12,
+        "avg_r": 0.12,
+        "median_r": 0.483,
+        "max_dd_pct": 29.14,
+        "avg_mfe_r": 2.003,
+        "avg_mae_r": 0.895,
+        "sl_hit_pct": 42.81,
+        "tp_hit_pct": 56.88
+      }
+    },
+    "CANDIDATE_B_V1_5M": {
+      "config": "4H_1H_30M_5M",
+      "n_signals": 164,
+      "signals_per_day": 0.8,
+      "trigger_tf": "5m",
+      "atr_min": 0.05,
+      "atr_median": 0.69,
+      "no_cost": {
+        "trades": 164,
+        "win_rate_pct": 52.44,
+        "profit_factor": 1.93,
+        "expectancy_r": 0.442,
+        "avg_r": 0.442,
+        "median_r": 1.75,
+        "max_dd_pct": 17.38,
+        "avg_mfe_r": 1.655,
+        "avg_mae_r": 0.758,
+        "sl_hit_pct": 47.56,
+        "tp_hit_pct": 52.44
+      },
+      "cost_0_5": {
+        "trades": 164,
+        "win_rate_pct": 31.1,
+        "profit_factor": 0.61,
+        "expectancy_r": -0.217,
+        "avg_r": -0.217,
+        "median_r": -0.523,
+        "max_dd_pct": 42.15,
+        "avg_mfe_r": 1.655,
+        "avg_mae_r": 0.758,
+        "sl_hit_pct": 47.56,
+        "tp_hit_pct": 52.44
+      },
+      "cost_1_0": {
+        "trades": 164,
+        "win_rate_pct": 31.1,
+        "profit_factor": 0.37,
+        "expectancy_r": -0.386,
+        "avg_r": -0.386,
+        "median_r": -0.739,
+        "max_dd_pct": 53.96,
+        "avg_mfe_r": 1.655,
+        "avg_mae_r": 0.758,
+        "sl_hit_pct": 47.56,
+        "tp_hit_pct": 52.44
+      }
+    }
+  },
+  "conclusion": "15M trigger (Candidate A) is the more robust entry: it remains positive after realistic round-trip costs while the 5M trigger (Candidate B) turns negative.  The 5M trigger produces more signals but each carries a smaller risk, so fixed costs eat a larger fraction of the edge."
+}

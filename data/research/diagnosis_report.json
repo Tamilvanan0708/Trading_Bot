@@ -1,0 +1,2088 @@
+{
+  "data_label": "REAL DATA (Binance XAUUSDT)",
+  "candles": 24585,
+  "data_start": "2025-12-11T08:00:00+00:00",
+  "data_end": "2026-08-24T10:00:00+00:00",
+  "signals": 2384,
+  "generated_at": "2026-08-24T12:30:56.692167+00:00",
+  "phase3": {
+    "baseline_tp1.5": {
+      "trades": 2384,
+      "win_rate_pct": 49.16,
+      "profit_factor": 1.31,
+      "expectancy_r": 0.136,
+      "avg_r": 0.136,
+      "median_r": -0.004,
+      "max_dd_pct": 65.52,
+      "avg_mfe_r": 1.048,
+      "avg_mae_r": 0.765,
+      "sl_hit_pct": 41.11,
+      "tp_hit_pct": 33.98
+    },
+    "entry_quality": {
+      "median_mfe_r": 0.812,
+      "p75_mfe_r": 1.605,
+      "median_mae_r": 0.622,
+      "mfe_ge_1r_pct": 45.01,
+      "mfe_ge_2r_pct": 9.77,
+      "mfe_ge_3r_pct": 2.43,
+      "mae_ge_1r_pct": 41.11
+    },
+    "clustering": {
+      "total_signals": 2384,
+      "signals_within_2h_of_previous": 2054,
+      "clustering_pct": 86.16,
+      "avg_signals_per_day": 9.57
+    },
+    "direction_long": {
+      "trades": 1299,
+      "win_rate_pct": 52.5,
+      "profit_factor": 1.39,
+      "expectancy_r": 0.15,
+      "avg_r": 0.15,
+      "median_r": 0.022,
+      "max_dd_pct": 68.41,
+      "avg_mfe_r": 0.906,
+      "avg_mae_r": 0.719,
+      "sl_hit_pct": 35.72,
+      "tp_hit_pct": 29.56
+    },
+    "direction_short": {
+      "trades": 1085,
+      "win_rate_pct": 45.16,
+      "profit_factor": 1.24,
+      "expectancy_r": 0.119,
+      "avg_r": 0.119,
+      "median_r": -0.324,
+      "max_dd_pct": 55.58,
+      "avg_mfe_r": 1.219,
+      "avg_mae_r": 0.819,
+      "sl_hit_pct": 47.56,
+      "tp_hit_pct": 39.26
+    },
+    "regime_HIGH_VOLATILITY": {
+      "trades": 646,
+      "win_rate_pct": 49.38,
+      "profit_factor": 1.27,
+      "expectancy_r": 0.128,
+      "avg_r": 0.128,
+      "median_r": -0.056,
+      "max_dd_pct": 53.84,
+      "avg_mfe_r": 1.11,
+      "avg_mae_r": 0.811,
+      "sl_hit_pct": 45.67,
+      "tp_hit_pct": 35.45
+    },
+    "regime_LOW_VOLATILITY": {
+      "trades": 775,
+      "win_rate_pct": 46.19,
+      "profit_factor": 1.11,
+      "expectancy_r": 0.044,
+      "avg_r": 0.044,
+      "median_r": -0.009,
+      "max_dd_pct": 60.39,
+      "avg_mfe_r": 0.814,
+      "avg_mae_r": 0.708,
+      "sl_hit_pct": 37.16,
+      "tp_hit_pct": 25.94
+    },
+    "regime_RANGING": {
+      "trades": 316,
+      "win_rate_pct": 62.34,
+      "profit_factor": 2.42,
+      "expectancy_r": 0.5,
+      "avg_r": 0.5,
+      "median_r": 1.5,
+      "max_dd_pct": 16.16,
+      "avg_mfe_r": 1.602,
+      "avg_mae_r": 0.766,
+      "sl_hit_pct": 32.91,
+      "tp_hit_pct": 54.75
+    },
+    "regime_TRENDING": {
+      "trades": 500,
+      "win_rate_pct": 42.4,
+      "profit_factor": 1.05,
+      "expectancy_r": 0.026,
+      "avg_r": 0.026,
+      "median_r": -0.506,
+      "max_dd_pct": 56.05,
+      "avg_mfe_r": 0.962,
+      "avg_mae_r": 0.803,
+      "sl_hit_pct": 46.8,
+      "tp_hit_pct": 30.0
+    },
+    "regime_UNCERTAIN": {
+      "trades": 147,
+      "win_rate_pct": 58.5,
+      "profit_factor": 1.61,
+      "expectancy_r": 0.246,
+      "avg_r": 0.246,
+      "median_r": 0.274,
+      "max_dd_pct": 24.01,
+      "avg_mfe_r": 1.116,
+      "avg_mae_r": 0.73,
+      "sl_hit_pct": 40.14,
+      "tp_hit_pct": 38.78
+    },
+    "session_ASIA": {
+      "trades": 786,
+      "win_rate_pct": 48.22,
+      "profit_factor": 1.32,
+      "expectancy_r": 0.142,
+      "avg_r": 0.142,
+      "median_r": -0.032,
+      "max_dd_pct": 33.94,
+      "avg_mfe_r": 1.033,
+      "avg_mae_r": 0.742,
+      "sl_hit_pct": 43.51,
+      "tp_hit_pct": 36.26
+    },
+    "session_LONDON": {
+      "trades": 394,
+      "win_rate_pct": 48.48,
+      "profit_factor": 1.27,
+      "expectancy_r": 0.137,
+      "avg_r": 0.137,
+      "median_r": -0.496,
+      "max_dd_pct": 26.09,
+      "avg_mfe_r": 1.133,
+      "avg_mae_r": 0.894,
+      "sl_hit_pct": 48.48,
+      "tp_hit_pct": 39.34
+    },
+    "session_LONDON_NY": {
+      "trades": 391,
+      "win_rate_pct": 47.83,
+      "profit_factor": 1.16,
+      "expectancy_r": 0.075,
+      "avg_r": 0.075,
+      "median_r": -0.097,
+      "max_dd_pct": 27.89,
+      "avg_mfe_r": 1.017,
+      "avg_mae_r": 0.908,
+      "sl_hit_pct": 45.52,
+      "tp_hit_pct": 32.23
+    },
+    "session_NEW_YORK": {
+      "trades": 533,
+      "win_rate_pct": 49.34,
+      "profit_factor": 1.25,
+      "expectancy_r": 0.099,
+      "avg_r": 0.099,
+      "median_r": -0.002,
+      "max_dd_pct": 30.14,
+      "avg_mfe_r": 1.005,
+      "avg_mae_r": 0.665,
+      "sl_hit_pct": 35.27,
+      "tp_hit_pct": 27.58
+    },
+    "session_OFF_HOURS": {
+      "trades": 280,
+      "win_rate_pct": 54.29,
+      "profit_factor": 1.86,
+      "expectancy_r": 0.271,
+      "avg_r": 0.271,
+      "median_r": 0.078,
+      "max_dd_pct": 14.89,
+      "avg_mfe_r": 1.097,
+      "avg_mae_r": 0.634,
+      "sl_hit_pct": 28.93,
+      "tp_hit_pct": 34.64
+    },
+    "feat_has_bos": {
+      "trades": 1028,
+      "win_rate_pct": 49.81,
+      "profit_factor": 1.39,
+      "expectancy_r": 0.157,
+      "avg_r": 0.157,
+      "median_r": 0.0,
+      "max_dd_pct": 56.31,
+      "avg_mfe_r": 0.939,
+      "avg_mae_r": 0.735,
+      "sl_hit_pct": 37.84,
+      "tp_hit_pct": 31.81
+    },
+    "feat_no_bos": {
+      "trades": 1356,
+      "win_rate_pct": 48.67,
+      "profit_factor": 1.26,
+      "expectancy_r": 0.119,
+      "avg_r": 0.119,
+      "median_r": -0.02,
+      "max_dd_pct": 52.76,
+      "avg_mfe_r": 1.131,
+      "avg_mae_r": 0.787,
+      "sl_hit_pct": 43.58,
+      "tp_hit_pct": 35.62
+    },
+    "feat_has_fvg": {
+      "trades": 1556,
+      "win_rate_pct": 55.01,
+      "profit_factor": 1.68,
+      "expectancy_r": 0.238,
+      "avg_r": 0.238,
+      "median_r": 0.086,
+      "max_dd_pct": 50.75,
+      "avg_mfe_r": 0.962,
+      "avg_mae_r": 0.653,
+      "sl_hit_pct": 32.78,
+      "tp_hit_pct": 33.74
+    },
+    "feat_no_fvg": {
+      "trades": 828,
+      "win_rate_pct": 38.16,
+      "profit_factor": 0.9,
+      "expectancy_r": -0.057,
+      "avg_r": -0.057,
+      "median_r": -1.0,
+      "max_dd_pct": 73.25,
+      "avg_mfe_r": 1.21,
+      "avg_mae_r": 0.976,
+      "sl_hit_pct": 56.76,
+      "tp_hit_pct": 34.42
+    },
+    "feat_has_sweep": {
+      "trades": 2219,
+      "win_rate_pct": 50.16,
+      "profit_factor": 1.35,
+      "expectancy_r": 0.15,
+      "avg_r": 0.15,
+      "median_r": 0.001,
+      "max_dd_pct": 59.05,
+      "avg_mfe_r": 1.066,
+      "avg_mae_r": 0.765,
+      "sl_hit_pct": 41.14,
+      "tp_hit_pct": 34.61
+    },
+    "feat_no_sweep": {
+      "trades": 165,
+      "win_rate_pct": 35.76,
+      "profit_factor": 0.88,
+      "expectancy_r": -0.06,
+      "avg_r": -0.06,
+      "median_r": -0.455,
+      "max_dd_pct": 22.67,
+      "avg_mfe_r": 0.806,
+      "avg_mae_r": 0.757,
+      "sl_hit_pct": 40.61,
+      "tp_hit_pct": 25.45
+    },
+    "feat_has_fib": {
+      "trades": 832,
+      "win_rate_pct": 47.6,
+      "profit_factor": 1.24,
+      "expectancy_r": 0.109,
+      "avg_r": 0.109,
+      "median_r": -0.081,
+      "max_dd_pct": 34.49,
+      "avg_mfe_r": 1.062,
+      "avg_mae_r": 0.821,
+      "sl_hit_pct": 43.03,
+      "tp_hit_pct": 33.77
+    },
+    "feat_no_fib": {
+      "trades": 1552,
+      "win_rate_pct": 50.0,
+      "profit_factor": 1.36,
+      "expectancy_r": 0.15,
+      "avg_r": 0.15,
+      "median_r": 0.001,
+      "max_dd_pct": 69.07,
+      "avg_mfe_r": 1.041,
+      "avg_mae_r": 0.734,
+      "sl_hit_pct": 40.08,
+      "tp_hit_pct": 34.09
+    },
+    "conf_60-74": {
+      "trades": 0,
+      "win_rate_pct": 0.0,
+      "profit_factor": 0.0,
+      "expectancy_r": 0.0,
+      "avg_r": 0.0,
+      "median_r": 0.0,
+      "max_dd_pct": 0.0,
+      "avg_mfe_r": 0.0,
+      "avg_mae_r": 0.0
+    },
+    "conf_75-79": {
+      "trades": 1733,
+      "win_rate_pct": 48.93,
+      "profit_factor": 1.3,
+      "expectancy_r": 0.131,
+      "avg_r": 0.131,
+      "median_r": -0.009,
+      "max_dd_pct": 71.93,
+      "avg_mfe_r": 1.034,
+      "avg_mae_r": 0.755,
+      "sl_hit_pct": 41.66,
+      "tp_hit_pct": 33.76
+    },
+    "conf_80-89": {
+      "trades": 485,
+      "win_rate_pct": 48.25,
+      "profit_factor": 1.26,
+      "expectancy_r": 0.112,
+      "avg_r": 0.112,
+      "median_r": -0.006,
+      "max_dd_pct": 33.29,
+      "avg_mfe_r": 1.064,
+      "avg_mae_r": 0.808,
+      "sl_hit_pct": 40.62,
+      "tp_hit_pct": 33.2
+    },
+    "conf_90-100": {
+      "trades": 166,
+      "win_rate_pct": 54.22,
+      "profit_factor": 1.66,
+      "expectancy_r": 0.252,
+      "avg_r": 0.252,
+      "median_r": 0.19,
+      "max_dd_pct": 14.47,
+      "avg_mfe_r": 1.147,
+      "avg_mae_r": 0.745,
+      "sl_hit_pct": 36.75,
+      "tp_hit_pct": 38.55
+    },
+    "atr_q1_low_vol": {
+      "trades": 596,
+      "win_rate_pct": 56.54,
+      "profit_factor": 1.87,
+      "expectancy_r": 0.316,
+      "avg_r": 0.316,
+      "median_r": 0.102,
+      "max_dd_pct": 38.1,
+      "avg_mfe_r": 1.301,
+      "avg_mae_r": 0.698,
+      "sl_hit_pct": 35.23,
+      "tp_hit_pct": 42.62,
+      "atr_range": [
+        0.06,
+        2.07
+      ]
+    },
+    "atr_q2": {
+      "trades": 596,
+      "win_rate_pct": 51.34,
+      "profit_factor": 1.5,
+      "expectancy_r": 0.196,
+      "avg_r": 0.196,
+      "median_r": 0.013,
+      "max_dd_pct": 34.88,
+      "avg_mfe_r": 1.056,
+      "avg_mae_r": 0.729,
+      "sl_hit_pct": 37.42,
+      "tp_hit_pct": 36.41,
+      "atr_range": [
+        2.07,
+        6.93
+      ]
+    },
+    "atr_q3": {
+      "trades": 593,
+      "win_rate_pct": 50.93,
+      "profit_factor": 1.33,
+      "expectancy_r": 0.149,
+      "avg_r": 0.149,
+      "median_r": 0.098,
+      "max_dd_pct": 50.22,
+      "avg_mfe_r": 1.007,
+      "avg_mae_r": 0.765,
+      "sl_hit_pct": 44.01,
+      "tp_hit_pct": 34.06,
+      "atr_range": [
+        6.93,
+        9.35
+      ]
+    },
+    "atr_q4_high_vol": {
+      "trades": 599,
+      "win_rate_pct": 37.9,
+      "profit_factor": 0.78,
+      "expectancy_r": -0.117,
+      "avg_r": -0.117,
+      "median_r": -0.58,
+      "max_dd_pct": 71.21,
+      "avg_mfe_r": 0.83,
+      "avg_mae_r": 0.866,
+      "sl_hit_pct": 47.75,
+      "tp_hit_pct": 22.87,
+      "atr_range": [
+        9.35,
+        54.37
+      ]
+    }
+  },
+  "phase4": {
+    "all_signals_tp1.25": {
+      "trades": 2384,
+      "win_rate_pct": 52.14,
+      "profit_factor": 1.31,
+      "expectancy_r": 0.125,
+      "avg_r": 0.125,
+      "median_r": 0.048,
+      "max_dd_pct": 64.9,
+      "avg_mfe_r": 0.951,
+      "avg_mae_r": 0.73,
+      "sl_hit_pct": 38.21,
+      "tp_hit_pct": 39.22
+    },
+    "strongest_per_day": {
+      "trades": 192,
+      "win_rate_pct": 51.56,
+      "profit_factor": 1.3,
+      "expectancy_r": 0.13,
+      "avg_r": 0.13,
+      "median_r": 0.071,
+      "max_dd_pct": 6.39,
+      "avg_mfe_r": 0.976,
+      "avg_mae_r": 0.786,
+      "sl_hit_pct": 41.15,
+      "tp_hit_pct": 42.19
+    },
+    "strongest_per_4h_block": {
+      "trades": 477,
+      "win_rate_pct": 53.25,
+      "profit_factor": 1.4,
+      "expectancy_r": 0.16,
+      "avg_r": 0.16,
+      "median_r": 0.087,
+      "max_dd_pct": 13.93,
+      "avg_mfe_r": 0.981,
+      "avg_mae_r": 0.734,
+      "sl_hit_pct": 37.95,
+      "tp_hit_pct": 42.14
+    },
+    "strongest_per_session": {
+      "trades": 432,
+      "win_rate_pct": 52.55,
+      "profit_factor": 1.4,
+      "expectancy_r": 0.159,
+      "avg_r": 0.159,
+      "median_r": 0.077,
+      "max_dd_pct": 12.45,
+      "avg_mfe_r": 0.992,
+      "avg_mae_r": 0.733,
+      "sl_hit_pct": 37.5,
+      "tp_hit_pct": 42.13
+    },
+    "min_4h_between_signals": {
+      "trades": 407,
+      "win_rate_pct": 51.6,
+      "profit_factor": 1.34,
+      "expectancy_r": 0.14,
+      "avg_r": 0.14,
+      "median_r": 0.048,
+      "max_dd_pct": 12.59,
+      "avg_mfe_r": 0.938,
+      "avg_mae_r": 0.754,
+      "sl_hit_pct": 38.57,
+      "tp_hit_pct": 41.28
+    },
+    "confidence_ge_85": {
+      "trades": 357,
+      "win_rate_pct": 57.7,
+      "profit_factor": 1.59,
+      "expectancy_r": 0.199,
+      "avg_r": 0.199,
+      "median_r": 0.179,
+      "max_dd_pct": 33.46,
+      "avg_mfe_r": 1.022,
+      "avg_mae_r": 0.722,
+      "sl_hit_pct": 32.21,
+      "tp_hit_pct": 39.78
+    },
+    "confidence_ge_80": {
+      "trades": 651,
+      "win_rate_pct": 52.23,
+      "profit_factor": 1.31,
+      "expectancy_r": 0.121,
+      "avg_r": 0.121,
+      "median_r": 0.054,
+      "max_dd_pct": 39.06,
+      "avg_mfe_r": 0.991,
+      "avg_mae_r": 0.755,
+      "sl_hit_pct": 37.17,
+      "tp_hit_pct": 38.56
+    },
+    "first_signal_of_day": {
+      "trades": 192,
+      "win_rate_pct": 49.48,
+      "profit_factor": 1.25,
+      "expectancy_r": 0.106,
+      "avg_r": 0.106,
+      "median_r": -0.001,
+      "max_dd_pct": 7.31,
+      "avg_mfe_r": 0.88,
+      "avg_mae_r": 0.767,
+      "sl_hit_pct": 41.15,
+      "tp_hit_pct": 40.1
+    },
+    "no_same_dir_within_4h": {
+      "trades": 412,
+      "win_rate_pct": 51.94,
+      "profit_factor": 1.35,
+      "expectancy_r": 0.144,
+      "avg_r": 0.144,
+      "median_r": 0.071,
+      "max_dd_pct": 12.59,
+      "avg_mfe_r": 0.941,
+      "avg_mae_r": 0.751,
+      "sl_hit_pct": 38.35,
+      "tp_hit_pct": 41.5
+    },
+    "short_trend_ranging_no_fvg_no_bos": {
+      "trades": 288,
+      "win_rate_pct": 48.61,
+      "profit_factor": 1.27,
+      "expectancy_r": 0.128,
+      "avg_r": 0.128,
+      "median_r": -0.153,
+      "max_dd_pct": 31.61,
+      "avg_mfe_r": 1.372,
+      "avg_mae_r": 0.804,
+      "sl_hit_pct": 44.44,
+      "tp_hit_pct": 47.22
+    }
+  },
+  "phase5": {
+    "train_months": 2,
+    "val_months": 1,
+    "test_months": 1,
+    "window_count": 5,
+    "positive_oos_windows": 2,
+    "oos_trades": 233,
+    "oos_win_rate_pct": 30.04,
+    "oos_expectancy_r": -0.05,
+    "oos_profit_factor": 0.9,
+    "oos_max_drawdown_pct": 42.02,
+    "windows": [
+      {
+        "window": 0,
+        "train": "2025-12-11 \u2192 2026-02-09",
+        "val": "2026-02-09 \u2192 2026-03-11",
+        "test": "2026-03-11 \u2192 2026-04-10",
+        "train_metrics": {
+          "total_trades": 70,
+          "winning_trades": 22,
+          "losing_trades": 48,
+          "win_rate_pct": 31.43,
+          "gross_profit_usd": 4035.66,
+          "gross_loss_usd": 4702.35,
+          "net_profit_usd": -666.69,
+          "profit_factor": 0.86,
+          "avg_r": -0.01,
+          "median_r": -1.0,
+          "r_std": 1.49,
+          "expectancy_r": -0.01,
+          "max_drawdown_usd": 2097.73,
+          "max_drawdown_pct": 20.98,
+          "recovery_factor": -0.32,
+          "sharpe_like": -0.05,
+          "sortino_like": -0.08,
+          "consecutive_wins": 5,
+          "consecutive_losses": 17,
+          "avg_trade_hours": 27.01,
+          "tp1_hit_rate_pct": 31.43,
+          "tp2_hit_rate_pct": 31.43,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 68.57,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 22,
+              "pct": 31.43
+            },
+            "STOP_LOSS_HIT": {
+              "count": 48,
+              "pct": 68.57
+            }
+          },
+          "monthly_pnl": {
+            "2025-12": -202.33,
+            "2026-01": -781.33,
+            "2026-02": 316.97
+          },
+          "daily_pnl": {
+            "2025-12-22": 843.59,
+            "2025-12-29": -325.32,
+            "2025-12-30": -621.63,
+            "2025-12-31": -98.97,
+            "2026-01-02": -295.92,
+            "2026-01-03": -31.34,
+            "2026-01-04": 433.07,
+            "2026-01-06": 566.76,
+            "2026-01-07": -314.1,
+            "2026-01-08": -302.65,
+            "2026-01-11": -295.59,
+            "2026-01-13": -191.16,
+            "2026-01-16": -281.01,
+            "2026-01-18": -272.58,
+            "2026-01-20": 408.28,
+            "2026-01-21": -10.79,
+            "2026-01-22": 392.38,
+            "2026-01-26": 75.42,
+            "2026-01-27": -290.34,
+            "2026-01-30": -371.76,
+            "2026-02-01": -270.48,
+            "2026-02-04": 304.41,
+            "2026-02-07": 283.04
+          },
+          "worst_day_usd": -621.63,
+          "worst_month_usd": -781.33,
+          "return_over_max_dd": -0.32,
+          "profit_factor_over_max_dd": 0.0004,
+          "long_trades": 45,
+          "long_win_rate_pct": 35.56,
+          "short_trades": 25,
+          "short_win_rate_pct": 24.0,
+          "strategy_breakdown": {
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 10,
+              "net_pnl_usd": 179.53,
+              "wins": 4,
+              "win_rate_pct": 40.0
+            },
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 44,
+              "net_pnl_usd": -697.75,
+              "wins": 12,
+              "win_rate_pct": 27.27
+            },
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 16,
+              "net_pnl_usd": -148.47,
+              "wins": 6,
+              "win_rate_pct": 37.5
+            }
+          }
+        },
+        "val_metrics": {
+          "total_trades": 65,
+          "winning_trades": 18,
+          "losing_trades": 47,
+          "win_rate_pct": 27.69,
+          "gross_profit_usd": 3678.62,
+          "gross_loss_usd": 4578.02,
+          "net_profit_usd": -899.4,
+          "profit_factor": 0.8,
+          "avg_r": -0.07,
+          "median_r": -1.0,
+          "r_std": 1.43,
+          "expectancy_r": -0.07,
+          "max_drawdown_usd": 2379.08,
+          "max_drawdown_pct": 23.79,
+          "recovery_factor": -0.38,
+          "sharpe_like": -0.42,
+          "sortino_like": -0.65,
+          "consecutive_wins": 6,
+          "consecutive_losses": 14,
+          "avg_trade_hours": 10.85,
+          "tp1_hit_rate_pct": 27.69,
+          "tp2_hit_rate_pct": 27.69,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 67.69,
+          "exit_reason_breakdown": {
+            "STOP_LOSS_HIT": {
+              "count": 44,
+              "pct": 67.69
+            },
+            "TP2_HIT": {
+              "count": 18,
+              "pct": 27.69
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 4.62
+            }
+          },
+          "monthly_pnl": {
+            "2026-02": 20.07,
+            "2026-03": -919.47
+          },
+          "daily_pnl": {
+            "2026-02-15": 600.35,
+            "2026-02-16": 360.36,
+            "2026-02-17": 518.6,
+            "2026-02-18": 0.37,
+            "2026-02-19": -114.8,
+            "2026-02-20": -886.63,
+            "2026-02-22": -436.69,
+            "2026-02-23": 715.46,
+            "2026-02-24": -427.05,
+            "2026-02-27": -309.9,
+            "2026-03-01": -395.81,
+            "2026-03-02": -288.72,
+            "2026-03-03": 736.55,
+            "2026-03-04": -302.16,
+            "2026-03-05": -293.1,
+            "2026-03-06": -94.77,
+            "2026-03-08": -281.46,
+            "2026-03-11": 0.0
+          },
+          "worst_day_usd": -886.63,
+          "worst_month_usd": -919.47,
+          "return_over_max_dd": -0.38,
+          "profit_factor_over_max_dd": 0.0003,
+          "long_trades": 22,
+          "long_win_rate_pct": 18.18,
+          "short_trades": 43,
+          "short_win_rate_pct": 32.56,
+          "strategy_breakdown": {
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 35,
+              "net_pnl_usd": -1203.26,
+              "wins": 8,
+              "win_rate_pct": 22.86
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 18,
+              "net_pnl_usd": 810.09,
+              "wins": 7,
+              "win_rate_pct": 38.89
+            },
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 12,
+              "net_pnl_usd": -506.23,
+              "wins": 3,
+              "win_rate_pct": 25.0
+            }
+          }
+        },
+        "test_metrics": {
+          "total_trades": 69,
+          "winning_trades": 19,
+          "losing_trades": 50,
+          "win_rate_pct": 27.54,
+          "gross_profit_usd": 3575.1,
+          "gross_loss_usd": 4516.28,
+          "net_profit_usd": -941.18,
+          "profit_factor": 0.79,
+          "avg_r": -0.13,
+          "median_r": -1.0,
+          "r_std": 1.37,
+          "expectancy_r": -0.13,
+          "max_drawdown_usd": 2047.72,
+          "max_drawdown_pct": 20.48,
+          "recovery_factor": -0.46,
+          "sharpe_like": -0.77,
+          "sortino_like": -1.21,
+          "consecutive_wins": 4,
+          "consecutive_losses": 12,
+          "avg_trade_hours": 9.59,
+          "tp1_hit_rate_pct": 27.54,
+          "tp2_hit_rate_pct": 27.54,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 68.12,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 19,
+              "pct": 27.54
+            },
+            "STOP_LOSS_HIT": {
+              "count": 47,
+              "pct": 68.12
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 4.35
+            }
+          },
+          "monthly_pnl": {
+            "2026-03": -981.55,
+            "2026-04": 40.37
+          },
+          "daily_pnl": {
+            "2026-03-17": 62.04,
+            "2026-03-18": -143.33,
+            "2026-03-21": -295.58,
+            "2026-03-22": -33.22,
+            "2026-03-24": -191.65,
+            "2026-03-25": -281.94,
+            "2026-03-26": -450.34,
+            "2026-03-27": 330.47,
+            "2026-03-29": 113.1,
+            "2026-03-30": -91.1,
+            "2026-04-01": 870.75,
+            "2026-04-02": -98.89,
+            "2026-04-05": 135.3,
+            "2026-04-06": -586.62,
+            "2026-04-07": -280.17,
+            "2026-04-10": 0.0
+          },
+          "worst_day_usd": -586.62,
+          "worst_month_usd": -981.55,
+          "return_over_max_dd": -0.46,
+          "profit_factor_over_max_dd": 0.0004,
+          "long_trades": 37,
+          "long_win_rate_pct": 27.03,
+          "short_trades": 32,
+          "short_win_rate_pct": 28.12,
+          "strategy_breakdown": {
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 39,
+              "net_pnl_usd": 306.75,
+              "wins": 13,
+              "win_rate_pct": 33.33
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 17,
+              "net_pnl_usd": -1042.81,
+              "wins": 1,
+              "win_rate_pct": 5.88
+            },
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 13,
+              "net_pnl_usd": -205.12,
+              "wins": 5,
+              "win_rate_pct": 38.46
+            }
+          }
+        }
+      },
+      {
+        "window": 1,
+        "train": "2026-01-10 \u2192 2026-03-11",
+        "val": "2026-03-11 \u2192 2026-04-10",
+        "test": "2026-04-10 \u2192 2026-05-10",
+        "train_metrics": {
+          "total_trades": 89,
+          "winning_trades": 21,
+          "losing_trades": 68,
+          "win_rate_pct": 23.6,
+          "gross_profit_usd": 3720.39,
+          "gross_loss_usd": 5961.59,
+          "net_profit_usd": -2241.2,
+          "profit_factor": 0.62,
+          "avg_r": -0.22,
+          "median_r": -1.0,
+          "r_std": 1.36,
+          "expectancy_r": -0.22,
+          "max_drawdown_usd": 2675.04,
+          "max_drawdown_pct": 26.75,
+          "recovery_factor": -0.84,
+          "sharpe_like": -1.52,
+          "sortino_like": -2.65,
+          "consecutive_wins": 4,
+          "consecutive_losses": 14,
+          "avg_trade_hours": 19.49,
+          "tp1_hit_rate_pct": 23.6,
+          "tp2_hit_rate_pct": 23.6,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 73.03,
+          "exit_reason_breakdown": {
+            "STOP_LOSS_HIT": {
+              "count": 65,
+              "pct": 73.03
+            },
+            "TP2_HIT": {
+              "count": 21,
+              "pct": 23.6
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 3.37
+            }
+          },
+          "monthly_pnl": {
+            "2026-01": -566.35,
+            "2026-02": -947.95,
+            "2026-03": -726.9
+          },
+          "daily_pnl": {
+            "2026-01-15": -300.0,
+            "2026-01-16": -172.81,
+            "2026-01-18": -281.81,
+            "2026-01-20": 447.24,
+            "2026-01-21": -20.16,
+            "2026-01-22": 392.38,
+            "2026-01-26": 61.57,
+            "2026-01-27": -303.78,
+            "2026-01-30": -388.98,
+            "2026-02-01": -283.02,
+            "2026-02-04": 304.41,
+            "2026-02-07": 296.47,
+            "2026-02-09": -292.56,
+            "2026-02-12": -283.77,
+            "2026-02-20": -275.25,
+            "2026-02-22": -370.31,
+            "2026-02-23": 580.18,
+            "2026-02-24": -361.66,
+            "2026-02-27": -262.44,
+            "2026-03-01": -335.21,
+            "2026-03-02": -244.5,
+            "2026-03-03": 681.06,
+            "2026-03-04": -257.61,
+            "2026-03-05": -249.87,
+            "2026-03-06": -80.8,
+            "2026-03-08": -239.97,
+            "2026-03-11": 0.0
+          },
+          "worst_day_usd": -388.98,
+          "worst_month_usd": -947.95,
+          "return_over_max_dd": -0.84,
+          "profit_factor_over_max_dd": 0.0002,
+          "long_trades": 56,
+          "long_win_rate_pct": 19.64,
+          "short_trades": 33,
+          "short_win_rate_pct": 30.3,
+          "strategy_breakdown": {
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 47,
+              "net_pnl_usd": -1253.74,
+              "wins": 11,
+              "win_rate_pct": 23.4
+            },
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 18,
+              "net_pnl_usd": -491.51,
+              "wins": 5,
+              "win_rate_pct": 27.78
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 24,
+              "net_pnl_usd": -495.95,
+              "wins": 5,
+              "win_rate_pct": 20.83
+            }
+          }
+        },
+        "val_metrics": {
+          "total_trades": 69,
+          "winning_trades": 19,
+          "losing_trades": 50,
+          "win_rate_pct": 27.54,
+          "gross_profit_usd": 3575.1,
+          "gross_loss_usd": 4516.28,
+          "net_profit_usd": -941.18,
+          "profit_factor": 0.79,
+          "avg_r": -0.13,
+          "median_r": -1.0,
+          "r_std": 1.37,
+          "expectancy_r": -0.13,
+          "max_drawdown_usd": 2047.72,
+          "max_drawdown_pct": 20.48,
+          "recovery_factor": -0.46,
+          "sharpe_like": -0.77,
+          "sortino_like": -1.21,
+          "consecutive_wins": 4,
+          "consecutive_losses": 12,
+          "avg_trade_hours": 9.59,
+          "tp1_hit_rate_pct": 27.54,
+          "tp2_hit_rate_pct": 27.54,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 68.12,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 19,
+              "pct": 27.54
+            },
+            "STOP_LOSS_HIT": {
+              "count": 47,
+              "pct": 68.12
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 4.35
+            }
+          },
+          "monthly_pnl": {
+            "2026-03": -981.55,
+            "2026-04": 40.37
+          },
+          "daily_pnl": {
+            "2026-03-17": 62.04,
+            "2026-03-18": -143.33,
+            "2026-03-21": -295.58,
+            "2026-03-22": -33.22,
+            "2026-03-24": -191.65,
+            "2026-03-25": -281.94,
+            "2026-03-26": -450.34,
+            "2026-03-27": 330.47,
+            "2026-03-29": 113.1,
+            "2026-03-30": -91.1,
+            "2026-04-01": 870.75,
+            "2026-04-02": -98.89,
+            "2026-04-05": 135.3,
+            "2026-04-06": -586.62,
+            "2026-04-07": -280.17,
+            "2026-04-10": 0.0
+          },
+          "worst_day_usd": -586.62,
+          "worst_month_usd": -981.55,
+          "return_over_max_dd": -0.46,
+          "profit_factor_over_max_dd": 0.0004,
+          "long_trades": 37,
+          "long_win_rate_pct": 27.03,
+          "short_trades": 32,
+          "short_win_rate_pct": 28.12,
+          "strategy_breakdown": {
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 39,
+              "net_pnl_usd": 306.75,
+              "wins": 13,
+              "win_rate_pct": 33.33
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 17,
+              "net_pnl_usd": -1042.81,
+              "wins": 1,
+              "win_rate_pct": 5.88
+            },
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 13,
+              "net_pnl_usd": -205.12,
+              "wins": 5,
+              "win_rate_pct": 38.46
+            }
+          }
+        },
+        "test_metrics": {
+          "total_trades": 47,
+          "winning_trades": 10,
+          "losing_trades": 37,
+          "win_rate_pct": 21.28,
+          "gross_profit_usd": 1789.81,
+          "gross_loss_usd": 3140.14,
+          "net_profit_usd": -1350.33,
+          "profit_factor": 0.57,
+          "avg_r": -0.27,
+          "median_r": -1.0,
+          "r_std": 1.27,
+          "expectancy_r": -0.27,
+          "max_drawdown_usd": 2516.81,
+          "max_drawdown_pct": 25.17,
+          "recovery_factor": -0.54,
+          "sharpe_like": -1.46,
+          "sortino_like": -2.59,
+          "consecutive_wins": 4,
+          "consecutive_losses": 23,
+          "avg_trade_hours": 18.49,
+          "tp1_hit_rate_pct": 21.28,
+          "tp2_hit_rate_pct": 21.28,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 72.34,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 10,
+              "pct": 21.28
+            },
+            "STOP_LOSS_HIT": {
+              "count": 34,
+              "pct": 72.34
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 6.38
+            }
+          },
+          "monthly_pnl": {
+            "2026-04": -1863.63,
+            "2026-05": 513.3
+          },
+          "daily_pnl": {
+            "2026-04-17": -286.83,
+            "2026-04-19": 695.93,
+            "2026-04-20": -613.16,
+            "2026-04-21": -291.92,
+            "2026-04-24": -467.64,
+            "2026-04-25": -180.72,
+            "2026-04-26": -435.75,
+            "2026-04-27": -168.4,
+            "2026-04-28": 136.5,
+            "2026-04-30": -251.64,
+            "2026-05-04": 221.05,
+            "2026-05-07": 198.4,
+            "2026-05-08": 93.85,
+            "2026-05-10": 0.0
+          },
+          "worst_day_usd": -613.16,
+          "worst_month_usd": -1863.63,
+          "return_over_max_dd": -0.54,
+          "profit_factor_over_max_dd": 0.0002,
+          "long_trades": 15,
+          "long_win_rate_pct": 6.67,
+          "short_trades": 32,
+          "short_win_rate_pct": 28.12,
+          "strategy_breakdown": {
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 14,
+              "net_pnl_usd": -95.93,
+              "wins": 5,
+              "win_rate_pct": 35.71
+            },
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 22,
+              "net_pnl_usd": -335.78,
+              "wins": 5,
+              "win_rate_pct": 22.73
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 11,
+              "net_pnl_usd": -918.62,
+              "wins": 0,
+              "win_rate_pct": 0.0
+            }
+          }
+        }
+      },
+      {
+        "window": 2,
+        "train": "2026-02-09 \u2192 2026-04-10",
+        "val": "2026-04-10 \u2192 2026-05-10",
+        "test": "2026-05-10 \u2192 2026-06-09",
+        "train_metrics": {
+          "total_trades": 142,
+          "winning_trades": 39,
+          "losing_trades": 103,
+          "win_rate_pct": 27.46,
+          "gross_profit_usd": 6482.84,
+          "gross_loss_usd": 9073.8,
+          "net_profit_usd": -2590.96,
+          "profit_factor": 0.71,
+          "avg_r": -0.15,
+          "median_r": -1.0,
+          "r_std": 1.37,
+          "expectancy_r": -0.15,
+          "max_drawdown_usd": 4455.38,
+          "max_drawdown_pct": 44.55,
+          "recovery_factor": -0.58,
+          "sharpe_like": -1.34,
+          "sortino_like": -2.18,
+          "consecutive_wins": 6,
+          "consecutive_losses": 22,
+          "avg_trade_hours": 8.48,
+          "tp1_hit_rate_pct": 27.46,
+          "tp2_hit_rate_pct": 27.46,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 70.42,
+          "exit_reason_breakdown": {
+            "STOP_LOSS_HIT": {
+              "count": 100,
+              "pct": 70.42
+            },
+            "TP2_HIT": {
+              "count": 39,
+              "pct": 27.46
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 2.11
+            }
+          },
+          "monthly_pnl": {
+            "2026-02": 20.07,
+            "2026-03": -2447.49,
+            "2026-04": -163.54
+          },
+          "daily_pnl": {
+            "2026-02-15": 600.35,
+            "2026-02-16": 360.36,
+            "2026-02-17": 518.6,
+            "2026-02-18": 0.37,
+            "2026-02-19": -114.8,
+            "2026-02-20": -886.63,
+            "2026-02-22": -436.69,
+            "2026-02-23": 715.46,
+            "2026-02-24": -427.05,
+            "2026-02-27": -309.9,
+            "2026-03-01": -395.81,
+            "2026-03-02": -288.72,
+            "2026-03-03": 736.55,
+            "2026-03-04": -302.16,
+            "2026-03-05": -293.1,
+            "2026-03-06": -94.77,
+            "2026-03-08": -281.46,
+            "2026-03-11": -273.03,
+            "2026-03-12": -264.84,
+            "2026-03-15": -506.07,
+            "2026-03-17": 44.52,
+            "2026-03-18": -136.93,
+            "2026-03-21": -237.33,
+            "2026-03-22": -32.25,
+            "2026-03-24": 140.73,
+            "2026-03-25": -235.05,
+            "2026-03-26": -375.44,
+            "2026-03-27": 249.74,
+            "2026-03-29": 174.42,
+            "2026-03-30": -76.49,
+            "2026-04-01": 431.35,
+            "2026-04-05": 114.01,
+            "2026-04-06": -479.76,
+            "2026-04-07": -229.14,
+            "2026-04-10": 0.0
+          },
+          "worst_day_usd": -886.63,
+          "worst_month_usd": -2447.49,
+          "return_over_max_dd": -0.58,
+          "profit_factor_over_max_dd": 0.0002,
+          "long_trades": 60,
+          "long_win_rate_pct": 21.67,
+          "short_trades": 82,
+          "short_win_rate_pct": 31.71,
+          "strategy_breakdown": {
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 74,
+              "net_pnl_usd": -1382.21,
+              "wins": 20,
+              "win_rate_pct": 27.03
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 38,
+              "net_pnl_usd": -571.97,
+              "wins": 8,
+              "win_rate_pct": 21.05
+            },
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 30,
+              "net_pnl_usd": -636.78,
+              "wins": 11,
+              "win_rate_pct": 36.67
+            }
+          }
+        },
+        "val_metrics": {
+          "total_trades": 47,
+          "winning_trades": 10,
+          "losing_trades": 37,
+          "win_rate_pct": 21.28,
+          "gross_profit_usd": 1789.81,
+          "gross_loss_usd": 3140.14,
+          "net_profit_usd": -1350.33,
+          "profit_factor": 0.57,
+          "avg_r": -0.27,
+          "median_r": -1.0,
+          "r_std": 1.27,
+          "expectancy_r": -0.27,
+          "max_drawdown_usd": 2516.81,
+          "max_drawdown_pct": 25.17,
+          "recovery_factor": -0.54,
+          "sharpe_like": -1.46,
+          "sortino_like": -2.59,
+          "consecutive_wins": 4,
+          "consecutive_losses": 23,
+          "avg_trade_hours": 18.49,
+          "tp1_hit_rate_pct": 21.28,
+          "tp2_hit_rate_pct": 21.28,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 72.34,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 10,
+              "pct": 21.28
+            },
+            "STOP_LOSS_HIT": {
+              "count": 34,
+              "pct": 72.34
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 6.38
+            }
+          },
+          "monthly_pnl": {
+            "2026-04": -1863.63,
+            "2026-05": 513.3
+          },
+          "daily_pnl": {
+            "2026-04-17": -286.83,
+            "2026-04-19": 695.93,
+            "2026-04-20": -613.16,
+            "2026-04-21": -291.92,
+            "2026-04-24": -467.64,
+            "2026-04-25": -180.72,
+            "2026-04-26": -435.75,
+            "2026-04-27": -168.4,
+            "2026-04-28": 136.5,
+            "2026-04-30": -251.64,
+            "2026-05-04": 221.05,
+            "2026-05-07": 198.4,
+            "2026-05-08": 93.85,
+            "2026-05-10": 0.0
+          },
+          "worst_day_usd": -613.16,
+          "worst_month_usd": -1863.63,
+          "return_over_max_dd": -0.54,
+          "profit_factor_over_max_dd": 0.0002,
+          "long_trades": 15,
+          "long_win_rate_pct": 6.67,
+          "short_trades": 32,
+          "short_win_rate_pct": 28.12,
+          "strategy_breakdown": {
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 14,
+              "net_pnl_usd": -95.93,
+              "wins": 5,
+              "win_rate_pct": 35.71
+            },
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 22,
+              "net_pnl_usd": -335.78,
+              "wins": 5,
+              "win_rate_pct": 22.73
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 11,
+              "net_pnl_usd": -918.62,
+              "wins": 0,
+              "win_rate_pct": 0.0
+            }
+          }
+        },
+        "test_metrics": {
+          "total_trades": 49,
+          "winning_trades": 16,
+          "losing_trades": 33,
+          "win_rate_pct": 32.65,
+          "gross_profit_usd": 3084.15,
+          "gross_loss_usd": 3154.69,
+          "net_profit_usd": -70.54,
+          "profit_factor": 0.98,
+          "avg_r": -0.02,
+          "median_r": -1.0,
+          "r_std": 1.44,
+          "expectancy_r": -0.02,
+          "max_drawdown_usd": 1508.67,
+          "max_drawdown_pct": 15.09,
+          "recovery_factor": -0.05,
+          "sharpe_like": -0.09,
+          "sortino_like": -0.13,
+          "consecutive_wins": 5,
+          "consecutive_losses": 16,
+          "avg_trade_hours": 11.12,
+          "tp1_hit_rate_pct": 32.65,
+          "tp2_hit_rate_pct": 32.65,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 67.35,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 16,
+              "pct": 32.65
+            },
+            "STOP_LOSS_HIT": {
+              "count": 33,
+              "pct": 67.35
+            }
+          },
+          "monthly_pnl": {
+            "2026-05": -608.08,
+            "2026-06": 537.54
+          },
+          "daily_pnl": {
+            "2026-05-17": -123.77,
+            "2026-05-19": -392.08,
+            "2026-05-20": -285.48,
+            "2026-05-21": -456.27,
+            "2026-05-24": 41.44,
+            "2026-05-26": -29.3,
+            "2026-05-29": 207.2,
+            "2026-05-30": 720.64,
+            "2026-05-31": -290.46,
+            "2026-06-01": 630.54,
+            "2026-06-02": -300.66,
+            "2026-06-03": 241.2,
+            "2026-06-04": -490.35,
+            "2026-06-06": 659.45,
+            "2026-06-08": -202.64
+          },
+          "worst_day_usd": -490.35,
+          "worst_month_usd": -608.08,
+          "return_over_max_dd": -0.05,
+          "profit_factor_over_max_dd": 0.0006,
+          "long_trades": 14,
+          "long_win_rate_pct": 28.57,
+          "short_trades": 35,
+          "short_win_rate_pct": 34.29,
+          "strategy_breakdown": {
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 11,
+              "net_pnl_usd": 437.55,
+              "wins": 6,
+              "win_rate_pct": 54.55
+            },
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 26,
+              "net_pnl_usd": -315.54,
+              "wins": 7,
+              "win_rate_pct": 26.92
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 12,
+              "net_pnl_usd": -192.55,
+              "wins": 3,
+              "win_rate_pct": 25.0
+            }
+          }
+        }
+      },
+      {
+        "window": 3,
+        "train": "2026-03-11 \u2192 2026-05-10",
+        "val": "2026-05-10 \u2192 2026-06-09",
+        "test": "2026-06-09 \u2192 2026-07-09",
+        "train_metrics": {
+          "total_trades": 125,
+          "winning_trades": 32,
+          "losing_trades": 93,
+          "win_rate_pct": 25.6,
+          "gross_profit_usd": 5628.72,
+          "gross_loss_usd": 8043.72,
+          "net_profit_usd": -2415.0,
+          "profit_factor": 0.7,
+          "avg_r": -0.19,
+          "median_r": -1.0,
+          "r_std": 1.36,
+          "expectancy_r": -0.19,
+          "max_drawdown_usd": 3534.19,
+          "max_drawdown_pct": 35.34,
+          "recovery_factor": -0.68,
+          "sharpe_like": -1.53,
+          "sortino_like": -2.57,
+          "consecutive_wins": 5,
+          "consecutive_losses": 23,
+          "avg_trade_hours": 14.02,
+          "tp1_hit_rate_pct": 25.6,
+          "tp2_hit_rate_pct": 25.6,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 72.0,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 32,
+              "pct": 25.6
+            },
+            "STOP_LOSS_HIT": {
+              "count": 90,
+              "pct": 72.0
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 2.4
+            }
+          },
+          "monthly_pnl": {
+            "2026-03": -981.55,
+            "2026-04": -1859.85,
+            "2026-05": 426.4
+          },
+          "daily_pnl": {
+            "2026-03-17": 62.04,
+            "2026-03-18": -143.33,
+            "2026-03-21": -295.58,
+            "2026-03-22": -33.22,
+            "2026-03-24": -191.65,
+            "2026-03-25": -281.94,
+            "2026-03-26": -450.34,
+            "2026-03-27": 330.47,
+            "2026-03-29": 113.1,
+            "2026-03-30": -91.1,
+            "2026-04-01": 870.75,
+            "2026-04-02": -98.89,
+            "2026-04-05": 135.3,
+            "2026-04-06": -586.62,
+            "2026-04-07": -280.17,
+            "2026-04-12": -271.77,
+            "2026-04-13": -519.34,
+            "2026-04-14": -164.53,
+            "2026-04-15": 188.0,
+            "2026-04-17": 266.81,
+            "2026-04-19": 579.47,
+            "2026-04-20": -538.24,
+            "2026-04-21": -256.25,
+            "2026-04-24": -410.51,
+            "2026-04-25": -158.64,
+            "2026-04-26": -382.5,
+            "2026-04-27": -147.82,
+            "2026-04-28": 136.5,
+            "2026-04-30": -221.4,
+            "2026-05-04": 164.67,
+            "2026-05-07": 173.6,
+            "2026-05-08": 88.13,
+            "2026-05-10": 0.0
+          },
+          "worst_day_usd": -586.62,
+          "worst_month_usd": -1859.85,
+          "return_over_max_dd": -0.68,
+          "profit_factor_over_max_dd": 0.0002,
+          "long_trades": 54,
+          "long_win_rate_pct": 24.07,
+          "short_trades": 71,
+          "short_win_rate_pct": 26.76,
+          "strategy_breakdown": {
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 62,
+              "net_pnl_usd": 406.39,
+              "wins": 20,
+              "win_rate_pct": 32.26
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 30,
+              "net_pnl_usd": -2264.29,
+              "wins": 1,
+              "win_rate_pct": 3.33
+            },
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 33,
+              "net_pnl_usd": -557.1,
+              "wins": 11,
+              "win_rate_pct": 33.33
+            }
+          }
+        },
+        "val_metrics": {
+          "total_trades": 49,
+          "winning_trades": 16,
+          "losing_trades": 33,
+          "win_rate_pct": 32.65,
+          "gross_profit_usd": 3084.15,
+          "gross_loss_usd": 3154.69,
+          "net_profit_usd": -70.54,
+          "profit_factor": 0.98,
+          "avg_r": -0.02,
+          "median_r": -1.0,
+          "r_std": 1.44,
+          "expectancy_r": -0.02,
+          "max_drawdown_usd": 1508.67,
+          "max_drawdown_pct": 15.09,
+          "recovery_factor": -0.05,
+          "sharpe_like": -0.09,
+          "sortino_like": -0.13,
+          "consecutive_wins": 5,
+          "consecutive_losses": 16,
+          "avg_trade_hours": 11.12,
+          "tp1_hit_rate_pct": 32.65,
+          "tp2_hit_rate_pct": 32.65,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 67.35,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 16,
+              "pct": 32.65
+            },
+            "STOP_LOSS_HIT": {
+              "count": 33,
+              "pct": 67.35
+            }
+          },
+          "monthly_pnl": {
+            "2026-05": -608.08,
+            "2026-06": 537.54
+          },
+          "daily_pnl": {
+            "2026-05-17": -123.77,
+            "2026-05-19": -392.08,
+            "2026-05-20": -285.48,
+            "2026-05-21": -456.27,
+            "2026-05-24": 41.44,
+            "2026-05-26": -29.3,
+            "2026-05-29": 207.2,
+            "2026-05-30": 720.64,
+            "2026-05-31": -290.46,
+            "2026-06-01": 630.54,
+            "2026-06-02": -300.66,
+            "2026-06-03": 241.2,
+            "2026-06-04": -490.35,
+            "2026-06-06": 659.45,
+            "2026-06-08": -202.64
+          },
+          "worst_day_usd": -490.35,
+          "worst_month_usd": -608.08,
+          "return_over_max_dd": -0.05,
+          "profit_factor_over_max_dd": 0.0006,
+          "long_trades": 14,
+          "long_win_rate_pct": 28.57,
+          "short_trades": 35,
+          "short_win_rate_pct": 34.29,
+          "strategy_breakdown": {
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 11,
+              "net_pnl_usd": 437.55,
+              "wins": 6,
+              "win_rate_pct": 54.55
+            },
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 26,
+              "net_pnl_usd": -315.54,
+              "wins": 7,
+              "win_rate_pct": 26.92
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 12,
+              "net_pnl_usd": -192.55,
+              "wins": 3,
+              "win_rate_pct": 25.0
+            }
+          }
+        },
+        "test_metrics": {
+          "total_trades": 21,
+          "winning_trades": 8,
+          "losing_trades": 13,
+          "win_rate_pct": 38.1,
+          "gross_profit_usd": 1793.37,
+          "gross_loss_usd": 1040.17,
+          "net_profit_usd": 753.2,
+          "profit_factor": 1.72,
+          "avg_r": 0.45,
+          "median_r": 0.0,
+          "r_std": 1.6,
+          "expectancy_r": 0.45,
+          "max_drawdown_usd": 426.42,
+          "max_drawdown_pct": 4.26,
+          "recovery_factor": 1.77,
+          "sharpe_like": 1.27,
+          "sortino_like": 1.43,
+          "consecutive_wins": 4,
+          "consecutive_losses": 4,
+          "avg_trade_hours": 62.18,
+          "tp1_hit_rate_pct": 38.1,
+          "tp2_hit_rate_pct": 38.1,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 47.62,
+          "exit_reason_breakdown": {
+            "STOP_LOSS_HIT": {
+              "count": 10,
+              "pct": 47.62
+            },
+            "TP2_HIT": {
+              "count": 8,
+              "pct": 38.1
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 14.29
+            }
+          },
+          "monthly_pnl": {
+            "2026-06": 514.4,
+            "2026-07": 238.8
+          },
+          "daily_pnl": {
+            "2026-06-17": -300.0,
+            "2026-06-18": 447.78,
+            "2026-06-19": 136.57,
+            "2026-06-21": 279.2,
+            "2026-06-23": -71.59,
+            "2026-06-24": 249.46,
+            "2026-06-30": -227.02,
+            "2026-07-01": 238.8,
+            "2026-07-09": 0.0
+          },
+          "worst_day_usd": -300.0,
+          "worst_month_usd": 238.8,
+          "return_over_max_dd": 1.77,
+          "profit_factor_over_max_dd": 0.004,
+          "long_trades": 9,
+          "long_win_rate_pct": 0.0,
+          "short_trades": 12,
+          "short_win_rate_pct": 66.67,
+          "strategy_breakdown": {
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 7,
+              "net_pnl_usd": -30.61,
+              "wins": 2,
+              "win_rate_pct": 28.57
+            },
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 10,
+              "net_pnl_usd": 513.32,
+              "wins": 4,
+              "win_rate_pct": 40.0
+            },
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 4,
+              "net_pnl_usd": 270.49,
+              "wins": 2,
+              "win_rate_pct": 50.0
+            }
+          }
+        }
+      },
+      {
+        "window": 4,
+        "train": "2026-04-10 \u2192 2026-06-09",
+        "val": "2026-06-09 \u2192 2026-07-09",
+        "test": "2026-07-09 \u2192 2026-08-08",
+        "train_metrics": {
+          "total_trades": 109,
+          "winning_trades": 30,
+          "losing_trades": 79,
+          "win_rate_pct": 27.52,
+          "gross_profit_usd": 5023.26,
+          "gross_loss_usd": 6759.45,
+          "net_profit_usd": -1736.19,
+          "profit_factor": 0.74,
+          "avg_r": -0.15,
+          "median_r": -1.0,
+          "r_std": 1.4,
+          "expectancy_r": -0.15,
+          "max_drawdown_usd": 3253.6,
+          "max_drawdown_pct": 32.54,
+          "recovery_factor": -0.53,
+          "sharpe_like": -1.09,
+          "sortino_like": -1.81,
+          "consecutive_wins": 5,
+          "consecutive_losses": 23,
+          "avg_trade_hours": 14.88,
+          "tp1_hit_rate_pct": 27.52,
+          "tp2_hit_rate_pct": 27.52,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 72.48,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 30,
+              "pct": 27.52
+            },
+            "STOP_LOSS_HIT": {
+              "count": 79,
+              "pct": 72.48
+            }
+          },
+          "monthly_pnl": {
+            "2026-04": -1863.63,
+            "2026-05": -303.87,
+            "2026-06": 431.31
+          },
+          "daily_pnl": {
+            "2026-04-17": -286.83,
+            "2026-04-19": 695.93,
+            "2026-04-20": -613.16,
+            "2026-04-21": -291.92,
+            "2026-04-24": -467.64,
+            "2026-04-25": -180.72,
+            "2026-04-26": -435.75,
+            "2026-04-27": -168.4,
+            "2026-04-28": 136.5,
+            "2026-04-30": -251.64,
+            "2026-05-04": 221.05,
+            "2026-05-07": 198.4,
+            "2026-05-08": 93.85,
+            "2026-05-10": -86.5,
+            "2026-05-11": -663.34,
+            "2026-05-12": -158.0,
+            "2026-05-13": 102.91,
+            "2026-05-14": 341.24,
+            "2026-05-15": 164.88,
+            "2026-05-17": -102.34,
+            "2026-05-19": -327.48,
+            "2026-05-20": -238.43,
+            "2026-05-21": -381.07,
+            "2026-05-24": 16.17,
+            "2026-05-26": -20.19,
+            "2026-05-29": 177.6,
+            "2026-05-30": 599.63,
+            "2026-05-31": -242.25,
+            "2026-06-01": 532.96,
+            "2026-06-02": -250.95,
+            "2026-06-03": 180.9,
+            "2026-06-04": -408.67,
+            "2026-06-06": 545.71,
+            "2026-06-08": -168.64
+          },
+          "worst_day_usd": -663.34,
+          "worst_month_usd": -1863.63,
+          "return_over_max_dd": -0.53,
+          "profit_factor_over_max_dd": 0.0002,
+          "long_trades": 29,
+          "long_win_rate_pct": 17.24,
+          "short_trades": 80,
+          "short_win_rate_pct": 31.25,
+          "strategy_breakdown": {
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 30,
+              "net_pnl_usd": -130.5,
+              "wins": 11,
+              "win_rate_pct": 36.67
+            },
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 54,
+              "net_pnl_usd": -507.02,
+              "wins": 15,
+              "win_rate_pct": 27.78
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 25,
+              "net_pnl_usd": -1098.67,
+              "wins": 4,
+              "win_rate_pct": 16.0
+            }
+          }
+        },
+        "val_metrics": {
+          "total_trades": 21,
+          "winning_trades": 8,
+          "losing_trades": 13,
+          "win_rate_pct": 38.1,
+          "gross_profit_usd": 1793.37,
+          "gross_loss_usd": 1040.17,
+          "net_profit_usd": 753.2,
+          "profit_factor": 1.72,
+          "avg_r": 0.45,
+          "median_r": 0.0,
+          "r_std": 1.6,
+          "expectancy_r": 0.45,
+          "max_drawdown_usd": 426.42,
+          "max_drawdown_pct": 4.26,
+          "recovery_factor": 1.77,
+          "sharpe_like": 1.27,
+          "sortino_like": 1.43,
+          "consecutive_wins": 4,
+          "consecutive_losses": 4,
+          "avg_trade_hours": 62.18,
+          "tp1_hit_rate_pct": 38.1,
+          "tp2_hit_rate_pct": 38.1,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 47.62,
+          "exit_reason_breakdown": {
+            "STOP_LOSS_HIT": {
+              "count": 10,
+              "pct": 47.62
+            },
+            "TP2_HIT": {
+              "count": 8,
+              "pct": 38.1
+            },
+            "END_OF_BACKTEST": {
+              "count": 3,
+              "pct": 14.29
+            }
+          },
+          "monthly_pnl": {
+            "2026-06": 514.4,
+            "2026-07": 238.8
+          },
+          "daily_pnl": {
+            "2026-06-17": -300.0,
+            "2026-06-18": 447.78,
+            "2026-06-19": 136.57,
+            "2026-06-21": 279.2,
+            "2026-06-23": -71.59,
+            "2026-06-24": 249.46,
+            "2026-06-30": -227.02,
+            "2026-07-01": 238.8,
+            "2026-07-09": 0.0
+          },
+          "worst_day_usd": -300.0,
+          "worst_month_usd": 238.8,
+          "return_over_max_dd": 1.77,
+          "profit_factor_over_max_dd": 0.004,
+          "long_trades": 9,
+          "long_win_rate_pct": 0.0,
+          "short_trades": 12,
+          "short_win_rate_pct": 66.67,
+          "strategy_breakdown": {
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 7,
+              "net_pnl_usd": -30.61,
+              "wins": 2,
+              "win_rate_pct": 28.57
+            },
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 10,
+              "net_pnl_usd": 513.32,
+              "wins": 4,
+              "win_rate_pct": 40.0
+            },
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 4,
+              "net_pnl_usd": 270.49,
+              "wins": 2,
+              "win_rate_pct": 50.0
+            }
+          }
+        },
+        "test_metrics": {
+          "total_trades": 47,
+          "winning_trades": 17,
+          "losing_trades": 30,
+          "win_rate_pct": 36.17,
+          "gross_profit_usd": 3269.91,
+          "gross_loss_usd": 3224.26,
+          "net_profit_usd": 45.65,
+          "profit_factor": 1.01,
+          "avg_r": 0.05,
+          "median_r": -1.0,
+          "r_std": 1.44,
+          "expectancy_r": 0.05,
+          "max_drawdown_usd": 1171.26,
+          "max_drawdown_pct": 11.71,
+          "recovery_factor": 0.04,
+          "sharpe_like": 0.22,
+          "sortino_like": 0.31,
+          "consecutive_wins": 5,
+          "consecutive_losses": 9,
+          "avg_trade_hours": 22.96,
+          "tp1_hit_rate_pct": 36.17,
+          "tp2_hit_rate_pct": 36.17,
+          "tp3_hit_rate_pct": 0.0,
+          "sl_hit_rate_pct": 63.83,
+          "exit_reason_breakdown": {
+            "TP2_HIT": {
+              "count": 17,
+              "pct": 36.17
+            },
+            "STOP_LOSS_HIT": {
+              "count": 30,
+              "pct": 63.83
+            }
+          },
+          "monthly_pnl": {
+            "2026-07": 1142.67,
+            "2026-08": -1097.02
+          },
+          "daily_pnl": {
+            "2026-07-16": 722.97,
+            "2026-07-17": 84.58,
+            "2026-07-20": -324.24,
+            "2026-07-21": 733.6,
+            "2026-07-28": -977.32,
+            "2026-07-29": 705.2,
+            "2026-07-30": 197.88,
+            "2026-08-02": -334.29,
+            "2026-08-03": -638.76,
+            "2026-08-06": 188.88,
+            "2026-08-07": -312.85
+          },
+          "worst_day_usd": -977.32,
+          "worst_month_usd": -1097.02,
+          "return_over_max_dd": 0.04,
+          "profit_factor_over_max_dd": 0.0009,
+          "long_trades": 12,
+          "long_win_rate_pct": 25.0,
+          "short_trades": 35,
+          "short_win_rate_pct": 40.0,
+          "strategy_breakdown": {
+            "FIBONACCI_RETRACEMENT": {
+              "trades": 15,
+              "net_pnl_usd": 1405.2,
+              "wins": 11,
+              "win_rate_pct": 73.33
+            },
+            "MULTI_TF_CONFLUENCE": {
+              "trades": 21,
+              "net_pnl_usd": -536.72,
+              "wins": 5,
+              "win_rate_pct": 23.81
+            },
+            "SMART_MONEY_CONCEPTS": {
+              "trades": 11,
+              "net_pnl_usd": -822.83,
+              "wins": 1,
+              "win_rate_pct": 9.09
+            }
+          }
+        }
+      }
+    ]
+  },
+  "phase6": {
+    "tp_sweep": {
+      "0.75": {
+        "trades": 2384,
+        "win_rate_pct": 60.7,
+        "expectancy_r": 0.077,
+        "profit_factor": 1.24,
+        "max_dd_pct": 64.37
+      },
+      "1.0": {
+        "trades": 2384,
+        "win_rate_pct": 55.79,
+        "expectancy_r": 0.102,
+        "profit_factor": 1.27,
+        "max_dd_pct": 64.74
+      },
+      "1.25": {
+        "trades": 2384,
+        "win_rate_pct": 52.14,
+        "expectancy_r": 0.125,
+        "profit_factor": 1.31,
+        "max_dd_pct": 64.9
+      },
+      "1.5": {
+        "trades": 2384,
+        "win_rate_pct": 49.16,
+        "expectancy_r": 0.136,
+        "profit_factor": 1.31,
+        "max_dd_pct": 65.52
+      },
+      "1.75": {
+        "trades": 2384,
+        "win_rate_pct": 46.52,
+        "expectancy_r": 0.135,
+        "profit_factor": 1.3,
+        "max_dd_pct": 68.9
+      },
+      "2.0": {
+        "trades": 2384,
+        "win_rate_pct": 43.71,
+        "expectancy_r": 0.114,
+        "profit_factor": 1.24,
+        "max_dd_pct": 70.76
+      }
+    },
+    "sl_sweep": {
+      "0.5": {
+        "trades": 2384,
+        "win_rate_pct": 43.54,
+        "expectancy_r": -0.02,
+        "profit_factor": 0.97,
+        "max_dd_pct": 75.77
+      },
+      "0.75": {
+        "trades": 2384,
+        "win_rate_pct": 46.18,
+        "expectancy_r": 0.036,
+        "profit_factor": 1.07,
+        "max_dd_pct": 61.49
+      },
+      "1.0": {
+        "trades": 2384,
+        "win_rate_pct": 46.48,
+        "expectancy_r": 0.042,
+        "profit_factor": 1.08,
+        "max_dd_pct": 69.13
+      },
+      "1.25": {
+        "trades": 2384,
+        "win_rate_pct": 48.15,
+        "expectancy_r": 0.08,
+        "profit_factor": 1.16,
+        "max_dd_pct": 70.85
+      },
+      "1.5": {
+        "trades": 2384,
+        "win_rate_pct": 49.58,
+        "expectancy_r": 0.109,
+        "profit_factor": 1.22,
+        "max_dd_pct": 76.44
+      },
+      "2.0": {
+        "trades": 2384,
+        "win_rate_pct": 49.83,
+        "expectancy_r": 0.11,
+        "profit_factor": 1.23,
+        "max_dd_pct": 70.74
+      }
+    },
+    "random_removal": {
+      "0.0": {
+        "trades": 2384,
+        "expectancy_r": 0.125,
+        "win_rate_pct": 52.14
+      },
+      "0.1": {
+        "trades": 2145,
+        "expectancy_r": 0.122,
+        "win_rate_pct": 51.93
+      },
+      "0.25": {
+        "trades": 1788,
+        "expectancy_r": 0.136,
+        "win_rate_pct": 52.52
+      },
+      "0.5": {
+        "trades": 1192,
+        "expectancy_r": 0.124,
+        "win_rate_pct": 52.6
+      }
+    }
+  }
+}

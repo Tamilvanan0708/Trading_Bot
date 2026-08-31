@@ -1,0 +1,255 @@
+"""
+RETRACEMENT_BOS_V1 — Multi-timeframe live monitor (15m / 30m / 1h).
+
+The agent continuously monitors ALL THREE timeframes INDEPENDENTLY.  Each
+timeframe runs its own ``RetracementBOSEngine`` instance with its own state
+machine, setup lifecycle and persistence keyed by
+``(symbol, strategy, timeframe)``.
+
+Timetimeframe isolation is strict:
+
+  * a setup detected on 15M never overwrites the 30M or 1H setup
+  * a setup detected on 30M never overwrites the 15M or 1H setup
+  * a setup detected on 1H never overwrites the 15M or 30M setup
+
+All three states coexist simultaneously, e.g.::
+
+    15M: WAITING_FOR_ENTRY
+    30M: ENTRY_TOUCHED -> TP_LOCKED
+    1H : BOS_CONFIRMED -> FIB_ACTIVE
+
+``advance`` feeds each engine only the NEWLY closed candles for its own
+timeframe, so a new valid high on 15M updates the 15M dynamic TP without
+touching 30M/1H.  When a setup completes/invalidates on any timeframe, that
+timeframe immediately keeps scanning for the next valid BOS + retracement.
+
+This module NEVER fabricates prices or levels and NEVER changes the engine's
+strategy rules — each engine remains 100% deterministic over real candles.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime
+from typing import Any
+
+from app.core.constants import TimeFrame
+from app.core.logging import logger
+from app.data.live.service import get_live_service
+from app.retracement.engine import RetracementBOSEngine
+from app.retracement.models import RetracementSetup, RetracementState
+from app.retracement.repository import RetracementRepository
+
+# Timeframes monitored continuously and independently.
+DEFAULT_TIMEFRAMES = ["15m", "30m", "1h"]
+TF_MAP: dict[str, TimeFrame] = {
+    "15m": TimeFrame.M15,
+    "30m": TimeFrame.M30,
+    "1h": TimeFrame.H1,
+}
+
+_instances: dict[str, RetracementMultiTFMonitor] = {}
+
+
+def get_retracement_multi_tf_service(symbol: str = "XAUUSD") -> RetracementMultiTFMonitor:
+    """Returns the shared multi-timeframe monitor for a symbol (singleton)."""
+    svc = _instances.get(symbol)
+    if svc is None:
+        svc = RetracementMultiTFMonitor(symbol=symbol)
+        _instances[symbol] = svc
+    return svc
+
+
+def _same_setup(a: RetracementSetup, b: RetracementSetup) -> bool:
+    """Two setups are the same logical setup when they share the same BOS,
+    Point 1 and Point 2 anchors (levels may differ as TP tracks new highs)."""
+    if a.bos_price is None or b.bos_price is None:
+        return False
+    if a.point_2_price is None or b.point_2_price is None:
+        return False
+    return (
+        abs(a.bos_price - b.bos_price) < 1e-9
+        and abs(a.point_2_price - b.point_2_price) < 1e-9
+        and abs(a.point_1_price - b.point_1_price) < 1e-9
+    )
+
+
+class _TFSlot:
+    """One independent timeframe slot: its own engine + tracking state."""
+
+    def __init__(self, symbol: str, timeframe: str) -> None:
+        self.timeframe = timeframe
+        self.engine = RetracementBOSEngine(symbol=symbol, timeframe=timeframe)
+        self.last_processed_ts: datetime | None = None
+        self.last_completed: RetracementSetup | None = None
+        self.live_price: float | None = None
+        self.data_status: str = "NO_DATA"
+        self.has_live_data: bool = False
+
+    def reset(self) -> None:
+        self.engine.reset()
+        self.last_processed_ts = None
+        self.last_completed = None
+        self.has_live_data = False
+
+
+class RetracementMultiTFMonitor:
+    """Monitors 15m / 30m / 1h retracement structures independently."""
+
+    def __init__(self, symbol: str = "XAUUSD",
+                 timeframes: list[str] | None = None) -> None:
+        self.symbol = symbol
+        self.timeframes = list(timeframes or DEFAULT_TIMEFRAMES)
+        self.slots: dict[str, _TFSlot] = {
+            tf: _TFSlot(symbol, tf) for tf in self.timeframes
+        }
+        self.live_price: float | None = None
+        self.data_status: str = "NO_DATA"
+        self._lock = asyncio.Lock()
+
+    # ------------------------------------------------------------------
+    # Live data (one snapshot feeds all three independent engines)
+    # ------------------------------------------------------------------
+
+    async def _snapshot(self) -> Any:
+        """Latest CLOSED multi-timeframe snapshot from the live market service."""
+        try:
+            service = get_live_service()
+            snap = await service.get_multi_timeframe_snapshot(
+                self.symbol, include_forming=False, m15_limit=800,
+            )
+            self.live_price = snap.current_price
+            self.data_status = "HEALTHY"
+            return snap
+        except Exception as exc:  # noqa: BLE001 - live feed unavailable
+            logger.debug("[RETR-MULTI] live snapshot unavailable: %s", exc)
+            self.data_status = "NO_DATA"
+            self.live_price = None
+            return None
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def advance(self, db) -> dict[str, RetracementSetup | None]:
+        """Process any newly-closed candles on EVERY timeframe and persist each
+        independent state.
+
+        Returns ``{timeframe: active_setup_or_None}`` for all timeframes.
+        Cheap when no new candle has closed (no reprocessing happens).
+        """
+        async with self._lock:
+            snap = await self._snapshot()
+            results: dict[str, RetracementSetup | None] = {}
+            for tf in self.timeframes:
+                slot = self.slots[tf]
+                candles: list = []
+                if snap is not None:
+                    candles = list(snap.get_series(TF_MAP[tf]))
+                    slot.live_price = snap.current_price
+                    slot.data_status = "HEALTHY"
+                    slot.has_live_data = bool(candles)
+                else:
+                    slot.data_status = "NO_DATA"
+                    slot.has_live_data = False
+                results[tf] = self._advance_slot(slot, candles)
+            await self._persist(db)
+            return results
+
+    def _advance_slot(self, slot: _TFSlot, candles: list) -> RetracementSetup | None:
+        """Advance ONE timeframe engine with its own newly-closed candles."""
+        if not candles:
+            return slot.engine.setup
+        new_candles = [
+            c for c in candles
+            if slot.last_processed_ts is None or c.timestamp > slot.last_processed_ts
+        ]
+        if not new_candles:
+            return slot.engine.setup
+        new_candles.sort(key=lambda c: c.timestamp)
+        completed: list[RetracementSetup] = []
+        for candle in new_candles:
+            slot.engine.process_candle(candle)
+            archived = slot.engine.archive_completed()
+            if archived is not None:
+                completed.append(archived)
+        slot.last_processed_ts = new_candles[-1].timestamp
+        if completed:
+            slot.last_completed = completed[-1]
+        return slot.engine.setup
+
+    def reset(self) -> None:
+        """Drop all cached engine state (re-seed on next advance)."""
+        for slot in self.slots.values():
+            slot.reset()
+        self.live_price = None
+        self.data_status = "NO_DATA"
+
+    def current_state(self) -> dict[str, RetracementSetup | None]:
+        """Snapshot of the current active setup per timeframe (no I/O)."""
+        return {
+            tf: self.slots[tf].engine.setup for tf in self.timeframes
+        }
+
+    # ------------------------------------------------------------------
+    # Persistence (idempotent, isolated per timeframe)
+    # ------------------------------------------------------------------
+
+    async def _persist(self, db) -> None:
+        for tf in self.timeframes:
+            slot = self.slots[tf]
+            setup = slot.engine.setup
+            repo = RetracementRepository(db)
+
+            # 1) Finalize a persisted active setup this timeframe just completed.
+            if setup is None and slot.last_completed is not None:
+                await self._finalize_completed(repo, tf, slot.last_completed)
+
+            # 2) Upsert the current active setup for THIS timeframe only.
+            if setup is not None and setup.point_2_price is not None:
+                persisted = await repo.load_latest_active(
+                    self.symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
+                inserted = False
+                if persisted is not None:
+                    if _same_setup(persisted, setup):
+                        setup.setup_id = persisted.setup_id
+                    else:
+                        await self._finalize_stale(repo, tf, persisted)
+                        inserted = True
+                else:
+                    inserted = True
+                await repo.save_setup(setup)
+                if inserted:
+                    await self._save_events(repo, slot, setup.setup_id)
+
+        await db.commit()
+
+    async def _finalize_completed(self, repo, timeframe: str,
+                                  completed: RetracementSetup) -> None:
+        """Mark the persisted active row (same timeframe) as done."""
+        persisted = await repo.load_latest_active(
+            self.symbol, strategy="RETRACEMENT_BOS_V1", timeframe=timeframe)
+        if persisted is None or not _same_setup(persisted, completed):
+            return
+        for field in ("state", "outcome", "entry_touched", "entry_timestamp",
+                      "tp_locked", "locked_tp", "completion_reason",
+                      "invalidation_reason"):
+            setattr(persisted, field, getattr(completed, field))
+        await repo.save_setup(persisted)
+
+    async def _finalize_stale(self, repo, timeframe: str,
+                              persisted: RetracementSetup) -> None:
+        """Mark an old persisted active row (same timeframe) as superseded."""
+        persisted.state = RetracementState.INVALIDATED
+        persisted.invalidation_reason = (
+            f"Superseded by a newer live retracement setup ({timeframe}).")
+        await repo.save_setup(persisted)
+
+    async def _save_events(self, repo, slot: _TFSlot, setup_id: str) -> None:
+        """Persist events for a newly-created setup (deduped by existence)."""
+        existing = await repo.load_events(setup_id, limit=1)
+        if existing:
+            return
+        for event in slot.engine._events:
+            if event.setup_id == setup_id:
+                await repo.save_event(event)

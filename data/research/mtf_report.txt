@@ -1,0 +1,69 @@
+XAU/USD MTF + CANDIDATE RESEARCH
+Data: 2025-12-11T08:05:00+00:00 -> 2026-08-24T15:40:00+00:00
+Best exit per config:
+  PROD_4H_1H_30M_15M       TP1.75|SL1.5     Exp=+0.127R n=2456
+  4H_1H_15M_5M             TP2.0|SL1.5      Exp=+0.046R n=9652
+  4H_1H_30M_5M             TP1.75|SL1.5     Exp=+0.101R n=7014
+  1H_30M_15M_5M            TP2.0|SLbase     Exp=+0.024R n=14210
+
+TOP CANDIDATES (ranked by pooled OOS):
+
+#1 4H_1H_30M_5M R:RANGING C:85 S:ALL TP:1.75 SL:None
+   n=164 WR=59.15% PF=2.53 Exp=+0.627R DD=18.21%
+   OOS windows positive: 7/13
+   MC: P(neg)=0.0% p95DD=8.23%
+   Bootstrap mean-R CI: [0.43, 0.83]
+   TP-perturbation expectancy: [0.449, 0.627, 0.834]
+
+#2 PROD_4H_1H_30M_15M R:RANGING C:75 S:ALL TP:1.75 SL:None
+   n=327 WR=55.05% PF=2.14 Exp=+0.511R DD=18.73%
+   OOS windows positive: 9/13
+   MC: P(neg)=0.0% p95DD=10.8%
+   Bootstrap mean-R CI: [0.36, 0.66]
+   TP-perturbation expectancy: [0.5, 0.511, 0.628]
+
+#3 4H_1H_15M_5M R:RANGING C:85 S:ALL TP:2.0 SL:None
+   n=203 WR=49.75% PF=1.91 Exp=+0.453R DD=18.35%
+   OOS windows positive: 9/13
+   MC: P(neg)=0.0% p95DD=11.57%
+   Bootstrap mean-R CI: [0.25, 0.66]
+   TP-perturbation expectancy: [0.393, 0.453, 0.473]
+
+#4 4H_1H_30M_5M R:RANGING C:80 S:ALL TP:1.75 SL:None
+   n=265 WR=52.45% PF=1.93 Exp=+0.436R DD=22.43%
+   OOS windows positive: 8/13
+
+#5 4H_1H_30M_5M R:RANGING C:75 S:ALL TP:1.75 SL:None
+   n=898 WR=51.22% PF=1.84 Exp=+0.407R DD=40.92%
+   OOS windows positive: 8/13
+
+#6 4H_1H_15M_5M R:TRENDING C:80 S:strong4h TP:2.0 SL:None
+   n=119 WR=46.22% PF=1.63 Exp=+0.338R DD=4.9%
+   OOS windows positive: 11/13
+
+#7 4H_1H_15M_5M R:TRENDING C:80 S:gap4h TP:2.0 SL:None
+   n=105 WR=43.81% PF=1.49 Exp=+0.277R DD=6.43%
+   OOS windows positive: 9/13
+
+#8 4H_1H_30M_5M R:ALL C:85 S:ALL TP:1.75 SL:None
+   n=1023 WR=47.02% PF=1.52 Exp=+0.271R DD=32.72%
+   OOS windows positive: 0/13
+
+#9 4H_1H_15M_5M R:RANGING C:80 S:ALL TP:2.0 SL:None
+   n=287 WR=43.55% PF=1.48 Exp=+0.269R DD=20.8%
+   OOS windows positive: 7/13
+
+#10 4H_1H_30M_5M R:ALL C:80 S:ALL TP:1.75 SL:None
+   n=2000 WR=45.4% PF=1.43 Exp=+0.230R DD=41.4%
+   OOS windows positive: 0/13
+
+#11 PROD_4H_1H_30M_15M R:ALL C:80 S:strong4h TP:1.75 SL:None
+   n=255 WR=45.88% PF=1.45 Exp=+0.229R DD=13.17%
+   OOS windows positive: 0/13
+
+#12 PROD_4H_1H_30M_15M R:ALL C:80 S:gap4h TP:1.75 SL:None
+   n=213 WR=45.54% PF=1.44 Exp=+0.225R DD=11.11%
+   OOS windows positive: 0/13
+
+DECISION NOTE: no candidate is promoted automatically. Forward observation
+is required before promotion review.

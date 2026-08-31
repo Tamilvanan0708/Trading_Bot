@@ -1,0 +1,163 @@
+{
+  "generated_at": "2026-08-25T04:58:58.716710+00:00",
+  "baseline_cost_points": 0.5,
+  "cost_multiples": [
+    0.0,
+    1.0,
+    1.5,
+    2.0,
+    3.0
+  ],
+  "candidates": {
+    "CANDIDATE_A_V1": {
+      "config": "PROD_4H_1H_30M_15M",
+      "regime": "RANGING",
+      "tp_r": 1.75,
+      "sl_atr": 1.5,
+      "n_signals": 327,
+      "cost_sweep": {
+        "0x": {
+          "cost_points": 0.0,
+          "trades": 327,
+          "expectancy_r": 0.567,
+          "win_rate_pct": 56.88,
+          "profit_factor": 2.32,
+          "max_dd_pct": 15.19
+        },
+        "1x": {
+          "cost_points": 0.5,
+          "trades": 327,
+          "expectancy_r": 0.278,
+          "win_rate_pct": 55.05,
+          "profit_factor": 1.65,
+          "max_dd_pct": 24.56
+        },
+        "1.5x": {
+          "cost_points": 0.75,
+          "trades": 327,
+          "expectancy_r": 0.191,
+          "win_rate_pct": 52.6,
+          "profit_factor": 1.44,
+          "max_dd_pct": 27.38
+        },
+        "2x": {
+          "cost_points": 1.0,
+          "trades": 327,
+          "expectancy_r": 0.12,
+          "win_rate_pct": 52.6,
+          "profit_factor": 1.27,
+          "max_dd_pct": 29.14
+        },
+        "3x": {
+          "cost_points": 1.5,
+          "trades": 327,
+          "expectancy_r": 0.009,
+          "win_rate_pct": 51.99,
+          "profit_factor": 1.02,
+          "max_dd_pct": 32.04
+        }
+      },
+      "fragility": "ROBUST"
+    },
+    "CANDIDATE_B_V1": {
+      "config": "4H_1H_30M_5M",
+      "regime": "RANGING",
+      "tp_r": 1.75,
+      "sl_atr": 1.5,
+      "n_signals": 164,
+      "cost_sweep": {
+        "0x": {
+          "cost_points": 0.0,
+          "trades": 164,
+          "expectancy_r": 0.442,
+          "win_rate_pct": 52.44,
+          "profit_factor": 1.93,
+          "max_dd_pct": 17.38
+        },
+        "1x": {
+          "cost_points": 0.5,
+          "trades": 164,
+          "expectancy_r": -0.217,
+          "win_rate_pct": 31.1,
+          "profit_factor": 0.61,
+          "max_dd_pct": 42.15
+        },
+        "1.5x": {
+          "cost_points": 0.75,
+          "trades": 164,
+          "expectancy_r": -0.316,
+          "win_rate_pct": 31.1,
+          "profit_factor": 0.47,
+          "max_dd_pct": 49.53
+        },
+        "2x": {
+          "cost_points": 1.0,
+          "trades": 164,
+          "expectancy_r": -0.386,
+          "win_rate_pct": 31.1,
+          "profit_factor": 0.37,
+          "max_dd_pct": 53.96
+        },
+        "3x": {
+          "cost_points": 1.5,
+          "trades": 164,
+          "expectancy_r": -0.481,
+          "win_rate_pct": 28.66,
+          "profit_factor": 0.25,
+          "max_dd_pct": 59.15
+        }
+      },
+      "fragility": "FRAGILE"
+    },
+    "CANDIDATE_C_V1": {
+      "config": "4H_1H_15M_5M",
+      "regime": "RANGING",
+      "tp_r": 2.0,
+      "sl_atr": 1.5,
+      "n_signals": 203,
+      "cost_sweep": {
+        "0x": {
+          "cost_points": 0.0,
+          "trades": 203,
+          "expectancy_r": 0.413,
+          "win_rate_pct": 47.29,
+          "profit_factor": 1.79,
+          "max_dd_pct": 18.38
+        },
+        "1x": {
+          "cost_points": 0.5,
+          "trades": 203,
+          "expectancy_r": -0.057,
+          "win_rate_pct": 34.48,
+          "profit_factor": 0.9,
+          "max_dd_pct": 39.44
+        },
+        "1.5x": {
+          "cost_points": 0.75,
+          "trades": 203,
+          "expectancy_r": -0.141,
+          "win_rate_pct": 33.99,
+          "profit_factor": 0.76,
+          "max_dd_pct": 47.31
+        },
+        "2x": {
+          "cost_points": 1.0,
+          "trades": 203,
+          "expectancy_r": -0.202,
+          "win_rate_pct": 33.99,
+          "profit_factor": 0.66,
+          "max_dd_pct": 52.16
+        },
+        "3x": {
+          "cost_points": 1.5,
+          "trades": 203,
+          "expectancy_r": -0.291,
+          "win_rate_pct": 32.51,
+          "profit_factor": 0.53,
+          "max_dd_pct": 57.97
+        }
+      },
+      "fragility": "FRAGILE"
+    }
+  }
+}
