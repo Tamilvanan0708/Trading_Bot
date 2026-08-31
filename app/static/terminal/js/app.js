@@ -2613,39 +2613,59 @@ Routes["/health"] = (mount) => {
 };
 
 /* ================= SHARED RICH STRATEGY UI BUILDER ================= */
+window.__selectedStrategyTf = window.__selectedStrategyTf || "15m";
+window.setStrategyTf = function(tf) {
+  window.__selectedStrategyTf = tf;
+  const hash = location.hash.replace(/^#\/?/, "");
+  const [rawPath] = hash.split("?");
+  const path = "/" + (rawPath || "overview");
+  const fn = Routes[path];
+  const mount = document.getElementById("view-mount");
+  if (fn && mount) fn(mount);
+};
+
 function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strategyType) {
   const TFS = ["5m", "15m", "30m", "1h", "4h"];
   const TF_LABELS = {"5m":"5M", "15m":"15M", "30m":"30M", "1h":"1H", "4h":"4H"};
-  let selectedTf = "15m";
+  const selectedTf = window.__selectedStrategyTf || "15m";
 
   function renderTimeline(state) {
     const steps = [
-      { id: "BOS", label: "BOS" },
-      { id: "POINT_2", label: "POINT 2" },
-      { id: "FIB_ACTIVE", label: "FIB ACTIVE" },
-      { id: "TRACKING_HIGH", label: "TRACKING HIGH" },
-      { id: "ENTRY_TOUCHED", label: "ENTRY TOUCHED" },
-      { id: "TP_FROZEN", label: "TP FROZEN" },
-      { id: "OUTCOME", label: "OUTCOME" },
+      ["BOS", "BOS_DETECTED"],
+      ["POINT 2", "POINT_2_IDENTIFIED"],
+      ["FIB ACTIVE", "FIB_ACTIVE"],
+      ["TRACKING HIGH", "TP_DYNAMIC"],
+      ["ENTRY TOUCHED", "ENTRY_TOUCHED"],
+      ["TP FROZEN", "TP_FROZEN"],
+      ["OUTCOME", "COMPLETED"],
     ];
     const s = String(state || "NO_SETUP").toUpperCase();
-    let curStep = 0;
-    if (s === "BOS_DETECTED") curStep = 0;
-    else if (s === "POINT_2_IDENTIFIED") curStep = 1;
-    else if (s === "FIB_ACTIVE") curStep = 2;
-    else if (s === "TP_DYNAMIC" || s === "WAITING_FOR_ENTRY" || s === "PREMIUM_PULLBACK") curStep = 3;
-    else if (s === "ENTRY_TOUCHED") curStep = 4;
-    else if (s === "TP_FROZEN" || s === "TRADE_ACTIVE") curStep = 5;
-    else if (s === "COMPLETED" || s === "INVALIDATED") curStep = 6;
+    const map = {
+      BOS_DETECTED: 0,
+      POINT_2_IDENTIFIED: 1,
+      FIB_ACTIVE: 2,
+      TP_DYNAMIC: 3,
+      PREMIUM_PULLBACK: 3,
+      WAITING_FOR_ENTRY: 3,
+      SCANNING_ZONE: 2,
+      ENTRY_TOUCHED: 4,
+      TP_FROZEN: 5,
+      TRADE_ACTIVE: 5,
+      COMPLETED: 6,
+      INVALIDATED: -1,
+      NO_SETUP: -1,
+    };
+    const activeIdx = map[s] !== undefined ? map[s] : -1;
 
-    const chips = steps.map((step, i) => {
-      const isPast = i < curStep;
-      const isCur = i === curStep && s !== "NO_SETUP";
-      const cls = isCur ? "step-current" : isPast ? "step-past" : "step-future";
-      return `<span class="step-chip ${cls}">${step.label}</span>`;
-    }).join(`<span class="step-arrow">→</span>`);
+    const chips = steps.map(([label, key], i) => {
+      let cls = "tl-step";
+      if (activeIdx === -1) cls += " tl-idle";
+      else if (i < activeIdx) cls += " tl-done";
+      else if (i === activeIdx) cls += " tl-active";
+      return `<div class="${cls}">${label}</div>`;
+    }).join(`<div class="tl-arrow">→</div>`);
 
-    return `<div class="state-timeline" style="margin-bottom:var(--sp-3)">${chips}</div>`;
+    return `<div class="tl-wrap" style="margin-bottom:var(--sp-2)">${chips}</div>`;
   }
 
   function renderActiveSignalBox(d, price, tf) {
@@ -2653,8 +2673,8 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const isSetup = state !== "NO_SETUP";
     const dir = d.direction || "LONG";
     const dirBadge = dir === "LONG"
-      ? '<span class="badge badge-green">▲ LONG &nbsp; BULLISH RETRACEMENT</span>'
-      : '<span class="badge badge-red">▼ SHORT &nbsp; BEARISH RETRACEMENT</span>';
+      ? '<span class="badge badge-green" style="font-size:14px;padding:4px 10px">▲ LONG &nbsp; BULLISH RETRACEMENT</span>'
+      : '<span class="badge badge-red" style="font-size:14px;padding:4px 10px">▼ SHORT &nbsp; BEARISH RETRACEMENT</span>';
     const entry = d.entry?.price;
     const sl = d.sl?.price;
     const tp = d.tp?.locked || d.tp?.dynamic || d.tp?.price;
@@ -2664,7 +2684,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const ptsCls = pts >= 0 ? "up" : "down";
     const ptsSign = pts >= 0 ? "+" : "";
 
-    return `<div class="card" style="border-color:rgba(52,211,153,0.3);margin-bottom:var(--sp-3)">
+    return `<div class="card" style="border-color:rgba(52,211,153,0.35);margin-bottom:var(--sp-3)">
       <div class="card-head">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           ${dirBadge}
@@ -2693,7 +2713,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
           </div>
         </div>
         <div class="row-between" style="font-size:12px;color:var(--text-dim);border-top:1px solid var(--border);padding-top:8px">
-          <div>R:R <b>1 : ${m.rr_ratio || "2.5"}</b> &nbsp;·&nbsp; ${d.smc?.zone ? `ZONE: <b style="color:var(--text-bright)">${d.smc.zone}</b>` : `BOS: <b>$${d.bos?.price || "—"}</b>`}</div>
+          <div>R:R <b>1 : ${m.rr_ratio || "2.83"}</b> &nbsp;·&nbsp; ${d.smc?.zone ? `ZONE: <b style="color:var(--text-bright)">${d.smc.zone}</b>` : `BOS: <b>$${d.bos?.price || "—"}</b>`}</div>
           <div>STATE: <span class="badge ${d.is_trade_active ? "badge-green" : "badge-amber"}">${state}</span> &nbsp;·&nbsp; CURRENT MOVEMENT: <b class="${ptsCls}">${pts != null ? `${ptsSign}${pts} PTS` : "—"}</b></div>
         </div>
       </div>
@@ -2756,7 +2776,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       const hasTrade = d.timeframes?.[tf]?.is_trade_active;
       const cls = isSel ? "btn btn-primary" : "btn btn-secondary";
       const dot = hasTrade ? ' <span class="dot dot-green" style="margin-left:4px"></span>' : isCascade ? ' <span class="dot dot-amber" style="margin-left:4px"></span>' : '';
-      return `<button class="${cls}" data-tf="${tf}" style="padding:5px 12px;font-size:12px">${TF_LABELS[tf]}${dot}</button>`;
+      return `<button class="${cls}" onclick="window.setStrategyTf('${tf}')" style="padding:6px 14px;font-size:12px;cursor:pointer">${TF_LABELS[tf]}${dot}</button>`;
     }).join(" ");
 
     return `<div class="stack">
@@ -2774,13 +2794,13 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       </div>
 
       <!-- TIMEFRAME SELECTOR -->
-      <div class="card" style="padding:8px 12px">
+      <div class="card" style="padding:10px 14px">
         <div class="row-between">
-          <div style="display:flex;align-items:center;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
             <span style="font-size:12px;font-weight:700;color:var(--text-dim)">SELECT TIMEFRAME:</span>
-            <div id="strat-tf-btns">${tfButtons}</div>
+            <div style="display:flex;gap:6px">${tfButtons}</div>
           </div>
-          <div style="font-size:11px;color:var(--text-muted)">Viewing: <b>${TF_LABELS[selectedTf]}</b></div>
+          <div style="font-size:12px;color:var(--text-dim)">Viewing: <b style="color:var(--accent)">${TF_LABELS[selectedTf]}</b></div>
         </div>
       </div>
 
@@ -2812,16 +2832,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         </div>
       </div>
     </div>`;
-  }, mount, (res) => {
-    // Post-render wire-up: TF button clicks
-    const btns = mount.querySelectorAll("#strat-tf-btns button");
-    btns.forEach(b => {
-      b.onclick = () => {
-        selectedTf = b.dataset.tf;
-        Routes[location.hash.slice(1)](mount);
-      };
-    });
-  });
+  }, mount);
 }
 
 /* ================= SMC WITH FIB ================= */
