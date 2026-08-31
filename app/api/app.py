@@ -74,7 +74,7 @@ def create_app() -> FastAPI:
         from app.api.routes.terminal import serve_terminal_index
         return await serve_terminal_index()
 
-    @app.get("/health", tags=["Health"])
+    @app.api_route("/health", methods=["GET", "HEAD"], tags=["Health"])
     async def health_check(request: Request):
         import asyncio
 
