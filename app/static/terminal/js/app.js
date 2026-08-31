@@ -2612,221 +2612,272 @@ Routes["/health"] = (mount) => {
   }, mount);
 };
 
-/* ================= SMC WITH FIB ================= */
-Routes["/smc-fib"] = (mount) => {
-  const TFS = ["5m","15m","30m","1h","4h"];
-  const TF_LABELS = {"5m":"5M","15m":"15M","30m":"30M","1h":"1H","4h":"4H"};
+/* ================= SHARED RICH STRATEGY UI BUILDER ================= */
+function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strategyType) {
+  const TFS = ["5m", "15m", "30m", "1h", "4h"];
+  const TF_LABELS = {"5m":"5M", "15m":"15M", "30m":"30M", "1h":"1H", "4h":"4H"};
+  let selectedTf = "15m";
 
-  function tfBadge(tf, active, isCascade) {
-    const cls = isCascade ? "badge-green" : active ? "badge-blue" : "badge-muted";
-    const star = isCascade ? " ★" : "";
-    return `<span class="badge ${cls}" style="margin:2px;font-size:11px">${TF_LABELS[tf]}${star}</span>`;
+  function renderTimeline(state) {
+    const steps = [
+      { id: "BOS", label: "BOS" },
+      { id: "POINT_2", label: "POINT 2" },
+      { id: "FIB_ACTIVE", label: "FIB ACTIVE" },
+      { id: "TRACKING_HIGH", label: "TRACKING HIGH" },
+      { id: "ENTRY_TOUCHED", label: "ENTRY TOUCHED" },
+      { id: "TP_FROZEN", label: "TP FROZEN" },
+      { id: "OUTCOME", label: "OUTCOME" },
+    ];
+    const s = String(state || "NO_SETUP").toUpperCase();
+    let curStep = 0;
+    if (s === "BOS_DETECTED") curStep = 0;
+    else if (s === "POINT_2_IDENTIFIED") curStep = 1;
+    else if (s === "FIB_ACTIVE") curStep = 2;
+    else if (s === "TP_DYNAMIC" || s === "WAITING_FOR_ENTRY" || s === "PREMIUM_PULLBACK") curStep = 3;
+    else if (s === "ENTRY_TOUCHED") curStep = 4;
+    else if (s === "TP_FROZEN" || s === "TRADE_ACTIVE") curStep = 5;
+    else if (s === "COMPLETED" || s === "INVALIDATED") curStep = 6;
+
+    const chips = steps.map((step, i) => {
+      const isPast = i < curStep;
+      const isCur = i === curStep && s !== "NO_SETUP";
+      const cls = isCur ? "step-current" : isPast ? "step-past" : "step-future";
+      return `<span class="step-chip ${cls}">${step.label}</span>`;
+    }).join(`<span class="step-arrow">→</span>`);
+
+    return `<div class="state-timeline" style="margin-bottom:var(--sp-3)">${chips}</div>`;
   }
 
-  function renderSmcCard(tf, card, isActive) {
-    const s = card;
-    const smc = s.smc || {};
-    const lvl = s.levels || {};
-    const str = s.structure || {};
-    const state = s.state || "NO_SETUP";
-    const stateColor = s.is_trade_active ? "badge-green" : s.is_entry_ready ? "badge-amber" : "badge-muted";
-    const borderColor = s.is_trade_active ? "rgba(52,211,153,0.35)" : s.is_entry_ready ? "rgba(251,191,36,0.35)" : "rgba(255,255,255,0.07)";
-    const price = v => v != null ? `<b>$${Number(v).toFixed(2)}</b>` : `<span class="muted">—</span>`;
-    const zoneColor = smc.zone === "DISCOUNT" ? "badge-green" : smc.zone === "PREMIUM" ? "badge-red" : "badge-muted";
-    const dirBadge = s.direction === "SHORT" ? '<span class="badge badge-red">SHORT (SELL)</span>' : '<span class="badge badge-green">LONG (BUY)</span>';
-    return `<div class="card" style="border-color:${borderColor};margin-bottom:var(--sp-2)">
+  function renderActiveSignalBox(d, price, tf) {
+    const state = String(d.state || "NO_SETUP").toUpperCase();
+    const isSetup = state !== "NO_SETUP";
+    const dir = d.direction || "LONG";
+    const dirBadge = dir === "LONG"
+      ? '<span class="badge badge-green">▲ LONG &nbsp; BULLISH RETRACEMENT</span>'
+      : '<span class="badge badge-red">▼ SHORT &nbsp; BEARISH RETRACEMENT</span>';
+    const entry = d.entry?.price;
+    const sl = d.sl?.price;
+    const tp = d.tp?.locked || d.tp?.dynamic || d.tp?.price;
+    const touched = !!(d.entry?.touched || d.is_entry_touched || d.is_trade_active);
+    const m = d.metrics || {};
+    const pts = m.current_movement_pts;
+    const ptsCls = pts >= 0 ? "up" : "down";
+    const ptsSign = pts >= 0 ? "+" : "";
+
+    return `<div class="card" style="border-color:rgba(52,211,153,0.3);margin-bottom:var(--sp-3)">
       <div class="card-head">
-        <span style="font-weight:700;font-size:13px">${TF_LABELS[tf]} — SMC With Fib</span>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
-          ${s.direction ? dirBadge : ""}
-          <span class="badge ${stateColor}">${state}</span>
-          ${smc.zone ? `<span class="badge ${zoneColor}">${smc.zone} ZONE</span>` : ""}
-          ${isActive ? `<span class="badge badge-green" style="animation:pulse 1.5s infinite">● ACTIVE TF</span>` : ""}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          ${dirBadge}
+          <span class="badge badge-blue">XAUUSD · ${TF_LABELS[tf] || tf.toUpperCase()}</span>
+          ${isSetup ? '<span class="badge badge-amber">ACTIVE</span>' : '<span class="badge badge-muted">NO SETUP</span>'}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${touched ? '<span class="badge badge-green">ENTRY TOUCHED</span>' : '<span class="badge badge-blue">WAITING FOR ENTRY</span>'}
+          ${d.tp?.is_locked ? '<span class="badge badge-green">TP FROZEN</span>' : '<span class="badge badge-blue">TP DYNAMIC</span>'}
+          <span style="font-size:12px;color:var(--text-dim)">LIVE: <b>$${Number(price || 0).toFixed(2)}</b></span>
         </div>
       </div>
       <div class="card-body">
-        <div class="grid grid-2" style="gap:var(--sp-2)">
-          <div>
-            ${UI.kv([
-              ["Direction", s.direction || "—"],
-              ["Anchor (1.0 Fib)", price(lvl.anchor_1_0)],
-              ["Target TP (0.0 Fib)", price(lvl.target_0_0)],
-              ["Entry (0.68 Fib)", price(lvl.entry_0_68)],
-              ["Pocket (0.79 Fib)", price(lvl.pocket_0_79)],
-              ["Stop Loss (0.92 Fib)", price(lvl.sl_0_92)],
-            ])}
+        <div class="grid grid-3" style="margin-bottom:var(--sp-3)">
+          <div class="metric">
+            <div class="metric-label">ENTRY (0.680 / 0.618)</div>
+            <div class="metric-value">${entry != null ? `$${Number(entry).toFixed(2)}` : "—"}</div>
           </div>
-          <div>
-            ${UI.kv([
-              ["50% Equilibrium", price(smc.equilibrium_50)],
-              ["Structure Break", str.break_type || "NONE"],
-              ["Break Price", price(str.break_price)],
-              ["Order Blocks Active", smc.active_obs_count != null ? `<b>${smc.active_obs_count}</b>` : '<span class="muted">—</span>'],
-              ["FVG Imbalances", smc.active_fvgs_count != null ? `<b>${smc.active_fvgs_count}</b>` : '<span class="muted">—</span>'],
-              ["Live Data Feed", s.has_live_data ? '<span class="badge badge-green">LIVE</span>' : '<span class="badge badge-muted">NO FEED</span>'],
-            ])}
+          <div class="metric">
+            <div class="metric-label">STOP LOSS (0.920 / 0.236)</div>
+            <div class="metric-value down">${sl != null ? `$${Number(sl).toFixed(2)}` : "—"}</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">TAKE PROFIT (0.000 / 1.000)</div>
+            <div class="metric-value up">${tp != null ? `$${Number(tp).toFixed(2)}` : "—"}</div>
           </div>
         </div>
+        <div class="row-between" style="font-size:12px;color:var(--text-dim);border-top:1px solid var(--border);padding-top:8px">
+          <div>R:R <b>1 : ${m.rr_ratio || "2.5"}</b> &nbsp;·&nbsp; ${d.smc?.zone ? `ZONE: <b style="color:var(--text-bright)">${d.smc.zone}</b>` : `BOS: <b>$${d.bos?.price || "—"}</b>`}</div>
+          <div>STATE: <span class="badge ${d.is_trade_active ? "badge-green" : "badge-amber"}">${state}</span> &nbsp;·&nbsp; CURRENT MOVEMENT: <b class="${ptsCls}">${pts != null ? `${ptsSign}${pts} PTS` : "—"}</b></div>
+        </div>
       </div>
+    </div>`;
+  }
+
+  function renderLevelsTable(lv) {
+    const ratios = ["1.618", "1.000", "0.920", "0.790", "0.680", "0.618", "0.500", "0.382", "0.236", "0.000"];
+    const rows = ratios.map(r => {
+      const l = lv?.[r];
+      if (!l) return "";
+      return `<tr>
+        <td class="num" style="font-weight:700">${r}</td>
+        <td>${UI.esc(String(l.label || "").replace(/_/g, " "))}</td>
+        <td class="num"><b>$${Number(l.price).toFixed(2)}</b></td>
+      </tr>`;
+    }).filter(Boolean).join("");
+
+    return `<div class="card">
+      <div class="card-head"><span>FIBONACCI STRUCTURE</span><span class="muted">Live Ratios</span></div>
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap" style="max-height:260px;overflow-y:auto">
+          <table class="term"><thead><tr><th>LEVEL</th><th>MEANING</th><th class="num">PRICE</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="3" class="muted">—</td></tr>'}</tbody></table>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function renderPointsMetrics(d) {
+    const m = d.metrics || {};
+    const e2tp = m.entry_to_tp_pts != null ? m.entry_to_tp_pts : (d.tp?.price && d.entry?.price ? Math.abs(d.tp.price - d.entry.price).toFixed(2) : null);
+    const e2sl = m.entry_to_sl_pts != null ? m.entry_to_sl_pts : (d.sl?.price && d.entry?.price ? Math.abs(d.entry.price - d.sl.price).toFixed(2) : null);
+    const tot = m.total_range_pts != null ? m.total_range_pts : (d.point_1?.price && d.point_2?.price ? Math.abs(d.point_1.price - d.point_2.price).toFixed(2) : null);
+
+    return `<div class="grid grid-3" style="margin-bottom:var(--sp-3)">
+      <div class="metric"><div class="metric-label">BOS / ANCHOR</div><div class="metric-value" style="font-size:14px">$${d.bos?.price ? Number(d.bos.price).toFixed(2) : "—"} / $${d.point_1?.price ? Number(d.point_1.price).toFixed(2) : "—"}</div></div>
+      <div class="metric"><div class="metric-label">TARGET POINT (0.000)</div><div class="metric-value" style="font-size:14px">${d.point_2?.price ? `$${Number(d.point_2.price).toFixed(2)}` : "—"}</div></div>
+      <div class="metric"><div class="metric-label">TOTAL RANGE</div><div class="metric-value">${tot ? `${tot} PTS` : "—"}</div></div>
+      <div class="metric"><div class="metric-label">ENTRY → TP</div><div class="metric-value up">${e2tp ? `+${e2tp} PTS` : "—"}</div></div>
+      <div class="metric"><div class="metric-label">ENTRY → SL</div><div class="metric-value down">${e2sl ? `-${e2sl} PTS` : "—"}</div></div>
+      <div class="metric"><div class="metric-label">50% EQUILIBRIUM</div><div class="metric-value" style="font-size:14px">${d.smc?.equilibrium_50 ? `$${Number(d.smc.equilibrium_50).toFixed(2)}` : "—"}</div></div>
     </div>`;
   }
 
   renderWith(async () => {
-    const r = await fetch("/retracement/strategy/smc-fib/XAUUSD");
-    if (!r.ok) throw new Error("SMC-Fib fetch failed");
-    return r.json();
-  }, (d) => {
-    const activeTf = d.cascading_active_tf;
+    const [strat, mkt] = await Promise.all([
+      fetch(endpoint).then(r => r.json()),
+      API.marketOverview().catch(() => null),
+    ]);
+    return { strat, mkt };
+  }, (data) => {
+    const d = data.strat || {};
+    const price = d.live_price || data.mkt?.current_price || 4428.0;
+    const tfData = d.timeframes?.[selectedTf] || {};
+    const activeCascadeTf = d.cascading_active_tf;
+
+    const tfButtons = TFS.map(tf => {
+      const isSel = tf === selectedTf;
+      const isCascade = tf === activeCascadeTf;
+      const hasTrade = d.timeframes?.[tf]?.is_trade_active;
+      const cls = isSel ? "btn btn-primary" : "btn btn-secondary";
+      const dot = hasTrade ? ' <span class="dot dot-green" style="margin-left:4px"></span>' : isCascade ? ' <span class="dot dot-amber" style="margin-left:4px"></span>' : '';
+      return `<button class="${cls}" data-tf="${tf}" style="padding:5px 12px;font-size:12px">${TF_LABELS[tf]}${dot}</button>`;
+    }).join(" ");
+
     return `<div class="stack">
       <div class="row-between">
         <div>
-          <div class="section-title">💎 SMC With Fib</div>
-          <div class="muted" style="font-size:11px">Multi-Timeframe Cascading Scanner (5M→15M→30M→1H→4H) · SMC_WITH_FIB</div>
+          <div class="section-title">${strategyName}</div>
+          <div class="muted" style="font-size:11px">${strategySub}</div>
         </div>
         <div class="toolbar" style="margin:0">
-          ${d.data_status === "HEALTHY" ? '<span class="badge badge-green">● LIVE FEED</span>' : '<span class="badge badge-muted">NO FEED</span>'}
-          ${activeTf ? `<span class="badge badge-amber">ACTIVE: ${TF_LABELS[activeTf]}</span>` : '<span class="badge badge-muted">NO ACTIVE SETUP</span>'}
+          <span class="badge badge-green">LIVE FEED</span>
+          ${activeCascadeTf ? `<span class="badge badge-amber">CASCADING ACTIVE: ${TF_LABELS[activeCascadeTf]}</span>` : '<span class="badge badge-muted">SCANNING 5 TFS</span>'}
           <span class="badge badge-blue">SIGNAL ONLY</span>
+          <span class="badge badge-red">REAL MONEY DISABLED</span>
         </div>
       </div>
 
-      <div class="card" style="border-color:rgba(77,159,255,0.25)">
-        <div class="card-head"><span>CASCADING TIMEFRAME STATUS</span></div>
-        <div class="card-body" style="display:flex;flex-wrap:wrap;gap:4px">
-          ${TFS.map(tf => {
-            const c = d.timeframes?.[tf] || {};
-            return tfBadge(tf, c.is_entry_ready || c.is_trade_active, tf === activeTf);
-          }).join("")}
-          <span style="font-size:11px;color:var(--text-muted);align-self:center;margin-left:8px">★ = Currently active entry timeframe</span>
+      <!-- TIMEFRAME SELECTOR -->
+      <div class="card" style="padding:8px 12px">
+        <div class="row-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:12px;font-weight:700;color:var(--text-dim)">SELECT TIMEFRAME:</span>
+            <div id="strat-tf-btns">${tfButtons}</div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted)">Viewing: <b>${TF_LABELS[selectedTf]}</b></div>
         </div>
       </div>
 
-      <div class="card" style="border-color:rgba(77,159,255,0.2)">
-        <div class="card-head"><span>STRATEGY RULES</span></div>
-        <div class="card-body" style="font-size:12px;color:var(--text)">
-          <div style="margin-bottom:4px"><b>Entry Rule:</b> Price retraces into Golden Pocket (0.618–0.79) inside Premium/Discount SMC Zone → Short/Long entry.</div>
-          <div style="margin-bottom:4px"><b>Stop Loss:</b> 0.92 Fib (Above/Below Order Block).</div>
-          <div style="margin-bottom:4px"><b>Target:</b> 0.0 Fib (Previous Swing Low/High Liquidity).</div>
-          <div style="color:var(--text-muted)"><b>Cascade:</b> If no entry in 5M → check 15M → 30M → 1H → 4H. First TF with entry is locked.</div>
+      <!-- STATE TIMELINE -->
+      ${renderTimeline(tfData.state)}
+
+      <!-- BIG ACTIVE SIGNAL BOX -->
+      ${renderActiveSignalBox(tfData, price, selectedTf)}
+
+      <!-- INTERACTIVE CHART -->
+      <div class="card" style="padding:0">
+        <div class="card-head">
+          <span>${strategyName} LIVE CHART</span>
+          <span class="muted">XAU/USD ${TF_LABELS[selectedTf]} · ${tfData.direction || "LONG"}</span>
+        </div>
+        <div class="card-body" style="padding:0">
+          <div class="chart-box" style="height:420px"><canvas id="strat-live-chart" class="chart"></canvas></div>
         </div>
       </div>
 
-      ${TFS.map(tf => {
-        const card = d.timeframes?.[tf];
-        if (!card) return `<div class="card"><div class="card-head"><span>${TF_LABELS[tf]}</span><span class="badge badge-muted">NO DATA</span></div></div>`;
-        return renderSmcCard(tf, card, tf === activeTf);
-      }).join("")}
+      <!-- METRICS & FIBONACCI TABLE -->
+      ${renderPointsMetrics(tfData)}
+
+      <div class="grid grid-2">
+        ${renderLevelsTable(tfData.levels)}
+        <div class="card">
+          <div class="card-head"><span>STRUCTURE & SMC STATUS</span><span class="muted">${TF_LABELS[selectedTf]}</span></div>
+          <div class="card-body">
+            ${UI.kv([
+              ["Direction", tfData.direction || "—"],
+              ["Structure Break", tfData.structure?.break_type || "NONE"],
+              ["Break Level", tfData.structure?.break_price ? `$${Number(tfData.structure.break_price).toFixed(2)}` : "—"],
+              ["Order Blocks (OB)", tfData.smc?.active_obs_count != null ? `<b>${tfData.smc.active_obs_count} Active</b>` : "—"],
+              ["FVG Imbalances", tfData.smc?.active_fvgs_count != null ? `<b>${tfData.smc.active_fvgs_count} Active</b>` : "—"],
+              ["SMC Zone", tfData.smc?.zone ? `<span class="badge ${tfData.smc.zone === "DISCOUNT" ? "badge-green" : "badge-red"}">${tfData.smc.zone} ZONE</span>` : "—"],
+              ["50% Equilibrium", tfData.smc?.equilibrium_50 ? `$${Number(tfData.smc.equilibrium_50).toFixed(2)}` : "—"],
+              ["Cascading Priority", activeCascadeTf === selectedTf ? '<span class="badge badge-green">★ LOCKED ACTIVE TF</span>' : '<span class="badge badge-muted">STANDBY</span>'],
+            ])}
+          </div>
+        </div>
+      </div>
     </div>`;
-  }, mount);
+  }, mount, (res) => {
+    // Post-render wire-up: TF button clicks
+    const btns = mount.querySelectorAll("#strat-tf-btns button");
+    btns.forEach(b => {
+      b.onclick = () => {
+        selectedTf = b.dataset.tf;
+        Routes[location.hash.slice(1)](mount);
+      };
+    });
+
+    // Draw live chart
+    const cv = mount.querySelector("#strat-live-chart");
+    if (!cv) return;
+    API.marketCandles(selectedTf === "4h" ? "4h" : selectedTf === "1h" ? "1h" : selectedTf === "30m" ? "30m" : selectedTf === "5m" ? "5m" : "15m", 80).then(cData => {
+      const candles = cData.candles || [];
+      if (!candles.length) return;
+      const tfData = res.strat?.timeframes?.[selectedTf] || {};
+      const lv = tfData.levels || {};
+      const levels = [];
+      const add = (label, price, color) => {
+        if (price != null) levels.push({ label, price: Number(price), color });
+      };
+      add("TP 0.000", tfData.tp?.locked || tfData.tp?.price, "#22c55e");
+      add("ENTRY 0.680", tfData.entry?.price, "#4d9fff");
+      add("0.500", lv["0.500"]?.price, "rgba(255,255,255,0.3)");
+      add("0.790", lv["0.790"]?.price, "rgba(251,191,36,0.5)");
+      add("SL 0.920", tfData.sl?.price, "#ef4444");
+      add("1.000 ANCHOR", tfData.point_1?.price, "#a855f7");
+      const lastPrice = res.strat?.live_price || candles[candles.length - 1].close;
+      Charts.candles(cv, candles, { window: 80, volume: true, levels, lastPrice, showLatest: true });
+    }).catch(() => {});
+  });
+}
+
+/* ================= SMC WITH FIB ================= */
+Routes["/smc-fib"] = (mount) => {
+  buildRichStrategyView(
+    mount,
+    "/retracement/strategy/smc-fib/XAUUSD",
+    "💎 SMC With Fib",
+    "Smart Money Concepts Golden Pocket Strategy · Dual-Direction Multi-TF",
+    "SMC_WITH_FIB"
+  );
 };
 
 /* ================= FIB WITH RETRACEMENT ================= */
 Routes["/fib-retracement"] = (mount) => {
-  const TFS = ["5m","15m","30m","1h","4h"];
-  const TF_LABELS = {"5m":"5M","15m":"15M","30m":"30M","1h":"1H","4h":"4H"};
-  const STATE_FLOW = ["BOS_DETECTED","POINT_2_IDENTIFIED","FIB_ACTIVE","TP_DYNAMIC","ENTRY_TOUCHED","TP_FROZEN","TRADE_ACTIVE","COMPLETED"];
-
-  function renderStateBar(state) {
-    const idx = STATE_FLOW.indexOf(state);
-    return `<div style="display:flex;gap:2px;flex-wrap:wrap;margin-bottom:var(--sp-2)">
-      ${STATE_FLOW.map((s,i) => {
-        const cls = i < idx ? "badge-green" : i === idx ? "badge-amber" : "badge-muted";
-        return `<span class="badge ${cls}" style="font-size:10px">${s.replace(/_/g," ")}</span>`;
-      }).join("→")}
-    </div>`;
-  }
-
-  function renderFibCard(tf, card, isActive) {
-    const s = card;
-    const state = s.state || "NO_SETUP";
-    const borderColor = s.is_trade_active ? "rgba(52,211,153,0.35)" : s.is_entry_ready ? "rgba(251,191,36,0.35)" : "rgba(255,255,255,0.07)";
-    const stateColor = s.is_trade_active ? "badge-green" : s.is_entry_ready ? "badge-amber" : "badge-muted";
-    const price = v => v != null ? `<b>$${Number(v).toFixed(2)}</b>` : `<span class="muted">—</span>`;
-    return `<div class="card" style="border-color:${borderColor};margin-bottom:var(--sp-2)">
-      <div class="card-head">
-        <span style="font-weight:700;font-size:13px">${TF_LABELS[tf]} — Fib With Retracement</span>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
-          <span class="badge ${stateColor}">${state}</span>
-          ${isActive ? `<span class="badge badge-green" style="animation:pulse 1.5s infinite">● ACTIVE TF</span>` : ""}
-        </div>
-      </div>
-      <div class="card-body">
-        ${renderStateBar(state)}
-        <div class="grid grid-2" style="gap:var(--sp-2)">
-          <div>
-            ${UI.kv([
-              ["BOS Level (Point 1)", price(s.bos?.price)],
-              ["Anchor Low (0.0)", price(s.point_2?.price)],
-              ["Current High (1.0 TP)", price(s.current_high?.price)],
-              ["Entry 0.618", price(s.entry?.price)],
-            ])}
-          </div>
-          <div>
-            ${UI.kv([
-              ["SL 0.236", price(s.sl?.price)],
-              ["TP Dynamic", price(s.tp?.dynamic)],
-              ["TP Locked", s.tp?.is_locked ? price(s.tp.locked) : '<span class="muted">Trailing…</span>'],
-              ["Entry Touched", s.entry_touched ? '<span class="badge badge-green">YES — LOCKED ✓</span>' : '<span class="badge badge-muted">NO — TRAILING</span>'],
-            ])}
-          </div>
-        </div>
-        ${s.invalidation_reason ? `<div style="margin-top:var(--sp-2);font-size:11px;color:var(--text-muted)">⚠ ${s.invalidation_reason}</div>` : ""}
-        ${s.completion_reason ? `<div style="margin-top:var(--sp-2);font-size:11px;color:var(--c-green)">✓ ${s.completion_reason}</div>` : ""}
-      </div>
-    </div>`;
-  }
-
-  renderWith(async () => {
-    const r = await fetch("/retracement/strategy/fib-retracement/XAUUSD");
-    if (!r.ok) throw new Error("Fib-Retracement fetch failed");
-    return r.json();
-  }, (d) => {
-    const activeTf = d.cascading_active_tf;
-    return `<div class="stack">
-      <div class="row-between">
-        <div>
-          <div class="section-title">🎯 Fib With Retracement</div>
-          <div class="muted" style="font-size:11px">Multi-Timeframe Cascading BOS Scanner (5M→15M→30M→1H→4H) · FIB_WITH_RETRACEMENT</div>
-        </div>
-        <div class="toolbar" style="margin:0">
-          ${d.data_status === "HEALTHY" ? '<span class="badge badge-green">● LIVE FEED</span>' : '<span class="badge badge-muted">NO FEED</span>'}
-          ${activeTf ? `<span class="badge badge-amber">ACTIVE: ${TF_LABELS[activeTf]}</span>` : '<span class="badge badge-muted">NO ACTIVE SETUP</span>'}
-          <span class="badge badge-blue">SIGNAL ONLY</span>
-        </div>
-      </div>
-
-      <div class="card" style="border-color:rgba(77,159,255,0.25)">
-        <div class="card-head"><span>CASCADING TIMEFRAME STATUS</span></div>
-        <div class="card-body" style="display:flex;flex-wrap:wrap;gap:4px">
-          ${TFS.map(tf => {
-            const c = d.timeframes?.[tf] || {};
-            const isCascade = tf === activeTf;
-            const isReady = c.is_entry_ready || c.is_trade_active;
-            const cls = isCascade ? "badge-green" : isReady ? "badge-amber" : "badge-muted";
-            return `<span class="badge ${cls}" style="margin:2px">${TF_LABELS[tf]}${isCascade ? " ★" : ""}</span>`;
-          }).join("")}
-          <span style="font-size:11px;color:var(--text-muted);align-self:center;margin-left:8px">★ = Currently active entry timeframe</span>
-        </div>
-      </div>
-
-      <div class="card" style="border-color:rgba(251,191,36,0.2)">
-        <div class="card-head"><span>STRATEGY LIFECYCLE</span></div>
-        <div class="card-body" style="font-size:12px;color:var(--text)">
-          <div style="margin-bottom:4px"><b>1. BOS:</b> Market breaks previous swing high (Bullish) or swing low (Bearish).</div>
-          <div style="margin-bottom:4px"><b>2. Dynamic Trail:</b> 0.618 Entry & 1.0 Target trail upward as new highs form. <i>TP never locked yet.</i></div>
-          <div style="margin-bottom:4px"><b>3. Entry Touch:</b> Price retraces to 0.618 → All levels FREEZE instantly.</div>
-          <div style="margin-bottom:4px"><b>4. Outcome:</b> TP at 1.0 (Profit ✓) or SL at 0.236 → CHoCH detected → switch to SMC With Fib.</div>
-          <div style="color:var(--text-muted)"><b>Expiry:</b> Setup auto-invalidated after 45 candles without entry touch.</div>
-        </div>
-      </div>
-
-      ${TFS.map(tf => {
-        const card = d.timeframes?.[tf];
-        if (!card) return `<div class="card"><div class="card-head"><span>${TF_LABELS[tf]}</span><span class="badge badge-muted">NO DATA</span></div></div>`;
-        return renderFibCard(tf, card, tf === activeTf);
-      }).join("")}
-    </div>`;
-  }, mount);
+  buildRichStrategyView(
+    mount,
+    "/retracement/strategy/fib-retracement/XAUUSD",
+    "🎯 Fib With Retracement",
+    "Multi-Timeframe Cascading BOS Retracement Strategy · RETRACEMENT_BOS_V1",
+    "FIB_WITH_RETRACEMENT"
+  );
 };
 
 /* ================= SETTINGS ================= */
