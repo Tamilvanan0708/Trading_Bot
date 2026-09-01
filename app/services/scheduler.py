@@ -431,7 +431,7 @@ class AnalysisScheduler:
                         existing_sig = await repo.get_signal_by_id(sig_id)
                         if existing_sig is None:
                             # 1. Save to Signals Table
-                            from app.core.constants import MarketBias, SignalDirection, SignalQuality, StrategyType
+                            from app.core.constants import MarketBias, SignalQuality, StrategyType
                             from app.signals.models import SignalPayload
 
                             custom_sig = SignalPayload(
