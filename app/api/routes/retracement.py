@@ -607,3 +607,105 @@ async def get_smc_fib_dashboard(
         "cascading_active_tf": cascading_active_tf,
         "timeframes": states,
     }
+
+
+# ---------------------------------------------------------------------------
+# Live Chart Data Endpoint — returns OHLCV + Fibonacci levels for chart rendering
+# ---------------------------------------------------------------------------
+
+_TF_TO_SERVICE_TF = {
+    "5m": "M5", "15m": "M15", "30m": "M30",
+    "1h": "H1", "4h": "H4",
+}
+
+@router.get("/chart/{symbol}/{timeframe}")
+async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
+    """Return OHLCV candles + live Fib levels for TradingView Lightweight Charts.
+
+    Used by the dashboard chart panel to render candlesticks and draw
+    Fibonacci level lines for both SMC With Fib and Fib With Retracement.
+    """
+    from app.core.constants import TimeFrame
+    from app.data.live.service import get_live_service
+    from app.data.timeframe_resampler import resample_candles
+    from app.retracement.multi_tf import get_retracement_multi_tf_service, TF_MAP as RETR_TF_MAP
+    from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service, TF_MAP as SMC_TF_MAP
+
+    tf = timeframe.lower()
+    svc = get_live_service()
+
+    try:
+        snap = await svc.get_multi_timeframe_snapshot(symbol, include_forming=True)
+        tf_enum = RETR_TF_MAP.get(tf)
+        if tf_enum is None:
+            raise HTTPException(status_code=400, detail=f"Unknown timeframe: {timeframe}")
+        candles = list(snap.get_series(tf_enum))[-limit:]
+        live_price = snap.current_price
+    except Exception as exc:
+        logger.debug("Chart snapshot failed: %s", exc)
+        candles = []
+        live_price = None
+
+    # Serialize OHLCV (Unix timestamp in seconds for lightweight-charts)
+    ohlcv = []
+    for c in candles:
+        ts = c.timestamp
+        unix = int(ts.timestamp())
+        ohlcv.append({
+            "time": unix,
+            "open": round(c.open, 2),
+            "high": round(c.high, 2),
+            "low": round(c.low, 2),
+            "close": round(c.close, 2),
+        })
+
+    # Collect Fibonacci levels from both strategies for this timeframe
+    fib_levels = {"smc_fib": {}, "fib_retracement": {}}
+
+    # SMC With Fib levels
+    try:
+        smc_svc = get_smc_fib_multi_tf_service(symbol)
+        smc_slot = smc_svc.slots.get(tf)
+        if smc_slot and smc_slot.engine:
+            eng = smc_slot.engine
+            if eng.entry_price is not None:
+                fib_levels["smc_fib"] = {
+                    "direction": eng.direction.value if eng.direction else None,
+                    "state": eng.state.value if eng.state else "NO_SETUP",
+                    "anchor": eng.point_2_price,          # 1.000
+                    "sl": eng.sl_price,                    # 0.920
+                    "pocket": eng.pocket_price,            # 0.790
+                    "entry": eng.entry_price,              # 0.680
+                    "equilibrium": eng.equilibrium_50,     # 0.500
+                    "tp": eng.locked_tp or eng.target_tp_price,  # 0.000
+                    "entry_touched": eng.entry_touched,
+                }
+    except Exception as exc:
+        logger.debug("SMC Fib levels for chart failed: %s", exc)
+
+    # Fib With Retracement levels
+    try:
+        retr_svc = get_retracement_multi_tf_service(symbol)
+        retr_slot = retr_svc.slots.get(tf)
+        if retr_slot and retr_slot.engine and retr_slot.engine.setup:
+            setup = retr_slot.engine.setup
+            fib_levels["fib_retracement"] = {
+                "direction": setup.direction,
+                "state": setup.state.value if setup.state else "NO_SETUP",
+                "anchor": setup.point_2_price,              # 0.000 anchor
+                "tp": setup.dynamic_tp or setup.entry_price,  # 1.000 TP
+                "entry": setup.entry_price,                 # 0.618 Entry
+                "sl": setup.sl_price,                       # 0.236 SL
+                "entry_touched": getattr(setup, "entry_touched", False),
+            }
+    except Exception as exc:
+        logger.debug("Fib Retracement levels for chart failed: %s", exc)
+
+    return {
+        "symbol": symbol,
+        "timeframe": tf,
+        "live_price": live_price,
+        "candles": ohlcv,
+        "fib_levels": fib_levels,
+        "candle_count": len(ohlcv),
+    }

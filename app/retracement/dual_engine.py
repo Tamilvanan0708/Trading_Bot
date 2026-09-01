@@ -45,7 +45,7 @@ from app.retracement.models import (
 class DualRetracementEngine:
     """Exact deterministic dual-direction (Bullish/Bearish) Retracement BOS Engine."""
 
-    def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int = 3, right_bars: int = 3):
+    def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int = 2, right_bars: int = 2):
         self.symbol = symbol
         self.timeframe = timeframe
         self.left_bars = left_bars
@@ -63,7 +63,7 @@ class DualRetracementEngine:
 
     def process_candle(self, candle: Candle) -> list[RetracementEvent]:
         self._candles.append(candle)
-        if len(self._candles) < 25:
+        if len(self._candles) < 20:
             return []
 
         # Keep rolling window bounded
@@ -102,9 +102,14 @@ class DualRetracementEngine:
 
         # 1. Check Bullish BOS (Close > last confirmed swing high)
         if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-            prior_lows = [s for s in confirmed_lows if s.index < last_sh.index]
-            p2_low = prior_lows[-1].price if prior_lows else min(c.low for c in self._candles[last_sh.index:])
-            p2_ts = prior_lows[-1].timestamp if prior_lows else candle.timestamp
+            # Bullish anchor = LOWEST swing low in the preceding sequence (within 60 bars)
+            lows_before_bos = [
+                s for s in confirmed_lows
+                if s.index <= last_sh.index and (last_sh.index - s.index) <= 60
+            ]
+            anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_sl
+            p2_low = anchor_low.price
+            p2_ts = anchor_low.timestamp
 
             setup = RetracementSetup(
                 symbol=self.symbol,
@@ -128,9 +133,14 @@ class DualRetracementEngine:
 
         # 2. Check Bearish BOS (Close < last confirmed swing low)
         elif candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-            prior_highs = [s for s in confirmed_highs if s.index < last_sl.index]
-            p2_high = prior_highs[-1].price if prior_highs else max(c.high for c in self._candles[last_sl.index:])
-            p2_ts = prior_highs[-1].timestamp if prior_highs else candle.timestamp
+            # Bearish anchor = HIGHEST swing high in the preceding sequence (within 60 bars)
+            highs_before_bos = [
+                s for s in confirmed_highs
+                if s.index <= last_sl.index and (last_sl.index - s.index) <= 60
+            ]
+            anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_sh
+            p2_high = anchor_high.price
+            p2_ts = anchor_high.timestamp
 
             setup = RetracementSetup(
                 symbol=self.symbol,

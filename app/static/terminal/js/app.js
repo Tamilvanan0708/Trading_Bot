@@ -2815,6 +2815,15 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <!-- BIG ACTIVE SIGNAL BOX -->
       ${renderActiveSignalBox(tfData, price, selectedTf)}
 
+      <!-- LIVE FIB CHART -->
+      <div class="card" style="margin-bottom:var(--sp-3)">
+        <div class="card-head">
+          <span>📈 LIVE CHART</span>
+          <span class="muted" style="font-size:11px">${TF_LABELS[selectedTf]} · Fibonacci Levels</span>
+        </div>
+        <div id="fib-chart-${strategyKey}-${selectedTf}" style="width:100%;height:380px;background:var(--bg-card,#1a1d26);border-radius:0 0 6px 6px;"></div>
+      </div>
+
       <!-- METRICS & FIBONACCI TABLE -->
       ${renderPointsMetrics(tfData)}
 
@@ -2838,6 +2847,141 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       </div>
     </div>`;
   }, mount);
+
+  // After HTML is rendered, draw the chart
+  setTimeout(() => {
+    drawFibChart(`fib-chart-${strategyKey}-${selectedTf}`, selectedTf, strategyKey);
+  }, 80);
+}
+
+// ─── LIVE FIB CHART RENDERER ──────────────────────────────────────────────────
+
+const _chartInstances = {};
+
+async function drawFibChart(containerId, tf, strategyKey) {
+  const container = document.getElementById(containerId);
+  if (!container || typeof LightweightCharts === "undefined") return;
+
+  // Destroy existing chart if re-rendering
+  if (_chartInstances[containerId]) {
+    try { _chartInstances[containerId].remove(); } catch(e) {}
+    delete _chartInstances[containerId];
+  }
+  container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-size:12px">Loading chart…</div>';
+
+  let data;
+  try {
+    const r = await fetch(`/retracement/chart/XAUUSD/${tf}?limit=150`);
+    data = await r.json();
+  } catch(e) {
+    container.innerHTML = '<div style="padding:20px;color:var(--text-dim);font-size:12px">Chart data unavailable</div>';
+    return;
+  }
+
+  const candles = data.candles || [];
+  if (!candles.length) {
+    container.innerHTML = '<div style="padding:20px;color:var(--text-dim);font-size:12px">No candle data yet — waiting for feed…</div>';
+    return;
+  }
+
+  container.innerHTML = "";
+
+  const chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 380,
+    layout: { background: { color: "#12141c" }, textColor: "#c8cde6" },
+    grid: { vertLines: { color: "#1e2130" }, horzLines: { color: "#1e2130" } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: "#2a2d3e" },
+    timeScale: { borderColor: "#2a2d3e", timeVisible: true, secondsVisible: false },
+  });
+  _chartInstances[containerId] = chart;
+
+  // Candlestick series
+  const candleSeries = chart.addCandlestickSeries({
+    upColor: "#26a69a", downColor: "#ef5350",
+    borderUpColor: "#26a69a", borderDownColor: "#ef5350",
+    wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+  });
+  candleSeries.setData(candles);
+
+  // Draw Fibonacci levels for the active strategy
+  const isSmc = strategyKey === "SMC_WITH_FIB";
+  const levs = isSmc ? data.fib_levels?.smc_fib : data.fib_levels?.fib_retracement;
+  const lp = data.live_price;
+
+  if (levs && Object.keys(levs).length > 0) {
+    const dir = levs.direction;
+    const isShort = dir === "SHORT" || dir === "BEARISH";
+    const firstTs = candles[0]?.time;
+    const lastTs = candles[candles.length - 1]?.time;
+
+    // Level definitions for SMC With Fib (SHORT)
+    const smcLevels = [
+      { price: levs.anchor, label: "1.000 ANCHOR", color: "#ef5350", dash: false },
+      { price: levs.sl, label: "0.920 SL", color: "#ef5350", dash: true },
+      { price: levs.pocket, label: "0.790 GOLDEN POCKET", color: "#ff9800", dash: true },
+      { price: levs.entry, label: "0.680 ENTRY", color: "#ffffff", dash: false },
+      { price: levs.equilibrium, label: "0.500 EQ", color: "#5c9bd6", dash: true },
+      { price: levs.tp, label: "0.000 TP", color: "#26a69a", dash: false },
+    ];
+    // Level definitions for Fib With Retracement (SHORT)
+    const retrLevels = [
+      { price: levs.anchor, label: "0.000 ANCHOR", color: "#ef5350", dash: false },
+      { price: levs.sl, label: "0.236 SL", color: "#ef5350", dash: true },
+      { price: levs.entry, label: "0.618 ENTRY", color: "#ffffff", dash: false },
+      { price: levs.tp, label: "1.000 TP", color: "#26a69a", dash: false },
+    ];
+
+    const levelDefs = isSmc ? smcLevels : retrLevels;
+
+    levelDefs.forEach(lev => {
+      if (!lev.price) return;
+      chart.addLineSeries({
+        color: lev.color,
+        lineWidth: lev.dash ? 1 : 2,
+        lineStyle: lev.dash ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+        priceLineVisible: true,
+        lastValueVisible: true,
+        title: lev.label,
+        crosshairMarkerVisible: false,
+      }).setData([{ time: firstTs, value: lev.price }, { time: lastTs, value: lev.price }]);
+    });
+
+    // SL zone fill (red tint between anchor and entry)
+    if (levs.sl && levs.anchor && isSmc) {
+      const slZone = chart.addLineSeries({ color: "rgba(239,83,80,0.08)", lineWidth: 0, title: "" });
+      slZone.setData([{ time: firstTs, value: levs.sl }, { time: lastTs, value: levs.sl }]);
+    }
+
+    // TP zone fill (green tint between entry and TP)
+    if (levs.tp && levs.entry && isSmc) {
+      const tpZone = chart.addLineSeries({ color: "rgba(38,166,154,0.08)", lineWidth: 0, title: "" });
+      tpZone.setData([{ time: firstTs, value: levs.tp }, { time: lastTs, value: levs.tp }]);
+    }
+  }
+
+  // Live price line
+  if (lp) {
+    candleSeries.createPriceLine({
+      price: lp,
+      color: "#f0b90b",
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dotted,
+      axisLabelVisible: true,
+      title: `LIVE $${Number(lp).toFixed(2)}`,
+    });
+  }
+
+  chart.timeScale().fitContent();
+
+  // Responsive resize
+  const ro = new ResizeObserver(entries => {
+    for (const e of entries) {
+      chart.resize(e.contentRect.width, 380);
+    }
+  });
+  ro.observe(container);
 }
 
 /* ================= SMC WITH FIB ================= */

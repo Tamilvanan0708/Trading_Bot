@@ -50,7 +50,7 @@ from app.retracement.models import (
 class SMCFibEngine:
     """Exact deterministic SMC With Fib Engine."""
 
-    def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int = 3, right_bars: int = 3):
+    def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int = 2, right_bars: int = 2):
         self.symbol = symbol
         self.timeframe = timeframe
         self.left_bars = left_bars
@@ -81,7 +81,7 @@ class SMCFibEngine:
         self.invalidation_reason: str | None = None
 
         self.candles_since_point_2: int = 0
-        self.max_expiry_candles: int = 45
+        self.max_expiry_candles: int = 200
 
         self.levels: dict[str, RetracementLevel] = {}
         self._events: list[RetracementEvent] = []
@@ -115,7 +115,7 @@ class SMCFibEngine:
     def process_candle(self, candle: Candle) -> None:
         """Process a newly closed candle in strict chronological order."""
         self._history.append(candle)
-        if len(self._history) < 30:
+        if len(self._history) < 20:
             return
 
         # Keep rolling window bounded
@@ -146,22 +146,34 @@ class SMCFibEngine:
 
         # Check for Bullish BOS (Price broke above previous confirmed swing high)
         if candle.close > last_high.price and last_high.index < len(self._history) - 1:
+            # Bullish anchor = LOWEST swing low of the preceding swing sequence (within 60 bars)
+            lows_before_bos = [
+                s for s in confirmed_lows
+                if s.index <= last_high.index and (last_high.index - s.index) <= 60
+            ]
+            anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_low
             self._initiate_setup(
                 direction=SignalDirection.LONG,
                 p1_price=last_high.price,
                 p1_ts=last_high.timestamp,
-                p2_price=last_low.price,
-                p2_ts=last_low.timestamp,
+                p2_price=anchor_low.price,
+                p2_ts=anchor_low.timestamp,
                 current_candle=candle,
             )
         # Check for Bearish BOS (Price broke below previous confirmed swing low)
         elif candle.close < last_low.price and last_low.index < len(self._history) - 1:
+            # Bearish anchor = HIGHEST swing high of the preceding swing sequence (within 60 bars)
+            highs_before_bos = [
+                s for s in confirmed_highs
+                if s.index <= last_low.index and (last_low.index - s.index) <= 60
+            ]
+            anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_high
             self._initiate_setup(
                 direction=SignalDirection.SHORT,
                 p1_price=last_low.price,
                 p1_ts=last_low.timestamp,
-                p2_price=last_high.price,
-                p2_ts=last_high.timestamp,
+                p2_price=anchor_high.price,
+                p2_ts=anchor_high.timestamp,
                 current_candle=candle,
             )
 
@@ -203,10 +215,11 @@ class SMCFibEngine:
             self.equilibrium_50 = round(lo + span * 0.500, 2)
             self.entry_price = round(lo + span * 0.320, 2)    # 0.680 retracement from top = (1 - 0.680) = 0.320 from base
             self.pocket_price = round(lo + span * 0.210, 2)   # 0.790 retracement from top = (1 - 0.790) = 0.210 from base
-            self.sl_price = round(lo - span * 0.05, 2)        # Invalidation below 1.000 base
+            self.sl_price = round(lo + span * 0.080, 2)       # 0.920 retracement from top = (1 - 0.920) = 0.080 from base
 
             self.levels = {
                 "1.000": RetracementLevel(ratio=1.000, price=lo, label="SWING_ANCHOR"),
+                "0.920": RetracementLevel(ratio=0.920, price=self.sl_price, label="STOP_LOSS"),
                 "0.790": RetracementLevel(ratio=0.790, price=self.pocket_price, label="GOLDEN_POCKET"),
                 "0.680": RetracementLevel(ratio=0.680, price=self.entry_price, label="ENTRY"),
                 "0.500": RetracementLevel(ratio=0.500, price=self.equilibrium_50, label="EQUILIBRIUM"),
@@ -224,10 +237,11 @@ class SMCFibEngine:
             self.equilibrium_50 = round(lo + span * 0.500, 2)
             self.entry_price = round(lo + span * 0.680, 2)    # 0.680 retracement up from bottom
             self.pocket_price = round(lo + span * 0.790, 2)   # 0.790 retracement up from bottom (Order Block)
-            self.sl_price = round(hi + span * 0.05, 2)        # Invalidation above 1.000 high
+            self.sl_price = round(lo + span * 0.920, 2)       # 0.920 retracement up from bottom (SL)
 
             self.levels = {
                 "1.000": RetracementLevel(ratio=1.000, price=hi, label="SWING_ANCHOR"),
+                "0.920": RetracementLevel(ratio=0.920, price=self.sl_price, label="STOP_LOSS"),
                 "0.790": RetracementLevel(ratio=0.790, price=self.pocket_price, label="GOLDEN_POCKET"),
                 "0.680": RetracementLevel(ratio=0.680, price=self.entry_price, label="ENTRY"),
                 "0.500": RetracementLevel(ratio=0.500, price=self.equilibrium_50, label="EQUILIBRIUM"),
@@ -236,9 +250,9 @@ class SMCFibEngine:
 
     def _track_and_check_entry(self, candle: Candle) -> None:
         self.candles_since_point_2 += 1
-        if self.candles_since_point_2 > self.max_expiry_candles:
+        if self.candles_since_point_2 > 200:
             self.state = RetracementState.INVALIDATED
-            self.invalidation_reason = f"Setup expired after {self.max_expiry_candles} candles without entry touch."
+            self.invalidation_reason = f"Setup expired after 200 candles without entry touch."
             return
 
         # 1. Update dynamic target if new extremes are formed before entry
