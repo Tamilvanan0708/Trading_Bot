@@ -103,39 +103,39 @@ class SMCFibMultiTFMonitor:
 
                 raw_results[tf] = slot.engine.to_dict(self.live_price)
 
-            # Step 2: MASTER CASCADING SELECTION (5M -> 15M -> 30M -> 1H -> 4H)
-            # Find the SINGLE authoritative active timeframe
-            cascading_active_tf = None
-
-            # 2a. Priority 1: First timeframe with an ACTIVE TRADE (Entry already touched)
+            # Step 2: WINNER-TAKES-ALL MASTER TRIGGER DETECTION
+            winner_tf = None
+            # 2a. Priority: Find the timeframe with an ACTIVE TRADE (Entry Touched)
             for tf in self.timeframes:
                 card = raw_results.get(tf) or {}
                 if card.get("is_trade_active"):
-                    cascading_active_tf = tf
+                    winner_tf = tf
                     break
 
-            # 2b. Priority 2: If no active trade, first timeframe WAITING FOR ENTRY
-            if cascading_active_tf is None:
+            # 2b. If no trade active yet, find the first timeframe WAITING FOR ENTRY
+            if winner_tf is None:
                 for tf in self.timeframes:
                     card = raw_results.get(tf) or {}
                     if card.get("is_entry_ready"):
-                        cascading_active_tf = tf
+                        winner_tf = tf
                         break
 
-            # Step 3: APPLY MASTER LOCK TO ALL OTHER TIMEFRAMES
-            # All other timeframes become STANDBY / LOCKED, showing no duplicate trade
+            # Step 3: PURGE NON-WINNERS & ENFORCE SINGLE-TRADE OUTPUT
             final_results: dict[str, Any] = {}
             for tf in self.timeframes:
                 card = raw_results.get(tf) or {}
-                is_this_tf_active = (cascading_active_tf == tf)
+                is_winner = (winner_tf == tf)
 
-                if is_this_tf_active:
+                if is_winner:
                     card["is_locked_by_cascade"] = False
                     card["cascade_status"] = "ACTIVE"
                     final_results[tf] = card
                 else:
-                    # Non-active timeframe: put on clean STANDBY so no false active trade shows
-                    lock_msg = f"STANDBY (Locked by {cascading_active_tf.upper()})" if cascading_active_tf else "STANDBY (Scanning in progress)"
+                    # Reset the slot engine so other timeframes hold NO pending or old trade
+                    if winner_tf is not None and card.get("is_trade_active"):
+                        self.slots[tf].engine.reset()
+
+                    lock_msg = f"STANDBY (Locked by {winner_tf.upper()})" if winner_tf else "STANDBY (Scanning in progress)"
                     final_results[tf] = {
                         "strategy": "SMC_WITH_FIB",
                         "symbol": self.symbol,

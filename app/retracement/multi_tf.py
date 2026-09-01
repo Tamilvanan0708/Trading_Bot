@@ -135,15 +135,14 @@ class RetracementMultiTFMonitor:
     # ------------------------------------------------------------------
 
     async def advance(self, db) -> dict[str, RetracementSetup | None]:
-        """Process any newly-closed candles on EVERY timeframe and persist each
-        independent state.
-
-        Returns ``{timeframe: active_setup_or_None}`` for all timeframes.
-        Cheap when no new candle has closed (no reprocessing happens).
+        """Process newly-closed candles on all timeframes with Winner-Takes-All Policy:
+        - If ANY timeframe triggers an entry touch, it instantly becomes the MASTER ACTIVE TRADE.
+        - All other timeframe setups are immediately PURGED / RESET to prevent multi-trade clutter.
+        - When the master active trade completes (TP/SL hit), scanning resumes across all timeframes.
         """
         async with self._lock:
             snap = await self._snapshot()
-            results: dict[str, RetracementSetup | None] = {}
+            raw_results: dict[str, RetracementSetup | None] = {}
             for tf in self.timeframes:
                 slot = self.slots[tf]
                 candles: list = []
@@ -155,7 +154,36 @@ class RetracementMultiTFMonitor:
                 else:
                     slot.data_status = "NO_DATA"
                     slot.has_live_data = False
-                results[tf] = self._advance_slot(slot, candles)
+                raw_results[tf] = self._advance_slot(slot, candles)
+
+            # --- WINNER-TAKES-ALL EXECUTION ENGINE ---
+            # 1. Check if any timeframe has triggered an ACTIVE ENTRY TOUCH
+            winner_tf: str | None = None
+            earliest_touch_ts = None
+
+            for tf in self.timeframes:
+                setup = raw_results.get(tf)
+                if setup and getattr(setup, "entry_touched", False) and not getattr(setup, "outcome", None):
+                    # Found an active trade
+                    touch_ts = getattr(setup, "entry_timestamp", None) or getattr(setup, "created_at", None)
+                    if winner_tf is None or (touch_ts and earliest_touch_ts and touch_ts < earliest_touch_ts):
+                        winner_tf = tf
+                        earliest_touch_ts = touch_ts
+
+            # 2. If a Winner Active Trade exists, PURGE / RESET all other timeframes immediately!
+            results: dict[str, RetracementSetup | None] = {}
+            if winner_tf is not None:
+                for tf in self.timeframes:
+                    if tf == winner_tf:
+                        results[tf] = raw_results[tf]
+                    else:
+                        # Reset the non-winner slot engine so it holds NO active trade or pending setup
+                        self.slots[tf].engine.reset()
+                        results[tf] = None
+            else:
+                # No active trade running yet -> Keep scanning setups on all timeframes
+                results = raw_results
+
             await self._persist(db)
             return results
 
