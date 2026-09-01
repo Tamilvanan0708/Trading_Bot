@@ -2821,7 +2821,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
           <span>📈 LIVE CHART</span>
           <span class="muted" style="font-size:11px">${TF_LABELS[selectedTf]} · Fibonacci Levels</span>
         </div>
-        <div id="fib-chart-${strategyKey}-${selectedTf}" style="width:100%;height:380px;background:var(--bg-card,#1a1d26);border-radius:0 0 6px 6px;"></div>
+        <div id="fib-chart-${strategyType}-${selectedTf}" style="width:100%;height:380px;background:var(--bg-card,#1a1d26);border-radius:0 0 6px 6px;"></div>
       </div>
 
       <!-- METRICS & FIBONACCI TABLE -->
@@ -2850,7 +2850,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
 
   // After HTML is rendered, draw the chart
   setTimeout(() => {
-    drawFibChart(`fib-chart-${strategyKey}-${selectedTf}`, selectedTf, strategyKey);
+    drawFibChart(`fib-chart-${strategyType}-${selectedTf}`, selectedTf, strategyType);
   }, 80);
 }
 
