@@ -406,7 +406,7 @@ async def advance_forward(symbol: str = "XAUUSD", timeframe: str = "15m"):
 def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict,
                                slots: dict, strategy_label: str) -> dict:
     """Build the unified strategy dashboard payload for either strategy panel with Strict 1-Trade Cascading Lock."""
-    TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h", "4h"]
+    TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h"] if strategy_label == "FIB_WITH_RETRACEMENT" else ["5m", "15m", "30m", "1h", "4h"]
     raw_cards = {}
     cascading_active_tf = None
 

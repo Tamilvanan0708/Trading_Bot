@@ -36,19 +36,17 @@ from typing import Any
 from app.core.constants import TimeFrame
 from app.core.logging import logger
 from app.data.live.service import get_live_service
-from app.retracement.engine import RetracementBOSEngine
+from app.retracement.dual_engine import DualRetracementEngine
 from app.retracement.models import RetracementSetup, RetracementState
 from app.retracement.repository import RetracementRepository
 
-# Timeframes monitored continuously and independently.
-# Order matters: 5m → 15m → 30m → 1h → 4h (cascading entry scan order)
-DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h"]
+# Timeframes monitored continuously: 5m → 15m → 30m → 1h (4H REMOVED per user request)
+DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h"]
 TF_MAP: dict[str, TimeFrame] = {
     "5m": TimeFrame.M5,
     "15m": TimeFrame.M15,
     "30m": TimeFrame.M30,
     "1h": TimeFrame.H1,
-    "4h": TimeFrame.H4,
 }
 
 _instances: dict[str, RetracementMultiTFMonitor] = {}
@@ -78,11 +76,11 @@ def _same_setup(a: RetracementSetup, b: RetracementSetup) -> bool:
 
 
 class _TFSlot:
-    """One independent timeframe slot: its own engine + tracking state."""
+    """One independent timeframe slot: its own dual engine + tracking state."""
 
     def __init__(self, symbol: str, timeframe: str) -> None:
         self.timeframe = timeframe
-        self.engine = RetracementBOSEngine(symbol=symbol, timeframe=timeframe)
+        self.engine = DualRetracementEngine(symbol=symbol, timeframe=timeframe)
         self.last_processed_ts: datetime | None = None
         self.last_completed: RetracementSetup | None = None
         self.live_price: float | None = None

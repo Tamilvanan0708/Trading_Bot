@@ -2625,9 +2625,9 @@ window.setStrategyTf = function(tf) {
 };
 
 function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strategyType) {
-  const TFS = ["5m", "15m", "30m", "1h", "4h"];
+  const TFS = strategyType === "FIB_WITH_RETRACEMENT" ? ["5m", "15m", "30m", "1h"] : ["5m", "15m", "30m", "1h", "4h"];
   const TF_LABELS = {"5m":"5M", "15m":"15M", "30m":"30M", "1h":"1H", "4h":"4H"};
-  const selectedTf = window.__selectedStrategyTf || "15m";
+  const selectedTf = window.__selectedStrategyTf && TFS.includes(window.__selectedStrategyTf) ? window.__selectedStrategyTf : "15m";
 
   function renderTimeline(state) {
     const steps = [
