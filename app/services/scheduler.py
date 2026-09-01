@@ -408,16 +408,66 @@ class AnalysisScheduler:
                     await self._send_signal_alert_with_metadata(result, signal_payload, ai_validation, regime, session=session)
 
             # ------------------------------------------------------------------
-            # 5a. CUSTOM USER STRATEGIES INTEGRATION (SMC With Fib & Fib Retracement)
-            #     Cascades 5m -> 15m -> 30m -> 1h -> 4h. If an entry is touched on ANY
-            #     timeframe, instantly register it in Signals table & open a Paper Trade!
+            # 5a. CUSTOM USER STRATEGIES INTEGRATION (Fib With Retracement & SMC With Fib)
+            #     Cascades 5m -> 15m -> 30m -> 1h (and 4h for SMC).
+            #     If an entry is touched on ANY timeframe, instantly register it in
+            #     Signals table & open a live Paper Trading position!
             # ------------------------------------------------------------------
             try:
+                # 1. FIB WITH RETRACEMENT (Dual-Direction Bullish & Bearish 5m -> 15m -> 30m -> 1h)
+                from app.retracement.multi_tf import get_retracement_multi_tf_service
+                fib_svc = get_retracement_multi_tf_service(symbol)
+                fib_states = await fib_svc.advance(session)
+
+                for tf_name in ["5m", "15m", "30m", "1h"]:
+                    setup_obj = fib_states.get(tf_name)
+                    if setup_obj and getattr(setup_obj, "entry_touched", False) and getattr(setup_obj, "entry_price", None):
+                        entry_px = float(setup_obj.entry_price)
+                        sl_px = float(setup_obj.sl_price or (entry_px - 20.0))
+                        tp_px = float(setup_obj.locked_tp or setup_obj.dynamic_tp or (entry_px + 30.0))
+                        dir_str = str(getattr(setup_obj, "direction", "LONG")).upper()
+                        sig_id = f"FIB_RETR_{tf_name.upper()}_{int(latest_candle.timestamp.timestamp())}"
+
+                        existing_sig = await repo.get_signal_by_id(sig_id)
+                        if existing_sig is None:
+                            from app.core.constants import MarketBias, SignalQuality, StrategyType
+                            from app.signals.models import SignalPayload
+
+                            custom_sig = SignalPayload(
+                                signal_id=sig_id,
+                                instrument=symbol,
+                                direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
+                                strategy=StrategyType.RETRACEMENT,
+                                timeframe=tf_name,
+                                timestamp=latest_candle.timestamp,
+                                entry=entry_px,
+                                stop_loss=sl_px,
+                                take_profit_1=tp_px,
+                                take_profit_2=tp_px,
+                                take_profit_3=tp_px,
+                                risk_reward=round(abs(tp_px - entry_px) / max(0.1, abs(entry_px - sl_px)), 2),
+                                confidence_score=0.95,
+                                signal_quality=SignalQuality.VERY_STRONG,
+                                market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
+                                strategy_version="RETRACEMENT_BOS_V2",
+                                reasons=[f"Fib BOS 0.618 Retracement Triggered on {tf_name.upper()} ({dir_str})"],
+                            )
+                            await repo.save_signal(custom_sig.model_dump(mode="json"))
+
+                            if self.settings.PAPER_TRADING_ENABLED:
+                                opened_pos = await self.pipeline.paper_service.open_position_from_signal(
+                                    custom_sig, repo=repo
+                                )
+                                if opened_pos:
+                                    logger.info("[FIB-RETRACEMENT] Opened paper trade %s %s on %s @ %.2f (id=%s)",
+                                                dir_str, symbol, tf_name, entry_px, opened_pos.position_id)
+                        break
+
+                # 2. SMC WITH FIB (Golden Pocket 0.68 / 0.79 / 0.92 SL)
                 from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
                 smc_svc = get_smc_fib_multi_tf_service(symbol)
                 smc_states = await smc_svc.advance(session)
 
-                # Find the single active cascading setup (Priority: 5M -> 15M -> 30M -> 1H -> 4H)
                 for tf_name in ["5m", "15m", "30m", "1h", "4h"]:
                     st_card = smc_states.get(tf_name) or {}
                     if st_card.get("is_trade_active") and st_card.get("entry", {}).get("price"):
@@ -427,10 +477,8 @@ class AnalysisScheduler:
                         dir_str = st_card.get("direction", "LONG")
                         sig_id = f"SMC_FIB_{tf_name.upper()}_{int(latest_candle.timestamp.timestamp())}"
 
-                        # Check if this signal already exists to prevent duplication
                         existing_sig = await repo.get_signal_by_id(sig_id)
                         if existing_sig is None:
-                            # 1. Save to Signals Table
                             from app.core.constants import MarketBias, SignalQuality, StrategyType
                             from app.signals.models import SignalPayload
 
@@ -451,21 +499,20 @@ class AnalysisScheduler:
                                 signal_quality=SignalQuality.VERY_STRONG,
                                 market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
                                 strategy_version="SMC_WITH_FIB_V1",
-                                reasons=[f"SMC 0.68 Golden Pocket Retracement on {tf_name.upper()}"],
+                                reasons=[f"SMC 0.68 Golden Pocket Retracement on {tf_name.upper()} ({dir_str})"],
                             )
                             await repo.save_signal(custom_sig.model_dump(mode="json"))
 
-                            # 2. Open Paper Position
                             if self.settings.PAPER_TRADING_ENABLED:
                                 opened_pos = await self.pipeline.paper_service.open_position_from_signal(
                                     custom_sig, repo=repo
                                 )
                                 if opened_pos:
-                                    logger.info("[SMC-FIB] Opened cascading paper trade %s %s on %s @ %.2f",
-                                                dir_str, symbol, tf_name, entry_px)
+                                    logger.info("[SMC-FIB] Opened paper trade %s %s on %s @ %.2f (id=%s)",
+                                                dir_str, symbol, tf_name, entry_px, opened_pos.position_id)
                         break
-            except Exception as smc_sched_exc:  # noqa: BLE001
-                logger.warning("[SMC-FIB] scheduler integration exception: %s", smc_sched_exc)
+            except Exception as strat_sched_exc:  # noqa: BLE001
+                logger.warning("[STRATEGY-SCHED] auto paper trade integration exception: %s", strat_sched_exc)
 
             await session.commit()
             self._last_processed_ts = latest_candle.timestamp
