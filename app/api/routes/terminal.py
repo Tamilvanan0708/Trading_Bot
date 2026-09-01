@@ -57,6 +57,7 @@ async def serve_terminal_index():
     ver = int(time.time())
     for asset in (
         "/terminal/static/css/terminal.css",
+        "/terminal/static/js/lightweight-charts.js",
         "/terminal/static/js/api.js",
         "/terminal/static/js/ui.js",
         "/terminal/static/js/charts.js",

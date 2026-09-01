@@ -2860,7 +2860,11 @@ const _chartInstances = {};
 
 async function drawFibChart(containerId, tf, strategyKey) {
   const container = document.getElementById(containerId);
-  if (!container || typeof LightweightCharts === "undefined") return;
+  if (!container) return;
+  if (typeof LightweightCharts === "undefined") {
+    container.innerHTML = '<div style="padding:20px;color:#ef5350;font-size:12px">Error: Charting library failed to load.</div>';
+    return;
+  }
 
   // Destroy existing chart if re-rendering
   if (_chartInstances[containerId]) {
@@ -2886,101 +2890,106 @@ async function drawFibChart(containerId, tf, strategyKey) {
 
   container.innerHTML = "";
 
-  const chart = LightweightCharts.createChart(container, {
-    width: container.clientWidth,
-    height: 380,
-    layout: { background: { color: "#12141c" }, textColor: "#c8cde6" },
-    grid: { vertLines: { color: "#1e2130" }, horzLines: { color: "#1e2130" } },
-    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor: "#2a2d3e" },
-    timeScale: { borderColor: "#2a2d3e", timeVisible: true, secondsVisible: false },
-  });
-  _chartInstances[containerId] = chart;
-
-  // Candlestick series
-  const candleSeries = chart.addCandlestickSeries({
-    upColor: "#26a69a", downColor: "#ef5350",
-    borderUpColor: "#26a69a", borderDownColor: "#ef5350",
-    wickUpColor: "#26a69a", wickDownColor: "#ef5350",
-  });
-  candleSeries.setData(candles);
-
-  // Draw Fibonacci levels for the active strategy
-  const isSmc = strategyKey === "SMC_WITH_FIB";
-  const levs = isSmc ? data.fib_levels?.smc_fib : data.fib_levels?.fib_retracement;
-  const lp = data.live_price;
-
-  if (levs && Object.keys(levs).length > 0) {
-    const dir = levs.direction;
-    const isShort = dir === "SHORT" || dir === "BEARISH";
-    const firstTs = candles[0]?.time;
-    const lastTs = candles[candles.length - 1]?.time;
-
-    // Level definitions for SMC With Fib (SHORT)
-    const smcLevels = [
-      { price: levs.anchor, label: "1.000 ANCHOR", color: "#ef5350", dash: false },
-      { price: levs.sl, label: "0.920 SL", color: "#ef5350", dash: true },
-      { price: levs.pocket, label: "0.790 GOLDEN POCKET", color: "#ff9800", dash: true },
-      { price: levs.entry, label: "0.680 ENTRY", color: "#ffffff", dash: false },
-      { price: levs.equilibrium, label: "0.500 EQ", color: "#5c9bd6", dash: true },
-      { price: levs.tp, label: "0.000 TP", color: "#26a69a", dash: false },
-    ];
-    // Level definitions for Fib With Retracement (SHORT)
-    const retrLevels = [
-      { price: levs.anchor, label: "0.000 ANCHOR", color: "#ef5350", dash: false },
-      { price: levs.sl, label: "0.236 SL", color: "#ef5350", dash: true },
-      { price: levs.entry, label: "0.618 ENTRY", color: "#ffffff", dash: false },
-      { price: levs.tp, label: "1.000 TP", color: "#26a69a", dash: false },
-    ];
-
-    const levelDefs = isSmc ? smcLevels : retrLevels;
-
-    levelDefs.forEach(lev => {
-      if (!lev.price) return;
-      chart.addLineSeries({
-        color: lev.color,
-        lineWidth: lev.dash ? 1 : 2,
-        lineStyle: lev.dash ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
-        priceLineVisible: true,
-        lastValueVisible: true,
-        title: lev.label,
-        crosshairMarkerVisible: false,
-      }).setData([{ time: firstTs, value: lev.price }, { time: lastTs, value: lev.price }]);
+  try {
+    const chart = LightweightCharts.createChart(container, {
+      width: container.clientWidth,
+      height: 380,
+      layout: { background: { type: 'solid', color: "#12141c" }, textColor: "#c8cde6" },
+      grid: { vertLines: { color: "#1e2130" }, horzLines: { color: "#1e2130" } },
+      crosshair: { mode: LightweightCharts.CrosshairMode ? LightweightCharts.CrosshairMode.Normal : 0 },
+      rightPriceScale: { borderColor: "#2a2d3e" },
+      timeScale: { borderColor: "#2a2d3e", timeVisible: true, secondsVisible: false },
     });
+    _chartInstances[containerId] = chart;
 
-    // SL zone fill (red tint between anchor and entry)
-    if (levs.sl && levs.anchor && isSmc) {
-      const slZone = chart.addLineSeries({ color: "rgba(239,83,80,0.08)", lineWidth: 0, title: "" });
-      slZone.setData([{ time: firstTs, value: levs.sl }, { time: lastTs, value: levs.sl }]);
-    }
-
-    // TP zone fill (green tint between entry and TP)
-    if (levs.tp && levs.entry && isSmc) {
-      const tpZone = chart.addLineSeries({ color: "rgba(38,166,154,0.08)", lineWidth: 0, title: "" });
-      tpZone.setData([{ time: firstTs, value: levs.tp }, { time: lastTs, value: levs.tp }]);
-    }
-  }
-
-  // Live price line
-  if (lp) {
-    candleSeries.createPriceLine({
-      price: lp,
-      color: "#f0b90b",
-      lineWidth: 1,
-      lineStyle: LightweightCharts.LineStyle.Dotted,
-      axisLabelVisible: true,
-      title: `LIVE $${Number(lp).toFixed(2)}`,
+    // Candlestick series
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#26a69a", downColor: "#ef5350",
+      borderUpColor: "#26a69a", borderDownColor: "#ef5350",
+      wickUpColor: "#26a69a", wickDownColor: "#ef5350",
     });
-  }
+    candleSeries.setData(candles);
 
-  chart.timeScale().fitContent();
+    // Draw Fibonacci levels for the active strategy
+    const isSmc = strategyKey === "SMC_WITH_FIB";
+    const levs = isSmc ? data.fib_levels?.smc_fib : data.fib_levels?.fib_retracement;
+    const lp = data.live_price;
 
-  // Responsive resize
-  const ro = new ResizeObserver(entries => {
-    for (const e of entries) {
-      chart.resize(e.contentRect.width, 380);
+    if (levs && Object.keys(levs).length > 0) {
+      const dir = levs.direction;
+      const isShort = dir === "SHORT" || dir === "BEARISH";
+      const firstTs = candles[0]?.time;
+      const lastTs = candles[candles.length - 1]?.time;
+
+      // Level definitions for SMC With Fib (SHORT)
+      const smcLevels = [
+        { price: levs.anchor, label: "1.000 ANCHOR", color: "#ef5350", dash: false },
+        { price: levs.sl, label: "0.920 SL", color: "#ef5350", dash: true },
+        { price: levs.pocket, label: "0.790 GOLDEN POCKET", color: "#ff9800", dash: true },
+        { price: levs.entry, label: "0.680 ENTRY", color: "#ffffff", dash: false },
+        { price: levs.equilibrium, label: "0.500 EQ", color: "#5c9bd6", dash: true },
+        { price: levs.tp, label: "0.000 TP", color: "#26a69a", dash: false },
+      ];
+      // Level definitions for Fib With Retracement (SHORT)
+      const retrLevels = [
+        { price: levs.anchor, label: "0.000 ANCHOR", color: "#ef5350", dash: false },
+        { price: levs.sl, label: "0.236 SL", color: "#ef5350", dash: true },
+        { price: levs.entry, label: "0.618 ENTRY", color: "#ffffff", dash: false },
+        { price: levs.tp, label: "1.000 TP", color: "#26a69a", dash: false },
+      ];
+
+      const levelDefs = isSmc ? smcLevels : retrLevels;
+
+      levelDefs.forEach(lev => {
+        if (!lev.price) return;
+        chart.addLineSeries({
+          color: lev.color,
+          lineWidth: lev.dash ? 1 : 2,
+          lineStyle: lev.dash ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
+          priceLineVisible: true,
+          lastValueVisible: true,
+          title: lev.label,
+          crosshairMarkerVisible: false,
+        }).setData([{ time: firstTs, value: lev.price }, { time: lastTs, value: lev.price }]);
+      });
+
+      // SL zone fill (red tint between anchor and entry)
+      if (levs.sl && levs.anchor && isSmc) {
+        const slZone = chart.addLineSeries({ color: "rgba(239,83,80,0.08)", lineWidth: 0, title: "" });
+        slZone.setData([{ time: firstTs, value: levs.sl }, { time: lastTs, value: levs.sl }]);
+      }
+
+      // TP zone fill (green tint between entry and TP)
+      if (levs.tp && levs.entry && isSmc) {
+        const tpZone = chart.addLineSeries({ color: "rgba(38,166,154,0.08)", lineWidth: 0, title: "" });
+        tpZone.setData([{ time: firstTs, value: levs.tp }, { time: lastTs, value: levs.tp }]);
+      }
     }
-  });
+
+    // Live price line
+    if (lp) {
+      candleSeries.createPriceLine({
+        price: lp,
+        color: "#f0b90b",
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: `LIVE $${Number(lp).toFixed(2)}`,
+      });
+    }
+
+    chart.timeScale().fitContent();
+
+    // Responsive resize
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) {
+        chart.resize(e.contentRect.width, 380);
+      }
+    });
+    ro.observe(container);
+  } catch (err) {
+    container.innerHTML = `<div style="padding:20px;color:#ef5350;font-size:12px;font-family:monospace;white-space:pre-wrap">Chart Error: ${err.message}\n${err.stack}</div>`;
+  }
   ro.observe(container);
 }
 
