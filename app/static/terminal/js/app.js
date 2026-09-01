@@ -2659,10 +2659,15 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
 
     const chips = steps.map(([label, key], i) => {
       let cls = "tl-step";
+      let labelTxt = label;
       if (activeIdx === -1) cls += " tl-idle";
       else if (i < activeIdx) cls += " tl-done";
       else if (i === activeIdx) cls += " tl-active";
-      return `<div class="${cls}">${label}</div>`;
+
+      if (key === "COMPLETED" && activeIdx === 6) {
+        if (s === "COMPLETED") labelTxt = "OUTCOME ✓";
+      }
+      return `<div class="${cls}">${labelTxt}</div>`;
     }).join(`<div class="tl-arrow">→</div>`);
 
     return `<div class="tl-wrap" style="margin-bottom:var(--sp-2)">${chips}</div>`;
