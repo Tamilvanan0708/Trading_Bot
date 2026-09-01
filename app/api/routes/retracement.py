@@ -438,48 +438,53 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
                 cascading_active_tf = tf
                 break
 
-    # Step 3: Apply Master Lock to all non-active timeframes
+    # Step 3: Apply Master Lock to non-active timeframes ONLY when a trade is actively running
     tf_cards = {}
     for tf in TIMEFRAMES_ORDER:
         card = raw_cards[tf]
-        is_this_tf_active = (cascading_active_tf == tf)
-        if is_this_tf_active:
-            card["is_locked_by_cascade"] = False
-            card["cascade_status"] = "ACTIVE"
-            tf_cards[tf] = card
+        if cascading_active_tf is not None:
+            # A trade is active -> Lock other timeframes
+            if cascading_active_tf == tf:
+                card["is_locked_by_cascade"] = False
+                card["cascade_status"] = "ACTIVE"
+                tf_cards[tf] = card
+            else:
+                tf_cards[tf] = {
+                    "strategy": strategy_label,
+                    "symbol": symbol,
+                    "timeframe": tf,
+                    "state": "NO_SETUP",
+                    "spec_state": "WAITING_FOR_BOS",
+                    "direction": card.get("direction", "LONG"),
+                    "has_live_data": card.get("has_live_data", False),
+                    "is_entry_ready": False,
+                    "is_entry_touched": False,
+                    "is_trade_active": False,
+                    "is_locked_by_cascade": True,
+                    "cascade_status": f"STANDBY (Locked by {cascading_active_tf.upper()})",
+                    "entry": None,
+                    "sl": None,
+                    "tp": {"dynamic": None, "locked": None, "is_locked": False},
+                    "point_1": None,
+                    "point_2": None,
+                    "bos": None,
+                    "levels": {},
+                    "metrics": {
+                        "total_range_pts": 0.0,
+                        "entry_to_tp_pts": 0.0,
+                        "entry_to_sl_pts": 0.0,
+                        "rr_ratio": 2.83,
+                        "current_movement_pts": 0.0,
+                    },
+                    "data_quality": "HEALTHY",
+                    "live_price": live_price,
+                    "data_status": data_status,
+                }
         else:
-            lock_msg = f"STANDBY (Locked by {cascading_active_tf.upper()})" if cascading_active_tf else "STANDBY (Scanning in progress)"
-            tf_cards[tf] = {
-                "strategy": strategy_label,
-                "symbol": symbol,
-                "timeframe": tf,
-                "state": "NO_SETUP",
-                "spec_state": "WAITING_FOR_BOS",
-                "direction": card.get("direction", "LONG"),
-                "has_live_data": card.get("has_live_data", False),
-                "is_entry_ready": False,
-                "is_entry_touched": False,
-                "is_trade_active": False,
-                "is_locked_by_cascade": True,
-                "cascade_status": lock_msg,
-                "entry": None,
-                "sl": None,
-                "tp": {"dynamic": None, "locked": None, "is_locked": False},
-                "point_1": None,
-                "point_2": None,
-                "bos": None,
-                "levels": {},
-                "metrics": {
-                    "total_range_pts": 0.0,
-                    "entry_to_tp_pts": 0.0,
-                    "entry_to_sl_pts": 0.0,
-                    "rr_ratio": 2.83,
-                    "current_movement_pts": 0.0,
-                },
-                "data_quality": "HEALTHY",
-                "live_price": live_price,
-                "data_status": data_status,
-            }
+            # Scanning in progress -> Show each timeframe's current setup & Fibonacci levels!
+            card["is_locked_by_cascade"] = False
+            card["cascade_status"] = "SCANNING"
+            tf_cards[tf] = card
 
     return {
         "strategy": strategy_label,

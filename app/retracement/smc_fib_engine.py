@@ -87,8 +87,8 @@ class SMCFibEngine:
         self._events: list[RetracementEvent] = []
         self._history: list[Candle] = []
 
-    def reset(self) -> None:
-        """Reset state machine."""
+    def _reset_setup(self) -> None:
+        """Clear setup variables while preserving candle history for continuous scanning."""
         self.state = RetracementState.NO_SETUP
         self.setup_id = None
         self.point_1_price = None
@@ -111,7 +111,6 @@ class SMCFibEngine:
         self.candles_since_point_2 = 0
         self.levels = {}
         self._events = []
-        self._history = []
 
     def process_candle(self, candle: Candle) -> None:
         """Process a newly closed candle in strict chronological order."""
@@ -122,6 +121,10 @@ class SMCFibEngine:
         # Keep rolling window bounded
         if len(self._history) > 300:
             self._history = self._history[-300:]
+
+        if self.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
+            # Previous trade is finished -> Auto-clear to scan fresh BOS setup
+            self._reset_setup()
 
         if self.state == RetracementState.NO_SETUP:
             self._detect_setup(candle)

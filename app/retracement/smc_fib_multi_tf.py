@@ -104,66 +104,58 @@ class SMCFibMultiTFMonitor:
                 raw_results[tf] = slot.engine.to_dict(self.live_price)
 
             # Step 2: WINNER-TAKES-ALL MASTER TRIGGER DETECTION
-            winner_tf = None
-            # 2a. Priority: Find the timeframe with an ACTIVE TRADE (Entry Touched)
+            active_trade_tf = None
             for tf in self.timeframes:
                 card = raw_results.get(tf) or {}
                 if card.get("is_trade_active"):
-                    winner_tf = tf
+                    active_trade_tf = tf
                     break
 
-            # 2b. If no trade active yet, find the first timeframe WAITING FOR ENTRY
-            if winner_tf is None:
-                for tf in self.timeframes:
-                    card = raw_results.get(tf) or {}
-                    if card.get("is_entry_ready"):
-                        winner_tf = tf
-                        break
-
-            # Step 3: PURGE NON-WINNERS & ENFORCE SINGLE-TRADE OUTPUT
+            # Step 3: OUTPUT SELECTION
             final_results: dict[str, Any] = {}
             for tf in self.timeframes:
                 card = raw_results.get(tf) or {}
-                is_winner = (winner_tf == tf)
 
-                if is_winner:
-                    card["is_locked_by_cascade"] = False
-                    card["cascade_status"] = "ACTIVE"
-                    final_results[tf] = card
+                if active_trade_tf is not None:
+                    # An active trade is running -> Only winner shows active, others standby
+                    if tf == active_trade_tf:
+                        card["is_locked_by_cascade"] = False
+                        card["cascade_status"] = "ACTIVE"
+                        final_results[tf] = card
+                    else:
+                        final_results[tf] = {
+                            "strategy": "SMC_WITH_FIB",
+                            "symbol": self.symbol,
+                            "timeframe": tf,
+                            "state": "NO_SETUP",
+                            "direction": card.get("direction", "LONG"),
+                            "has_live_data": card.get("has_live_data", False),
+                            "is_entry_ready": False,
+                            "is_entry_touched": False,
+                            "is_trade_active": False,
+                            "is_locked_by_cascade": True,
+                            "cascade_status": f"STANDBY (Locked by {active_trade_tf.upper()})",
+                            "entry": {"price": None, "touched": False},
+                            "sl": {"price": None},
+                            "tp": {"price": None, "dynamic": None, "locked": None, "is_locked": False},
+                            "point_1": {"price": None},
+                            "point_2": {"price": None},
+                            "bos": {"price": None},
+                            "levels": {},
+                            "metrics": {
+                                "total_range_pts": 0.0,
+                                "entry_to_tp_pts": 0.0,
+                                "entry_to_sl_pts": 0.0,
+                                "rr_ratio": 2.83,
+                                "current_movement_pts": 0.0,
+                            },
+                            "smc": card.get("smc", {}),
+                        }
                 else:
-                    # Reset the slot engine so other timeframes hold NO pending or old trade
-                    if winner_tf is not None and card.get("is_trade_active"):
-                        self.slots[tf].engine.reset()
-
-                    lock_msg = f"STANDBY (Locked by {winner_tf.upper()})" if winner_tf else "STANDBY (Scanning in progress)"
-                    final_results[tf] = {
-                        "strategy": "SMC_WITH_FIB",
-                        "symbol": self.symbol,
-                        "timeframe": tf,
-                        "state": "NO_SETUP",
-                        "direction": card.get("direction", "LONG"),
-                        "has_live_data": card.get("has_live_data", False),
-                        "is_entry_ready": False,
-                        "is_entry_touched": False,
-                        "is_trade_active": False,
-                        "is_locked_by_cascade": True,
-                        "cascade_status": lock_msg,
-                        "entry": {"price": None, "touched": False},
-                        "sl": {"price": None},
-                        "tp": {"price": None, "dynamic": None, "locked": None, "is_locked": False},
-                        "point_1": {"price": None},
-                        "point_2": {"price": None},
-                        "bos": {"price": None},
-                        "levels": {},
-                        "metrics": {
-                            "total_range_pts": 0.0,
-                            "entry_to_tp_pts": 0.0,
-                            "entry_to_sl_pts": 0.0,
-                            "rr_ratio": 2.83,
-                            "current_movement_pts": 0.0,
-                        },
-                        "smc": card.get("smc", {}),
-                    }
+                    # No trade is active yet -> Show each timeframe's current setup & Fibonacci levels so user can see the setups!
+                    card["is_locked_by_cascade"] = False
+                    card["cascade_status"] = "SCANNING"
+                    final_results[tf] = card
 
             return final_results
 
