@@ -407,6 +407,66 @@ class AnalysisScheduler:
                 else:
                     await self._send_signal_alert_with_metadata(result, signal_payload, ai_validation, regime, session=session)
 
+            # ------------------------------------------------------------------
+            # 5a. CUSTOM USER STRATEGIES INTEGRATION (SMC With Fib & Fib Retracement)
+            #     Cascades 5m -> 15m -> 30m -> 1h -> 4h. If an entry is touched on ANY
+            #     timeframe, instantly register it in Signals table & open a Paper Trade!
+            # ------------------------------------------------------------------
+            try:
+                from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
+                smc_svc = get_smc_fib_multi_tf_service(symbol)
+                smc_states = await smc_svc.advance(session)
+
+                # Find the single active cascading setup (Priority: 5M -> 15M -> 30M -> 1H -> 4H)
+                for tf_name in ["5m", "15m", "30m", "1h", "4h"]:
+                    st_card = smc_states.get(tf_name) or {}
+                    if st_card.get("is_trade_active") and st_card.get("entry", {}).get("price"):
+                        entry_px = float(st_card["entry"]["price"])
+                        sl_px = float(st_card["sl"]["price"])
+                        tp_px = float(st_card["tp"]["price"])
+                        dir_str = st_card.get("direction", "LONG")
+                        sig_id = f"SMC_FIB_{tf_name.upper()}_{int(latest_candle.timestamp.timestamp())}"
+
+                        # Check if this signal already exists to prevent duplication
+                        existing_sig = await repo.get_signal_by_id(sig_id)
+                        if existing_sig is None:
+                            # 1. Save to Signals Table
+                            from app.core.constants import MarketBias, SignalDirection, SignalQuality, StrategyType
+                            from app.signals.models import SignalPayload
+
+                            custom_sig = SignalPayload(
+                                signal_id=sig_id,
+                                instrument=symbol,
+                                direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
+                                strategy=StrategyType.SMC,
+                                timeframe=tf_name,
+                                timestamp=latest_candle.timestamp,
+                                entry=entry_px,
+                                stop_loss=sl_px,
+                                take_profit_1=tp_px,
+                                take_profit_2=tp_px,
+                                take_profit_3=tp_px,
+                                risk_reward=float(st_card.get("metrics", {}).get("rr_ratio", 2.83)),
+                                confidence_score=0.92,
+                                signal_quality=SignalQuality.VERY_STRONG,
+                                market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
+                                strategy_version="SMC_WITH_FIB_V1",
+                                reasons=[f"SMC 0.68 Golden Pocket Retracement on {tf_name.upper()}"],
+                            )
+                            await repo.save_signal(custom_sig.model_dump(mode="json"))
+
+                            # 2. Open Paper Position
+                            if self.settings.PAPER_TRADING_ENABLED:
+                                opened_pos = await self.pipeline.paper_service.open_position_from_signal(
+                                    custom_sig, repo=repo
+                                )
+                                if opened_pos:
+                                    logger.info("[SMC-FIB] Opened cascading paper trade %s %s on %s @ %.2f",
+                                                dir_str, symbol, tf_name, entry_px)
+                        break
+            except Exception as smc_sched_exc:  # noqa: BLE001
+                logger.warning("[SMC-FIB] scheduler integration exception: %s", smc_sched_exc)
+
             await session.commit()
             self._last_processed_ts = latest_candle.timestamp
             logger.info("Scheduler: finished candle %s.", latest_candle.timestamp)

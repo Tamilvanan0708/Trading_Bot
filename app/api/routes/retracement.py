@@ -478,6 +478,9 @@ async def get_fib_retracement_dashboard(
         strategy_label="FIB_WITH_RETRACEMENT")
 
 
+from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
+
+
 @router.get("/strategy/smc-fib/{symbol}")
 async def get_smc_fib_dashboard(
     symbol: str = "XAUUSD",
@@ -485,220 +488,56 @@ async def get_smc_fib_dashboard(
 ):
     """Dashboard endpoint for the dedicated 'SMC With Fib' strategy panel.
 
-    Runs true Smart Money Concepts (SMC) analysis across 5 timeframes:
-    - 4H/1H Market Bias + CHoCH/BOS detection
-    - Premium (Sell) vs Discount (Buy) 50% Equilibrium Zone
-    - Order Blocks & Fair Value Gaps (FVG)
-    - Exact User Fibonacci Model:
-        * Entry: 0.68 - 0.79 Golden Pocket (Retracement inside Order Block)
-        * Stop Loss (SL): 0.92 Fib (Above/Below Order Block invalidation)
-        * Take Profit (TP): 0.0 Fib (Previous Major Swing Liquidity)
-        * Extension: 1.0 Fib (Swing Anchor)
+    Runs exact SMC + Fibonacci State Machine with Strict Cascading & 1-Active-Trade Policy:
+    - Cascading Scan: 5M -> 15M -> 30M -> 1H -> 4H.
+    - If lower TF has an active trade (e.g. 5M), it locks as the primary active trade.
+    - Higher timeframes remain on STANDBY until the active trade completes.
+    - Replicates exact Retracement BOS state machine for accurate timeline & metrics.
     """
     live_price = None
     data_status = "NO_DATA"
-    snap = None
     try:
         ls = get_live_service()
         live_price = await ls.get_latest_price(symbol)
         dq = await ls.data_quality()
         data_status = "HEALTHY" if (dq.connected and not dq.degraded) else (
             "HISTORICAL" if dq.historical_available else "NO_DATA")
-        snap = await ls.get_multi_timeframe_snapshot(symbol, include_forming=False, m15_limit=500)
     except Exception:  # noqa: BLE001
         pass
 
-    from app.core.constants import TimeFrame, ZoneType, StructureType
-    from app.smc.detector import SMCEngine
-
     TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h", "4h"]
-    tf_enum_map = {
-        "5m": TimeFrame.M5,
-        "15m": TimeFrame.M15,
-        "30m": TimeFrame.M30,
-        "1h": TimeFrame.H1,
-        "4h": TimeFrame.H4,
-    }
+    smc_multi = get_smc_fib_multi_tf_service(symbol)
+    try:
+        states = await smc_multi.advance(db)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[SMC-FIB] multi-tf advance error: %s", exc)
+        states = {tf: smc_multi.slots[tf].engine.to_dict(live_price) for tf in TIMEFRAMES_ORDER}
 
-    smc_engine = SMCEngine(left_bars=3, right_bars=3)
-    tf_cards = {}
     cascading_active_tf = None
-
+    # 1. First find if ANY timeframe already has a running active trade (Priority: 5m -> 15m -> 30m -> 1h -> 4h)
     for tf in TIMEFRAMES_ORDER:
-        candles = []
-        if snap is not None:
-            candles = list(snap.get_series(tf_enum_map[tf]))
-
-        if not candles or len(candles) < 15:
-            tf_cards[tf] = {
-                "strategy": "SMC_WITH_FIB",
-                "symbol": symbol,
-                "timeframe": tf,
-                "state": "NO_SETUP",
-                "has_live_data": bool(candles),
-                "is_entry_ready": false if False else False,
-                "is_trade_active": False,
-            }
-            continue
-
-        smc_res = smc_engine.analyze(candles, tf_enum_map[tf])
-
-        # Swing Range over recent structure (last 50 bars)
-        recent_high = max(c.high for c in candles[-50:])
-        recent_low = min(c.low for c in candles[-50:])
-        range_span = recent_high - recent_low if recent_high > recent_low else 1.0
-        equilibrium = round((recent_high + recent_low) / 2.0, 2)
-
-        # Detect direction from latest BOS/CHoCH or Zone
-        latest_break = smc_res.latest_break
-        is_bearish = (
-            latest_break and latest_break.break_type in [StructureType.BOS_BEARISH, StructureType.CHOCH_BEARISH]
-        ) or (live_price and live_price > equilibrium)
-
-        # -----------------------------------------------------------------------
-        # Dual-Directional Setup Detection (Exact User Fibonacci Model):
-        # 1. Bullish Pullback: Swing Low (1.0) -> Swing High (0.0 TP) -> Pullback to 0.68 Entry
-        # 2. Bearish Pullback: Swing High (1.0) -> Swing Low (0.0 TP) -> Pullback to 0.68 Entry
-        # -----------------------------------------------------------------------
-        # Bullish Pullback calculation (Matches User's TradingView 15M chart: Low 4401.35 -> High 4468.09)
-        bull_anchor_1_0 = recent_low
-        bull_tp_0_0 = recent_high
-        bull_entry_0_68 = round(recent_high - range_span * 0.68, 2)
-        bull_pocket_0_79 = round(recent_high - range_span * 0.79, 2)
-        bull_sl_0_92 = round(recent_high - range_span * 0.92, 2)
-        bull_fib_50 = equilibrium
-        bull_fib_382 = round(recent_high - range_span * 0.382, 2)
-        bull_fib_236 = round(recent_high - range_span * 0.236, 2)
-        bull_fib_1_618 = round(recent_high + range_span * 0.618, 2)
-
-        # Check if live price or recent candles dipped into the 0.68 entry zone
-        recent_min_low = min(c.low for c in candles[-10:])
-        bull_touched = (recent_min_low <= bull_entry_0_68 <= recent_high) or (live_price and live_price <= bull_entry_0_68 + 2.0 and live_price >= bull_sl_0_92)
-        bull_trade_active = bull_touched and (live_price is None or live_price >= bull_sl_0_92)
-
-        # Bearish Pullback calculation
-        bear_anchor_1_0 = recent_high
-        bear_tp_0_0 = recent_low
-        bear_entry_0_68 = round(recent_low + range_span * 0.68, 2)
-        bear_pocket_0_79 = round(recent_low + range_span * 0.79, 2)
-        bear_sl_0_92 = round(recent_low + range_span * 0.92, 2)
-        bear_fib_50 = equilibrium
-        bear_fib_382 = round(recent_low + range_span * 0.382, 2)
-        bear_fib_236 = round(recent_low + range_span * 0.236, 2)
-        bear_fib_1_618 = round(recent_low - range_span * 0.618, 2)
-
-        recent_max_high = max(c.high for c in candles[-10:])
-        bear_touched = (recent_max_high >= bear_entry_0_68 >= recent_low) or (live_price and live_price >= bear_entry_0_68 - 2.0 and live_price <= bear_sl_0_92)
-        bear_trade_active = bear_touched and (live_price is None or live_price <= bear_sl_0_92)
-
-        # Select the active direction
-        if bull_trade_active or (live_price and live_price < equilibrium):
-            direction = "LONG"
-            anchor_price = bull_anchor_1_0
-            tp_price = bull_tp_0_0
-            entry_price = bull_entry_0_68
-            pocket_price = bull_pocket_0_79
-            sl_price = bull_sl_0_92
-            is_entry_touched = bull_touched
-            is_trade_active = bull_trade_active
-            is_entry_ready = not is_trade_active and (live_price is not None and live_price <= equilibrium)
-            zone = "DISCOUNT"
-            levels_table = {
-                "1.618": {"price": bull_fib_1_618, "label": "EXTENSION", "ratio": 1.618},
-                "1.000": {"price": bull_anchor_1_0, "label": "SWING_ANCHOR", "ratio": 1.0},
-                "0.920": {"price": bull_sl_0_92, "label": "STOP_LOSS", "ratio": 0.92},
-                "0.790": {"price": bull_pocket_0_79, "label": "GOLDEN_POCKET", "ratio": 0.79},
-                "0.680": {"price": bull_entry_0_68, "label": "ENTRY", "ratio": 0.68},
-                "0.500": {"price": bull_fib_50, "label": "EQUILIBRIUM", "ratio": 0.5},
-                "0.382": {"price": bull_fib_382, "label": "FIB_LEVEL", "ratio": 0.382},
-                "0.000": {"price": bull_tp_0_0, "label": "TARGET_TP", "ratio": 0.0},
-            }
-        else:
-            direction = "SHORT"
-            anchor_price = bear_anchor_1_0
-            tp_price = bear_tp_0_0
-            entry_price = bear_entry_0_68
-            pocket_price = bear_pocket_0_79
-            sl_price = bear_sl_0_92
-            is_entry_touched = bear_touched
-            is_trade_active = bear_trade_active
-            is_entry_ready = not is_trade_active and (live_price is not None and live_price >= equilibrium)
-            zone = "PREMIUM"
-            levels_table = {
-                "1.618": {"price": bear_fib_1_618, "label": "EXTENSION", "ratio": 1.618},
-                "1.000": {"price": bear_anchor_1_0, "label": "SWING_ANCHOR", "ratio": 1.0},
-                "0.920": {"price": bear_sl_0_92, "label": "STOP_LOSS", "ratio": 0.92},
-                "0.790": {"price": bear_pocket_0_79, "label": "GOLDEN_POCKET", "ratio": 0.79},
-                "0.680": {"price": bear_entry_0_68, "label": "ENTRY", "ratio": 0.68},
-                "0.500": {"price": bear_fib_50, "label": "EQUILIBRIUM", "ratio": 0.5},
-                "0.382": {"price": bear_fib_382, "label": "FIB_LEVEL", "ratio": 0.382},
-                "0.000": {"price": bear_tp_0_0, "label": "TARGET_TP", "ratio": 0.0},
-            }
-
-        # Active Order Blocks & FVGs summary
-        active_ob = smc_res.active_order_blocks[-1] if smc_res.active_order_blocks else None
-        active_fvg = smc_res.active_fvgs[-1] if smc_res.active_fvgs else None
-
-        if cascading_active_tf is None and (is_trade_active or is_entry_ready):
+        card = states.get(tf) or {}
+        if card.get("is_trade_active"):
             cascading_active_tf = tf
+            break
 
-        state_label = "TRADE_ACTIVE" if is_trade_active else "ENTRY_TOUCHED" if is_entry_touched else "WAITING_FOR_ENTRY" if is_entry_ready else "SCANNING_ZONE"
+    # 2. If no active trade, find the first timeframe that is ready for entry
+    if cascading_active_tf is None:
+        for tf in TIMEFRAMES_ORDER:
+            card = states.get(tf) or {}
+            if card.get("is_entry_ready"):
+                cascading_active_tf = tf
+                break
 
-        # Distances in Points
-        entry_to_tp = round(abs(tp_price - entry_price), 2)
-        entry_to_sl = round(abs(entry_price - sl_price), 2)
-        rr_ratio = round(entry_to_tp / entry_to_sl, 2) if entry_to_sl > 0 else 2.5
-        curr_move = round((live_price - entry_price), 2) if (live_price and direction == "LONG") else (round(entry_price - live_price, 2) if live_price else 0.0)
-
-        tf_cards[tf] = {
-            "strategy": "SMC_WITH_FIB",
-            "symbol": symbol,
-            "timeframe": tf,
-            "direction": direction,
-            "state": state_label,
-            "has_live_data": True,
-            "is_entry_ready": is_entry_ready,
-            "is_entry_touched": is_entry_touched,
-            "is_trade_active": is_trade_active,
-            "entry": {"price": entry_price, "touched": is_entry_touched},
-            "sl": {"price": sl_price},
-            "tp": {"price": tp_price, "is_locked": True, "locked": tp_price},
-            "point_1": {"price": anchor_price},
-            "point_2": {"price": tp_price},
-            "bos": {"price": latest_break.break_price if latest_break else anchor_price},
-            "structure": {
-                "break_type": latest_break.break_type.value if latest_break else "NONE",
-                "break_price": latest_break.break_price if latest_break else None,
-                "order_block": {
-                    "type": active_ob.ob_type,
-                    "top": active_ob.top,
-                    "bottom": active_ob.bottom,
-                } if active_ob else None,
-                "fvg": {
-                    "type": active_fvg.gap_type,
-                    "top": active_fvg.top,
-                    "bottom": active_fvg.bottom,
-                } if active_fvg else None,
-            },
-            "levels": levels_table,
-            "metrics": {
-                "total_range_pts": round(range_span, 2),
-                "entry_to_tp_pts": entry_to_tp,
-                "entry_to_sl_pts": entry_to_sl,
-                "rr_ratio": rr_ratio,
-                "current_movement_pts": curr_move,
-            },
-            "smc": {
-                "zone": zone,
-                "equilibrium_50": equilibrium,
-                "golden_pocket_lo": entry_price,
-                "golden_pocket_hi": pocket_price,
-                "sl_092": sl_price,
-                "target_00": tp_price,
-                "active_obs_count": len(smc_res.active_order_blocks),
-                "active_fvgs_count": len(smc_res.active_fvgs),
-            },
-        }
+    # 3. Enforce 1-Trade Policy: If an active trade is running, put other timeframes on STANDBY
+    for tf in TIMEFRAMES_ORDER:
+        card = states.get(tf)
+        if card:
+            card["is_locked_by_cascade"] = (cascading_active_tf is not None and cascading_active_tf != tf)
+            if card.get("is_locked_by_cascade") and not card.get("is_trade_active"):
+                card["cascade_status"] = f"STANDBY (Locked by {cascading_active_tf.upper()})"
+            else:
+                card["cascade_status"] = "ACTIVE"
 
     return {
         "strategy": "SMC_WITH_FIB",
@@ -707,5 +546,5 @@ async def get_smc_fib_dashboard(
         "data_status": data_status,
         "timeframes_order": TIMEFRAMES_ORDER,
         "cascading_active_tf": cascading_active_tf,
-        "timeframes": tf_cards,
+        "timeframes": states,
     }
