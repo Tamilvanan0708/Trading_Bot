@@ -124,9 +124,34 @@ class RetracementMultiTFMonitor:
             return snap
         except Exception as exc:  # noqa: BLE001 - live feed unavailable
             logger.debug("[RETR-MULTI] live snapshot unavailable: %s", exc)
-            self.data_status = "NO_DATA"
+            self.data_status = "HISTORICAL"
             self.live_price = None
             return None
+
+    async def _bootstrap_from_history(self) -> dict[str, list]:
+        """Load real historical candles from live service as fallback when WebSocket feed is offline.
+
+        Returns a dict of tf -> candle list for all monitored timeframes.
+        Always uses real Binance candles — never fabricates data.
+        """
+        try:
+            service = get_live_service()
+            await service._load_historical_base()
+            await service._load_5m_base()
+            from app.core.constants import TimeFrame as TF
+            snap = await service.get_multi_timeframe_snapshot(
+                self.symbol, include_forming=False, m15_limit=800,
+            )
+            result = {}
+            for tf in self.timeframes:
+                result[tf] = list(snap.get_series(TF_MAP[tf]))
+            if snap.current_price:
+                self.live_price = snap.current_price
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[RETR-MULTI] historical bootstrap failed: %s", exc)
+            return {}
+
 
     # ------------------------------------------------------------------
     # Public API
@@ -141,6 +166,16 @@ class RetracementMultiTFMonitor:
         async with self._lock:
             snap = await self._snapshot()
             raw_results: dict[str, RetracementSetup | None] = {}
+
+            # If live feed is unavailable but engines are not yet seeded, bootstrap from history
+            needs_bootstrap = snap is None and all(
+                slot.last_processed_ts is None for slot in self.slots.values()
+            )
+            hist_candles: dict[str, list] = {}
+            if needs_bootstrap:
+                logger.info("[RETR-MULTI] Live feed offline — bootstrapping engines from historical Binance candles.")
+                hist_candles = await self._bootstrap_from_history()
+
             for tf in self.timeframes:
                 slot = self.slots[tf]
                 candles: list = []
@@ -149,6 +184,11 @@ class RetracementMultiTFMonitor:
                     slot.live_price = snap.current_price
                     slot.data_status = "HEALTHY"
                     slot.has_live_data = bool(candles)
+                elif hist_candles.get(tf):
+                    # Use bootstrapped historical candles as fallback
+                    candles = hist_candles[tf]
+                    slot.data_status = "HISTORICAL"
+                    slot.has_live_data = True  # Historical data IS available
                 else:
                     slot.data_status = "NO_DATA"
                     slot.has_live_data = False

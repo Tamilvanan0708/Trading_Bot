@@ -53,11 +53,13 @@ class DualRetracementEngine:
         self.setup: RetracementSetup | None = None
         self._candles: list[Candle] = []
         self._events: list[RetracementEvent] = []
+        self._archived_setups: list[RetracementSetup] = []
 
     def reset(self) -> None:
         self.setup = None
         self._candles = []
         self._events = []
+        self._archived_setups = []
 
     def process_candle(self, candle: Candle) -> list[RetracementEvent]:
         self._candles.append(candle)
@@ -76,8 +78,16 @@ class DualRetracementEngine:
         elif self.setup.state in (RetracementState.ENTRY_TOUCHED, RetracementState.TP_FROZEN, RetracementState.TRADE_ACTIVE):
             events.extend(self._track_active_trade(candle))
 
+        # Auto-archive: if setup is now completed/invalidated, clear it and immediately try to detect a new BOS
+        if self.setup is not None and self.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
+            self._archived_setups.append(self.setup)
+            self.setup = None
+            # Try to detect a new BOS immediately on the same candle
+            events.extend(self._detect_bos(candle))
+
         self._events.extend(events)
         return events
+
 
     def _detect_bos(self, candle: Candle) -> list[RetracementEvent]:
         swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)

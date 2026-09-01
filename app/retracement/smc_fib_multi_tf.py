@@ -71,13 +71,39 @@ class SMCFibMultiTFMonitor:
             return snap
         except Exception as exc:  # noqa: BLE001
             logger.debug("[SMC-FIB-MULTI] snapshot error: %s", exc)
-            self.data_status = "NO_DATA"
+            self.data_status = "HISTORICAL"
             return None
+
+    async def _bootstrap_from_history(self) -> dict[str, list]:
+        """Load historical Binance candles as fallback when live WebSocket feed is offline."""
+        try:
+            service = get_live_service()
+            await service._load_historical_base()
+            await service._load_5m_base()
+            snap = await service.get_multi_timeframe_snapshot(self.symbol, include_forming=False)
+            result = {}
+            for tf in self.timeframes:
+                result[tf] = list(snap.get_series(TF_MAP[tf]))
+            if snap.current_price:
+                self.live_price = snap.current_price
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[SMC-FIB-MULTI] historical bootstrap failed: %s", exc)
+            return {}
 
     async def advance(self, db) -> dict[str, Any]:
         async with self._lock:
             snap = await self._snapshot()
             raw_results: dict[str, Any] = {}
+
+            # Bootstrap from history if live feed is offline and engines are not yet seeded
+            needs_bootstrap = snap is None and all(
+                slot.last_processed_ts is None for slot in self.slots.values()
+            )
+            hist_candles: dict[str, list] = {}
+            if needs_bootstrap:
+                logger.info("[SMC-FIB-MULTI] Live feed offline — bootstrapping from historical Binance candles.")
+                hist_candles = await self._bootstrap_from_history()
 
             # Step 1: Advance each slot with its own newly-closed candles
             for tf in self.timeframes:
@@ -87,6 +113,9 @@ class SMCFibMultiTFMonitor:
                     candles = list(snap.get_series(TF_MAP[tf]))
                     slot.has_live_data = bool(candles)
                     slot.live_price = snap.current_price
+                elif hist_candles.get(tf):
+                    candles = hist_candles[tf]
+                    slot.has_live_data = True  # Historical data IS available
                 else:
                     slot.has_live_data = False
 
