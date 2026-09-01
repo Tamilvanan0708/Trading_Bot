@@ -96,26 +96,48 @@ class SMCFibMultiTFMonitor:
             snap = await self._snapshot()
             raw_results: dict[str, Any] = {}
 
-            # Bootstrap from history if live feed is offline and engines are not yet seeded
-            needs_bootstrap = snap is None and all(
-                slot.last_processed_ts is None for slot in self.slots.values()
-            )
+            # Check if any engine has already been seeded
+            engines_seeded = any(slot.last_processed_ts is not None for slot in self.slots.values())
+
+            # Bootstrap from real Binance historical candles when engines are unseeded AND
+            # the snapshot has too few candles (DEGRADED state) or feed is offline
+            snap_15m_count = len(list(snap.get_series(TF_MAP["15m"]))) if snap is not None else 0
+            needs_bootstrap = not engines_seeded and snap_15m_count < 50
+
             hist_candles: dict[str, list] = {}
             if needs_bootstrap:
-                logger.info("[SMC-FIB-MULTI] Live feed offline — bootstrapping from historical Binance candles.")
+                logger.info(
+                    "[SMC-FIB-MULTI] Engines unseeded (15M candles from snap=%d < 50) — bootstrapping from historical Binance candles.",
+                    snap_15m_count,
+                )
                 hist_candles = await self._bootstrap_from_history()
 
             # Step 1: Advance each slot with its own newly-closed candles
             for tf in self.timeframes:
                 slot = self.slots[tf]
                 candles = []
-                if snap is not None:
-                    candles = list(snap.get_series(TF_MAP[tf]))
-                    slot.has_live_data = bool(candles)
+                snap_candles = list(snap.get_series(TF_MAP[tf])) if snap is not None else []
+
+                # Priority 1: Live snapshot candles (if enough or already seeded)
+                if snap_candles and (engines_seeded or len(snap_candles) >= 50):
+                    candles = snap_candles
+                    slot.has_live_data = True
                     slot.live_price = snap.current_price
                 elif hist_candles.get(tf):
+                    # Priority 2: Historical bootstrap candles + merge any newer live candles
                     candles = hist_candles[tf]
-                    slot.has_live_data = True  # Historical data IS available
+                    if snap_candles:
+                        last_hist_ts = candles[-1].timestamp if candles else None
+                        new_live = [c for c in snap_candles if last_hist_ts is None or c.timestamp > last_hist_ts]
+                        candles = candles + new_live
+                    if snap is not None and snap.current_price:
+                        slot.live_price = snap.current_price
+                    slot.has_live_data = True
+                elif snap_candles:
+                    # Priority 3: Whatever live candles exist
+                    candles = snap_candles
+                    slot.has_live_data = bool(candles)
+                    slot.live_price = snap.current_price if snap else None
                 else:
                     slot.has_live_data = False
 
