@@ -192,41 +192,45 @@ class SMCFibEngine:
             return
 
         if self.direction == SignalDirection.LONG:
+            # Bullish CHOCH Reversal (Drawing 2):
+            # Level 1.000 = Extreme Low Anchor (point_2_price)
+            # Level 0.000 = Target High (target_tp_price)
+            # Retracement dips down from 0.000 toward 1.000
             lo = self.point_2_price
             hi = self.target_tp_price
             span = hi - lo if hi > lo else 1.0
-            self.equilibrium_50 = round((hi + lo) / 2.0, 2)
-            self.entry_price = round(hi - span * 0.68, 2)
-            self.pocket_price = round(hi - span * 0.79, 2)
-            self.sl_price = round(hi - span * 0.92, 2)
+
+            self.equilibrium_50 = round(lo + span * 0.500, 2)
+            self.entry_price = round(lo + span * 0.320, 2)    # 0.680 retracement from top = (1 - 0.680) = 0.320 from base
+            self.pocket_price = round(lo + span * 0.210, 2)   # 0.790 retracement from top = (1 - 0.790) = 0.210 from base
+            self.sl_price = round(lo - span * 0.05, 2)        # Invalidation below 1.000 base
 
             self.levels = {
-                "1.618": RetracementLevel(ratio=1.618, price=round(hi + span * 0.618, 2), label="EXTENSION"),
                 "1.000": RetracementLevel(ratio=1.000, price=lo, label="SWING_ANCHOR"),
-                "0.920": RetracementLevel(ratio=0.920, price=self.sl_price, label="STOP_LOSS"),
                 "0.790": RetracementLevel(ratio=0.790, price=self.pocket_price, label="GOLDEN_POCKET"),
                 "0.680": RetracementLevel(ratio=0.680, price=self.entry_price, label="ENTRY"),
                 "0.500": RetracementLevel(ratio=0.500, price=self.equilibrium_50, label="EQUILIBRIUM"),
-                "0.382": RetracementLevel(ratio=0.382, price=round(hi - span * 0.382, 2), label="FIB_LEVEL"),
                 "0.000": RetracementLevel(ratio=0.000, price=hi, label="TARGET_TP"),
             }
         else:
+            # Bearish CHOCH Reversal (Drawing 1):
+            # Level 1.000 = Extreme High Anchor (point_2_price)
+            # Level 0.000 = Target Low (target_tp_price)
+            # Retracement pulls up from 0.000 toward 1.000
             hi = self.point_2_price
             lo = self.target_tp_price
             span = hi - lo if hi > lo else 1.0
-            self.equilibrium_50 = round((hi + lo) / 2.0, 2)
-            self.entry_price = round(lo + span * 0.68, 2)
-            self.pocket_price = round(lo + span * 0.79, 2)
-            self.sl_price = round(lo + span * 0.92, 2)
+
+            self.equilibrium_50 = round(lo + span * 0.500, 2)
+            self.entry_price = round(lo + span * 0.680, 2)    # 0.680 retracement up from bottom
+            self.pocket_price = round(lo + span * 0.790, 2)   # 0.790 retracement up from bottom (Order Block)
+            self.sl_price = round(hi + span * 0.05, 2)        # Invalidation above 1.000 high
 
             self.levels = {
-                "1.618": RetracementLevel(ratio=1.618, price=round(lo - span * 0.618, 2), label="EXTENSION"),
                 "1.000": RetracementLevel(ratio=1.000, price=hi, label="SWING_ANCHOR"),
-                "0.920": RetracementLevel(ratio=0.920, price=self.sl_price, label="STOP_LOSS"),
                 "0.790": RetracementLevel(ratio=0.790, price=self.pocket_price, label="GOLDEN_POCKET"),
                 "0.680": RetracementLevel(ratio=0.680, price=self.entry_price, label="ENTRY"),
                 "0.500": RetracementLevel(ratio=0.500, price=self.equilibrium_50, label="EQUILIBRIUM"),
-                "0.382": RetracementLevel(ratio=0.382, price=round(lo + span * 0.382, 2), label="FIB_LEVEL"),
                 "0.000": RetracementLevel(ratio=0.000, price=lo, label="TARGET_TP"),
             }
 
