@@ -132,8 +132,8 @@ class SMCFibEngine:
 
     def _detect_setup(self, candle: Candle) -> None:
         swings = detect_swings(self._history, left_bars=self.left_bars, right_bars=self.right_bars)
-        confirmed_highs = [s for s in swings if s.type == "HIGH" and s.index + self.right_bars < len(self._history)]
-        confirmed_lows = [s for s in swings if s.type == "LOW" and s.index + self.right_bars < len(self._history)]
+        confirmed_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._history) - 1]
+        confirmed_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._history) - 1]
 
         if not confirmed_highs or not confirmed_lows:
             return
