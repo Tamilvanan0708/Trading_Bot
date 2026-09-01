@@ -2846,12 +2846,10 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         </div>
       </div>
     </div>`;
-  }, mount);
-
-  // After HTML is rendered, draw the chart
-  setTimeout(() => {
+  }, mount).then(() => {
+    // After HTML is rendered and mounted into the DOM by renderWith, draw the chart.
     drawFibChart(`fib-chart-${strategyType}-${selectedTf}`, selectedTf, strategyType);
-  }, 80);
+  });
 }
 
 // ─── LIVE FIB CHART RENDERER ──────────────────────────────────────────────────
