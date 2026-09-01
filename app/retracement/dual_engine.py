@@ -114,7 +114,7 @@ class DualRetracementEngine:
             )
             self._apply_bullish_fib(setup, p2_low, candle.high)
             self.setup = setup
-            return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, from_state=RetracementState.NO_SETUP, to_state=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
+            return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
 
         # 2. Check Bearish BOS (Close < last confirmed swing low)
         elif candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
@@ -140,7 +140,7 @@ class DualRetracementEngine:
             )
             self._apply_bearish_fib(setup, p2_high, candle.low)
             self.setup = setup
-            return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, from_state=RetracementState.NO_SETUP, to_state=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
+            return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
 
         return []
 
@@ -192,7 +192,7 @@ class DualRetracementEngine:
                 setup.tp_locked = True
                 setup.locked_tp = setup.dynamic_tp
                 setup.state = RetracementState.TRADE_ACTIVE
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.ENTRY_TOUCHED, from_state=RetracementState.TP_DYNAMIC, to_state=RetracementState.TRADE_ACTIVE, timestamp=candle.timestamp, price=setup.entry_price))
+                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.ENTRY_TOUCHED, state_before=RetracementState.TP_DYNAMIC, state_after=RetracementState.TRADE_ACTIVE, timestamp=candle.timestamp, price=setup.entry_price))
         else:
             # 1. Update dynamic target if new low forms
             if candle.low < (setup.current_high_price or float("inf")):
@@ -207,7 +207,7 @@ class DualRetracementEngine:
                 setup.tp_locked = True
                 setup.locked_tp = setup.dynamic_tp
                 setup.state = RetracementState.TRADE_ACTIVE
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.ENTRY_TOUCHED, from_state=RetracementState.TP_DYNAMIC, to_state=RetracementState.TRADE_ACTIVE, timestamp=candle.timestamp, price=setup.entry_price))
+                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.ENTRY_TOUCHED, state_before=RetracementState.TP_DYNAMIC, state_after=RetracementState.TRADE_ACTIVE, timestamp=candle.timestamp, price=setup.entry_price))
 
         return events
 
@@ -222,23 +222,23 @@ class DualRetracementEngine:
                 setup.state = RetracementState.COMPLETED
                 setup.outcome = "TP_HIT"
                 setup.completion_reason = f"Take Profit reached at {setup.locked_tp}"
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.TP_HIT, from_state=RetracementState.TRADE_ACTIVE, to_state=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.locked_tp))
+                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.TP_HIT, state_before=RetracementState.TRADE_ACTIVE, state_after=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.locked_tp))
             elif setup.sl_price is not None and candle.low <= setup.sl_price:
                 setup.state = RetracementState.COMPLETED
                 setup.outcome = "SL_HIT"
                 setup.completion_reason = f"Stop Loss hit at {setup.sl_price}"
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.SL_HIT, from_state=RetracementState.TRADE_ACTIVE, to_state=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.sl_price))
+                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.SL_HIT, state_before=RetracementState.TRADE_ACTIVE, state_after=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.sl_price))
         else:
             if setup.locked_tp is not None and candle.low <= setup.locked_tp:
                 setup.state = RetracementState.COMPLETED
                 setup.outcome = "TP_HIT"
                 setup.completion_reason = f"Take Profit reached at {setup.locked_tp}"
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.TP_HIT, from_state=RetracementState.TRADE_ACTIVE, to_state=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.locked_tp))
+                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.TP_HIT, state_before=RetracementState.TRADE_ACTIVE, state_after=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.locked_tp))
             elif setup.sl_price is not None and candle.high >= setup.sl_price:
                 setup.state = RetracementState.COMPLETED
                 setup.outcome = "SL_HIT"
                 setup.completion_reason = f"Stop Loss hit at {setup.sl_price}"
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.SL_HIT, from_state=RetracementState.TRADE_ACTIVE, to_state=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.sl_price))
+                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.SL_HIT, state_before=RetracementState.TRADE_ACTIVE, state_after=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.sl_price))
 
         return events
 
