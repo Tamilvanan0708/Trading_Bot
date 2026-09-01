@@ -77,8 +77,9 @@ class SMCFibMultiTFMonitor:
     async def advance(self, db) -> dict[str, Any]:
         async with self._lock:
             snap = await self._snapshot()
-            results: dict[str, Any] = {}
+            raw_results: dict[str, Any] = {}
 
+            # Step 1: Advance each slot with its own newly-closed candles
             for tf in self.timeframes:
                 slot = self.slots[tf]
                 candles = []
@@ -100,6 +101,69 @@ class SMCFibMultiTFMonitor:
                             slot.engine.process_candle(c)
                         slot.last_processed_ts = new_candles[-1].timestamp
 
-                results[tf] = slot.engine.to_dict(self.live_price)
+                raw_results[tf] = slot.engine.to_dict(self.live_price)
 
-            return results
+            # Step 2: MASTER CASCADING SELECTION (5M -> 15M -> 30M -> 1H -> 4H)
+            # Find the SINGLE authoritative active timeframe
+            cascading_active_tf = None
+
+            # 2a. Priority 1: First timeframe with an ACTIVE TRADE (Entry already touched)
+            for tf in self.timeframes:
+                card = raw_results.get(tf) or {}
+                if card.get("is_trade_active"):
+                    cascading_active_tf = tf
+                    break
+
+            # 2b. Priority 2: If no active trade, first timeframe WAITING FOR ENTRY
+            if cascading_active_tf is None:
+                for tf in self.timeframes:
+                    card = raw_results.get(tf) or {}
+                    if card.get("is_entry_ready"):
+                        cascading_active_tf = tf
+                        break
+
+            # Step 3: APPLY MASTER LOCK TO ALL OTHER TIMEFRAMES
+            # All other timeframes become STANDBY / LOCKED, showing no duplicate trade
+            final_results: dict[str, Any] = {}
+            for tf in self.timeframes:
+                card = raw_results.get(tf) or {}
+                is_this_tf_active = (cascading_active_tf == tf)
+
+                if is_this_tf_active:
+                    card["is_locked_by_cascade"] = False
+                    card["cascade_status"] = "ACTIVE"
+                    final_results[tf] = card
+                else:
+                    # Non-active timeframe: put on clean STANDBY so no false active trade shows
+                    lock_msg = f"STANDBY (Locked by {cascading_active_tf.upper()})" if cascading_active_tf else "STANDBY (Scanning in progress)"
+                    final_results[tf] = {
+                        "strategy": "SMC_WITH_FIB",
+                        "symbol": self.symbol,
+                        "timeframe": tf,
+                        "state": "NO_SETUP",
+                        "direction": card.get("direction", "LONG"),
+                        "has_live_data": card.get("has_live_data", False),
+                        "is_entry_ready": False,
+                        "is_entry_touched": False,
+                        "is_trade_active": False,
+                        "is_locked_by_cascade": True,
+                        "cascade_status": lock_msg,
+                        "entry": {"price": None, "touched": False},
+                        "sl": {"price": None},
+                        "tp": {"price": None, "dynamic": None, "locked": None, "is_locked": False},
+                        "point_1": {"price": None},
+                        "point_2": {"price": None},
+                        "bos": {"price": None},
+                        "levels": {},
+                        "metrics": {
+                            "total_range_pts": 0.0,
+                            "entry_to_tp_pts": 0.0,
+                            "entry_to_sl_pts": 0.0,
+                            "rr_ratio": 2.83,
+                            "current_movement_pts": 0.0,
+                        },
+                        "smc": card.get("smc", {}),
+                    }
+
+            return final_results
+

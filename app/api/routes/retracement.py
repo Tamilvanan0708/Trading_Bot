@@ -405,18 +405,16 @@ async def advance_forward(symbol: str = "XAUUSD", timeframe: str = "15m"):
 
 def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict,
                                slots: dict, strategy_label: str) -> dict:
-    """Build the unified strategy dashboard payload for either strategy panel."""
+    """Build the unified strategy dashboard payload for either strategy panel with Strict 1-Trade Cascading Lock."""
     TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h", "4h"]
+    raw_cards = {}
+    cascading_active_tf = None
 
-    tf_cards = {}
-    cascading_active_tf = None  # First TF with an active entry-ready setup
-
+    # Step 1: First find if ANY timeframe has an ACTIVE TRADE
     for tf in TIMEFRAMES_ORDER:
         setup = states.get(tf)
         slot = slots.get(tf)
-        s = _serialize_setup(setup, live_price=live_price,
-                             data_status=data_status, symbol=symbol, timeframe=tf)
-        # Determine entry readiness for cascading logic
+        s = _serialize_setup(setup, live_price=live_price, data_status=data_status, symbol=symbol, timeframe=tf)
         is_entry_ready = (
             setup is not None
             and setup.point_2_price is not None
@@ -425,14 +423,63 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
         )
         is_entry_touched = setup is not None and getattr(setup, "entry_touched", False)
         is_trade_active = is_entry_touched and not getattr(setup, "outcome", None)
-
-        if cascading_active_tf is None and (is_entry_ready or is_trade_active):
-            cascading_active_tf = tf
-
         s["is_entry_ready"] = is_entry_ready
         s["is_trade_active"] = is_trade_active
         s["has_live_data"] = slot.has_live_data if slot else False
-        tf_cards[tf] = s
+        raw_cards[tf] = s
+
+        if cascading_active_tf is None and is_trade_active:
+            cascading_active_tf = tf
+
+    # Step 2: If no active trade, find first timeframe waiting for entry
+    if cascading_active_tf is None:
+        for tf in TIMEFRAMES_ORDER:
+            if raw_cards[tf].get("is_entry_ready"):
+                cascading_active_tf = tf
+                break
+
+    # Step 3: Apply Master Lock to all non-active timeframes
+    tf_cards = {}
+    for tf in TIMEFRAMES_ORDER:
+        card = raw_cards[tf]
+        is_this_tf_active = (cascading_active_tf == tf)
+        if is_this_tf_active:
+            card["is_locked_by_cascade"] = False
+            card["cascade_status"] = "ACTIVE"
+            tf_cards[tf] = card
+        else:
+            lock_msg = f"STANDBY (Locked by {cascading_active_tf.upper()})" if cascading_active_tf else "STANDBY (Scanning in progress)"
+            tf_cards[tf] = {
+                "strategy": strategy_label,
+                "symbol": symbol,
+                "timeframe": tf,
+                "state": "NO_SETUP",
+                "spec_state": "WAITING_FOR_BOS",
+                "direction": card.get("direction", "LONG"),
+                "has_live_data": card.get("has_live_data", False),
+                "is_entry_ready": False,
+                "is_entry_touched": False,
+                "is_trade_active": False,
+                "is_locked_by_cascade": True,
+                "cascade_status": lock_msg,
+                "entry": None,
+                "sl": None,
+                "tp": {"dynamic": None, "locked": None, "is_locked": False},
+                "point_1": None,
+                "point_2": None,
+                "bos": None,
+                "levels": {},
+                "metrics": {
+                    "total_range_pts": 0.0,
+                    "entry_to_tp_pts": 0.0,
+                    "entry_to_sl_pts": 0.0,
+                    "rr_ratio": 2.83,
+                    "current_movement_pts": 0.0,
+                },
+                "data_quality": "HEALTHY",
+                "live_price": live_price,
+                "data_status": data_status,
+            }
 
     return {
         "strategy": strategy_label,
