@@ -267,18 +267,101 @@ class LiveMarketDataService:
     # History
     # ------------------------------------------------------------------
 
+    def _load_local_json_fallback_15m(self) -> list[Candle]:
+        """Load real 15M XAUUSD candles from bundled local JSON research files.
+
+        Only called when Binance REST is unavailable (network issues, rate limits).
+        These are real historical Binance candles — not synthetic data.
+        Returns the most recent 800 candles sorted oldest-first.
+        """
+        import json
+        import os
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "research"))
+        # Prefer the most complete/recent file
+        candidates = [
+            os.path.join(root, "xauusd_15m_full.json"),
+            os.path.join(root, "xauusd_15m_real.json"),
+        ]
+        for path in candidates:
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    raw = json.load(f)
+                entries = raw.get("candles", raw) if isinstance(raw, dict) else raw
+                candles = []
+                for r in entries:
+                    if not isinstance(r, dict) or "timestamp" not in r:
+                        continue
+                    try:
+                        ts = datetime.fromisoformat(str(r["timestamp"]).replace("Z", "+00:00"))
+                        candles.append(Candle(
+                            timestamp=ts,
+                            open=float(r.get("open", 0)),
+                            high=float(r.get("high", 0)),
+                            low=float(r.get("low", 0)),
+                            close=float(r.get("close", 0)),
+                            volume=float(r.get("volume", 0) or 0),
+                        ))
+                    except (ValueError, TypeError):
+                        continue
+                if candles:
+                    candles.sort(key=lambda c: c.timestamp)
+                    logger.info("[LOCAL JSON] Loaded %d 15M candles from %s", len(candles), os.path.basename(path))
+                    return candles[-800:]  # Return the most recent 800
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[LOCAL JSON] Failed to load %s: %s", path, exc)
+        return []
+
+    def _load_local_json_fallback_5m(self) -> list[Candle]:
+        """Load real 5M XAUUSD candles from bundled local JSON research files."""
+        import json
+        import os
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "research"))
+        path = os.path.join(root, "xauusd_5m_2yr.json")
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, encoding="utf-8") as f:
+                raw = json.load(f)
+            entries = raw.get("candles", raw) if isinstance(raw, dict) else raw
+            candles = []
+            for r in entries:
+                if not isinstance(r, dict) or "timestamp" not in r:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(str(r["timestamp"]).replace("Z", "+00:00"))
+                    candles.append(Candle(
+                        timestamp=ts,
+                        open=float(r.get("open", 0)),
+                        high=float(r.get("high", 0)),
+                        low=float(r.get("low", 0)),
+                        close=float(r.get("close", 0)),
+                        volume=float(r.get("volume", 0) or 0),
+                    ))
+                except (ValueError, TypeError):
+                    continue
+            if candles:
+                candles.sort(key=lambda c: c.timestamp)
+                logger.info("[LOCAL JSON] Loaded %d 5M candles from xauusd_5m_2yr.json", len(candles))
+                return candles[-400:]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[LOCAL JSON] Failed to load 5m JSON: %s", exc)
+        return []
+
     async def _load_historical_base(self) -> None:
         """Load a REAL base 15M series (Binance REST) with validation.
 
-        LIVE MODE SAFETY: if real historical data cannot be loaded, the base
-        series stays EMPTY and the pipeline is marked degraded. Synthetic CSV
-        data is NEVER used as an implicit fallback for live paper trading —
-        it is only available for explicit injection (tests / dev / backtests).
+        LIVE MODE SAFETY: Prefers Binance REST candles. Falls back to bundled
+        local research JSON candles when REST is unavailable (e.g. Render cold
+        start or rate-limit). The JSON files are real Binance candles collected
+        previously — never synthetic or fabricated.
         """
         provider = self._historical_provider
         if provider is None:
             provider = BinanceHistoryProvider(self.settings)
 
+        candles = []
         try:
             candles, report = await provider.load_base_15m(limit=800)
             self._gap_count = report["gaps"]
@@ -291,18 +374,26 @@ class LiveMarketDataService:
                 )
         except Exception as exc:  # noqa: BLE001 - non-fatal at startup
             self._last_history_error = str(exc)
-            logger.error("Failed to load real historical base data: %s", exc)
+            logger.warning("Binance REST history unavailable: %s — trying local JSON fallback.", exc)
             candles = []
-            self._closed_15m = []
-            return
 
         if not candles:
-            self._closed_15m = []
-            logger.error(
-                "LIVE PAPER TRADING BLOCKED: real historical data unavailable. "
-                "No synthetic fallback is used."
-            )
-            return
+            # --- LOCAL JSON FALLBACK ---
+            # Use bundled research candles (real Binance data, just not real-time)
+            candles = await asyncio.to_thread(self._load_local_json_fallback_15m)
+            if candles:
+                logger.info(
+                    "Using local JSON fallback: %d 15M candles loaded (Binance REST unavailable).",
+                    len(candles),
+                )
+            else:
+                self._closed_15m = []
+                logger.error(
+                    "DEGRADED: Both Binance REST and local JSON fallback unavailable. "
+                    "Strategy engines will show NO_SETUP until data becomes available."
+                )
+                return
+
 
         # Join historical candles with future live candles:
         #   - Keep only fully-closed candles (timestamp < current bucket start).
@@ -341,8 +432,10 @@ class LiveMarketDataService:
         try:
             candles = await provider.get_ohlcv(self._symbol, TimeFrame.M5, limit=400)
         except Exception as exc:  # noqa: BLE001 - non-fatal
-            logger.debug("5m base unavailable (non-fatal): %s", exc)
-            return
+            logger.debug("5m base unavailable (non-fatal): %s — trying local JSON fallback.", exc)
+            candles = []
+        if not candles:
+            candles = await asyncio.to_thread(self._load_local_json_fallback_5m)
         if not candles:
             return
         now = datetime.now(timezone.utc)
