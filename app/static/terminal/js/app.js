@@ -2562,18 +2562,49 @@ Routes["/paper"] = (mount) => {
         ${UI.metric("Unrealized PnL", acct.unrealized_pnl_usd != null ? UI.fmt(acct.unrealized_pnl_usd, 2) : "—").outerHTML}
       </div>
       <div class="card">
-        <div class="card-head"><span>Trade history</span></div>
+        <div class="card-head">
+          <span>Active & Historical Paper Trades</span>
+          <span class="muted" style="font-size:11px">5M Dedicated Real-Time Simulation (0.01 Lots)</span>
+        </div>
         <div class="card-body flush"><div class="table-wrap"><table class="term">
-          <thead><tr><th>Opened</th><th>Direction</th><th>Entry</th><th>Exit</th><th>PnL</th><th>R</th><th>Status</th></tr></thead>
-          <tbody>${trades.length ? trades.map(t => `<tr>
-            <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
-            <td>${UI.dirBadge(t.direction)}</td>
-            <td class="num">${UI.fmt(t.entry_price)}</td>
-            <td class="num">${t.exit_price != null ? UI.fmt(t.exit_price) : "—"}</td>
-            <td class="num ${(t.pnl_usd || 0) >= 0 ? "up" : "down"}">${UI.fmt(t.pnl_usd, 2)}</td>
-            <td class="num ${(t.pnl_r || 0) >= 0 ? "up" : "down"}">${UI.fmt(t.pnl_r, 3)}</td>
-            <td>${UI.statusBadge(t.status || t.exit_reason || "OPEN")}</td>
-          </tr>`).join("") : '<tr><td colspan="7" style="text-align:center;color:var(--text-muted)">No paper trades — blocked while strategy is FAILED.</td></tr>'}</tbody>
+          <thead>
+            <tr>
+              <th>Opened</th>
+              <th>Strategy / Layer</th>
+              <th>Direction</th>
+              <th>Entry Price</th>
+              <th>Live / Exit</th>
+              <th>Running Points</th>
+              <th>PnL ($)</th>
+              <th>SL / TP</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>${trades.length ? trades.map(t => {
+            const entry = t.entry_price || t.actual_entry || t.target_entry || 0;
+            const curPx = t.current_price || t.exit_price || entry;
+            const pts = Number(t.running_pts != null ? t.running_pts : 0);
+            const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0)));
+            const ptsSign = pts >= 0 ? "+" : "";
+            const pnlSign = pnl >= 0 ? "+$" : "-$";
+            const ptsCls = pts >= 0 ? "up" : "down";
+            const pnlCls = pnl >= 0 ? "up" : "down";
+            const stratBadge = `<span class="badge ${t.strategy === 'SMC WITH FIB' ? 'badge-primary' : 'badge-blue'}" style="font-size:11px">${t.strategy || 'STRATEGY'} <b style="color:#fff">${t.layer || ''}</b></span>`;
+            const sl = t.stop_loss ? `$${Number(t.stop_loss).toFixed(2)}` : '—';
+            const tp = t.take_profit_1 || t.take_profit ? `$${Number(t.take_profit_1 || t.take_profit).toFixed(2)}` : '—';
+
+            return `<tr>
+              <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
+              <td>${stratBadge}</td>
+              <td>${UI.dirBadge(t.direction)}</td>
+              <td class="num"><b>$${Number(entry).toFixed(2)}</b></td>
+              <td class="num"><b>$${Number(curPx).toFixed(2)}</b></td>
+              <td class="num ${ptsCls}"><b>${ptsSign}${pts.toFixed(2)} PTS</b></td>
+              <td class="num ${pnlCls}"><b>${pnlSign}${Math.abs(pnl).toFixed(2)}</b></td>
+              <td style="font-size:11px;color:var(--text-dim)">SL: ${sl}<br>TP: ${tp}</td>
+              <td>${UI.statusBadge(t.status || t.state || t.exit_reason || "OPEN")}</td>
+            </tr>`;
+          }).join("") : '<tr><td colspan="9" style="text-align:center;padding:32px 14px;color:var(--text-muted);font-size:13px">⏳ <b>No paper trades active yet.</b><br><span style="font-size:11px">A 0.01 lot paper trade is automatically opened with live PnL and running point tracking as soon as a 5M strategy entry (Fib L1/L2/L3 or SMC 0.680) is touched.</span></td></tr>'}</tbody>
         </table></div></div>
       </div>
     </div>`;

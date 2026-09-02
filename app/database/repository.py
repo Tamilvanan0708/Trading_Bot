@@ -106,7 +106,7 @@ class Repository:
         """Lists active paper trades."""
         stmt = (
             select(PaperTradeModel)
-            .where(PaperTradeModel.state.in_(["PENDING", "ENTRY_HIT", "TP1_HIT", "TP2_HIT"]))
+            .where(PaperTradeModel.state.in_(["OPEN", "PENDING", "ENTRY_HIT", "TP1_HIT", "TP2_HIT"]))
             .order_by(desc(PaperTradeModel.created_at))
         )
         res = await self.session.execute(stmt)

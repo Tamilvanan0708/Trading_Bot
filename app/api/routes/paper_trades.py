@@ -6,32 +6,63 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import get_settings
+from app.data.live.service import get_live_service
 from app.database.connection import get_db_session
 from app.database.repository import Repository
+from app.paper_trading.sync import sync_strategy_paper_trades
 
 router = APIRouter(tags=["Paper Trading & Performance"])
 
 
-def _serialize_trade(t) -> dict:
+def _serialize_trade(t, live_price: float | None = None) -> dict:
+    entry = float(t.actual_entry or t.target_entry or 0.0)
+    cur_price = float(live_price) if live_price is not None else entry
+    running_pts = 0.0
+    unrealized_pnl = 0.0
+    lots = float(t.lot_size or 0.01)
+
+    if t.state == "OPEN" and entry > 0:
+        if t.direction == "LONG":
+            running_pts = round(cur_price - entry, 2)
+        else:
+            running_pts = round(entry - cur_price, 2)
+        # Gold: 1 lot = 100 oz. 0.01 lot = 1 oz. 1 point = $1.00 per 0.01 lot
+        unrealized_pnl = round(running_pts * lots * 100.0, 2)
+    elif t.state == "CLOSED":
+        unrealized_pnl = float(t.realized_pnl or 0.0)
+        if t.exit_price and entry > 0:
+            running_pts = round((float(t.exit_price) - entry) if t.direction == "LONG" else (entry - float(t.exit_price)), 2)
+
+    strat_name = "FIB RETRACEMENT" if "FIB_RETR" in (t.signal_id or "") else ("SMC WITH FIB" if "SMC_FIB" in (t.signal_id or "") else "CUSTOM STRATEGY")
+    layer_name = "L1" if "L1" in (t.signal_id or "") else ("L2" if "L2" in (t.signal_id or "") else ("L3" if "L3" in (t.signal_id or "") else "SINGLE"))
+
     return {
         "id": t.id,
         "signal_id": t.signal_id,
         "symbol": t.symbol,
+        "strategy": strat_name,
+        "layer": layer_name,
         "direction": t.direction,
         "state": t.state,
-        "lot_size": t.lot_size,
+        "status": t.state,
+        "lot_size": lots,
         "risk_amount": t.risk_amount,
         "target_entry": t.target_entry,
         "actual_entry": t.actual_entry,
+        "entry_price": entry,
+        "current_price": cur_price,
+        "running_pts": running_pts,
+        "unrealized_pnl": unrealized_pnl,
+        "realized_pnl": t.realized_pnl,
+        "pnl_usd": t.realized_pnl if t.state == "CLOSED" else unrealized_pnl,
+        "pnl_r": t.realized_r if t.state == "CLOSED" else (round(running_pts / max(0.1, abs(entry - float(t.stop_loss or 0.0))), 2) if t.stop_loss else 0.0),
         "stop_loss": t.stop_loss,
         "take_profit_1": t.take_profit_1,
         "take_profit_2": t.take_profit_2,
         "take_profit_3": t.take_profit_3,
-        "opened_at": t.opened_at,
+        "opened_at": t.opened_at or t.created_at,
         "exit_price": t.exit_price,
         "exit_reason": t.exit_reason,
-        "realized_pnl": t.realized_pnl,
-        "realized_r": t.realized_r,
         "closed_at": t.closed_at,
         "created_at": t.created_at,
     }
@@ -39,11 +70,19 @@ def _serialize_trade(t) -> dict:
 
 @router.get("/paper-trades")
 async def list_paper_trades(limit: int = 50, db: AsyncSession = Depends(get_db_session)):
-    """Lists simulated paper trading positions from the database."""
+    """Lists simulated paper trading positions from the database with live running points and PnL."""
+    await sync_strategy_paper_trades(db)
+
+    ls = get_live_service()
+    try:
+        live_price = await ls.get_latest_price("XAUUSD")
+    except Exception:  # noqa: BLE001
+        live_price = None
+
     repo = Repository(db)
     db_trades = await repo.list_paper_trades(limit=limit)
     return {
-        "database_trades": [_serialize_trade(t) for t in db_trades],
+        "database_trades": [_serialize_trade(t, live_price) for t in db_trades],
     }
 
 
@@ -104,6 +143,8 @@ async def get_performance(db: AsyncSession = Depends(get_db_session)):
 @router.get("/performance/account")
 async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
     """Detailed account statement with balance, equity, drawdown, and trade statistics."""
+    await sync_strategy_paper_trades(db)
+
     repo = Repository(db)
     active = await repo.list_active_paper_trades()
     closed = await repo.list_closed_paper_trades(limit=500)
