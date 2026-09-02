@@ -1,9 +1,0 @@
-trades: 10
-exits: {'STOP_LOSS_HIT': 7, 'END_OF_BACKTEST': 3}
-MFE>=1.0R: 4/10 (40%)
-MFE>=1.5R: 1/10 (10%)
-MFE>=2.0R: 0/10 (0%)
-MFE>=2.5R: 0/10 (0%)
-MAE>=1R (SL touched): 5/10 (50%)
-reached TP2(2.5R) at some point: 0/10
-both SL and TP2 touched: 0/10
