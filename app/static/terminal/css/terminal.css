@@ -58,6 +58,57 @@
   --trans: 0.16s ease;
 }
 
+/* ---------- Light Theme Tokens ---------- */
+[data-theme="light"] {
+  /* Surfaces */
+  --bg-0: #f1f5f9;
+  --bg-1: #f8fafc;
+  --bg-2: #ffffff;
+  --bg-3: #e2e8f0;
+  --panel: rgba(255, 255, 255, 0.94);
+  --panel-solid: #ffffff;
+  --border: #cbd5e1;
+  --border-strong: #94a3b8;
+  --border-glow: rgba(37, 99, 235, 0.15);
+
+  /* Text */
+  --text: #1e293b;
+  --text-bright: #0f172a;
+  --text-dim: #475569;
+  --text-muted: #64748b;
+
+  /* Accents */
+  --accent: #2563eb;
+  --accent-dim: #1d4ed8;
+
+  /* Effects */
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  --shadow-soft: 0 1px 0 rgba(0, 0, 0, 0.04) inset;
+}
+
+body, .sidebar, .topbar, .card, .main-column {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+/* ---------- Card & UI Micro-Animations ---------- */
+.card {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  border-color: var(--accent);
+}
+@keyframes tradePulse {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.45); }
+  70% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+.active-trade-card {
+  border-color: rgba(34, 197, 94, 0.7) !important;
+  animation: tradePulse 2.2s infinite;
+}
+
 /* ---------- Reset ---------- */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }

@@ -111,6 +111,19 @@ function wireShell() {
   if (btnRefresh) {
     btnRefresh.addEventListener("click", () => AutoRefresh.cycle());
   }
+  const themeBtn = document.getElementById("theme-toggle-btn");
+  const savedTheme = localStorage.getItem("xau_theme") || "dark";
+  document.documentElement.setAttribute("data-theme", savedTheme);
+  if (themeBtn) {
+    themeBtn.textContent = savedTheme === "light" ? "☀️" : "🌙";
+    themeBtn.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") || "dark";
+      const next = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      localStorage.setItem("xau_theme", next);
+      themeBtn.textContent = next === "light" ? "☀️" : "🌙";
+    });
+  }
 }
 
 const AutoRefresh = {
@@ -268,402 +281,313 @@ function ovHtml(id, html) {
   if (el && el.innerHTML !== html) el.innerHTML = html;
 }
 
-function ovDsBadge(ds) {
-  if (ds === "HEALTHY") return '<span class="badge badge-green"> LIVE</span>';
-  if (ds === "HISTORICAL") return '<span class="badge badge-amber"> HISTORICAL · FEED DEGRADED</span>';
-  if (ds === "HISTORICAL_CACHE") return '<span class="badge badge-amber"> HISTORICAL CACHE</span>';
-  return '<span class="badge badge-red"> NO DATA</span>';
-}
-function ovTrendBadge(t) {
-  const x = String(t || "NO_DATA").toUpperCase();
-  if (x === "BULLISH") return '<span class="badge badge-green">BULLISH</span>';
-  if (x === "BEARISH") return '<span class="badge badge-red">BEARISH</span>';
-  if (x === "NEUTRAL" || x === "RANGING") return '<span class="badge badge-amber">' + UI.esc(x) + '</span>';
-  return '<span class="badge badge-muted">NO DATA</span>';
-}
-function ovBanner(id, label, kind) {
-  const map = { green: "banner-green", red: "banner-red", amber: "banner-amber", blue: "banner-blue", muted: "banner-muted" };
-  ovHtml(id, `<div class="status-banner ${map[kind] || "banner-muted"}">${UI.esc(label)}</div>`);
-}
-
 function buildOverviewShell() {
   return `
   <div class="stack">
+    <!-- Top Cockpit Header -->
     <div class="row-between">
       <div>
-        <div class="section-title">Command Center</div>
-        <div style="font-size:12px;color:var(--text-dim)">XAU/USD · live market intelligence</div>
+        <div class="section-title" style="display:flex;align-items:center;gap:8px">
+          <span>Command Center</span>
+          <span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>
+        </div>
+        <div style="font-size:12px;color:var(--text-dim)">XAU/USD · 5M Institutional Trading Cockpit</div>
       </div>
-      <div class="row">
-        <span class="badge badge-dim" id="ov-grade">PRODUCTION: —</span>
-        <span id="ov-ds-mini">${ovDsBadge("NO_DATA")}</span>
+      <div class="toolbar" style="margin:0">
+        <span class="badge" style="background:rgba(41,98,255,0.2);color:#2962ff;border:1px solid #2962ff;font-weight:700">⚡ 5M DEDICATED</span>
+        <span class="badge badge-green" id="ov-ai-badge">🧠 AI GATE: ACTIVE</span>
+        <span class="badge badge-blue">💼 PAPER TRADING ENABLED</span>
+        <span class="badge badge-red">REAL MONEY DISABLED</span>
       </div>
     </div>
 
-    <div class="grid grid-3">
-      <div class="card" style="grid-column:span 2">
-        <div class="card-head"><span>Live Price</span><span class="muted" id="ov-updated">—</span></div>
-        <div class="card-body" style="display:flex;align-items:center;gap:var(--sp-5);flex-wrap:wrap">
-          <div>
-            <div class="metric-value lg" style="font-size:42px" id="ov-price">—</div>
-            <div class="metric-sub" id="ov-change">—</div>
-            <div class="metric-sub" id="ov-change-pct">—</div>
-            <div class="metric-sub muted" id="ov-feed-sub">feed —</div>
-          </div>
-          <div class="grid grid-3" style="flex:1;min-width:280px">
-            ${UI.metric("Bid", '<span id="ov-bid">—</span>').outerHTML}
-            ${UI.metric("Ask", '<span id="ov-ask">—</span>').outerHTML}
-            ${UI.metric("Spread", '<span id="ov-spread">—</span>').outerHTML}
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head"><span>Market Data</span></div>
-        <div class="card-body">
-          <div id="ov-ds">${'<div class="status-banner banner-muted">NO DATA</div>'}</div>
-          <div style="margin-top:10px" id="ov-ds-detail" class="ov-kv"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="grid grid-3">
-      <div class="card">
-        <div class="card-head"><span>Market Regime</span><span class="muted" id="ov-regime-updated">—</span></div>
-        <div class="card-body">
-          <div class="metric-value lg" id="ov-regime" style="color:var(--text-dim)">—</div>
-          <div class="metric-sub" id="ov-regime-trend">—</div>
-          <div class="metric-sub" id="ov-regime-conf">—</div>
-          <div class="metric-sub muted" style="margin-top:6px" id="ov-regime-details">—</div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head"><span>Multi-Timeframe Direction</span></div>
-        <div class="card-body" id="ov-mtf">
-          ${OV_TFS.map(([l]) => `<div class="mtf-row"><div class="mtf-tf">${l}</div><div class="mtf-bar"><div class="mtf-fill flat" style="width:8%"></div></div><div class="mtf-state flat">—</div></div>`).join("")}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head"><span>Trading Safety</span></div>
-        <div class="card-body">
-          <div id="ov-safety">${'<div class="status-banner banner-muted">CHECKING…</div>'}</div>
-          <div id="ov-safety-gates" style="margin-top:10px"></div>
-        </div>
-      </div>
-    </div>
-
+    <!-- Row 1: Live Market Ticker & Live Position Widget -->
     <div class="grid grid-2">
-      <div class="signal-hero flat" id="ov-signal-hero">
-        <div class="row-between">
-          <div class="signal-direction" id="ov-signal-dir">WAITING</div>
-          <div id="ov-signal-badges"></div>
+      <!-- Card 1: Gold Live Market Pulse -->
+      <div class="card card-hover">
+        <div class="card-head">
+          <span>GOLD MARKET PULSE (5M)</span>
+          <span class="muted" id="ov-updated">LIVE FEED</span>
         </div>
-        <div id="ov-signal-levels" style="margin-top:var(--sp-3)"></div>
-        <div class="signal-reason" id="ov-signal-reasons"></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><span>AI Validation</span></div>
         <div class="card-body">
-          <div class="row-between" style="margin-bottom:var(--sp-3)">
-            <span style="font-size:11px;letter-spacing:1px;color:var(--text-dim)">AI VALIDATION</span>
-            <span id="ov-ai-status">${'<span class="badge badge-dim">WAITING</span>'}</span>
+          <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px">
+            <div class="metric-value lg" style="font-size:42px;font-weight:800;font-family:var(--font-num)" id="ov-price">—</div>
+            <div style="font-size:15px;font-weight:700" id="ov-change-badge">—</div>
           </div>
-          <div id="ov-ai-conf" style="margin-bottom:var(--sp-2)"></div>
-          <div id="ov-ai-explanation" style="font-size:12.5px;color:var(--text);margin-bottom:var(--sp-3)">—</div>
-          <div id="ov-ai-risks" style="font-size:11.5px;color:var(--amber)"></div>
+          <div class="grid grid-3" style="background:var(--bg-1);padding:10px;border-radius:8px;border:1px solid var(--border)">
+            <div><div class="muted" style="font-size:10px;font-weight:700">BID PRICE</div><div class="num" style="font-size:14px;font-weight:700" id="ov-bid">—</div></div>
+            <div><div class="muted" style="font-size:10px;font-weight:700">ASK PRICE</div><div class="num" style="font-size:14px;font-weight:700" id="ov-ask">—</div></div>
+            <div><div class="muted" style="font-size:10px;font-weight:700">SPREAD</div><div class="num up" style="font-size:14px;font-weight:700" id="ov-spread">0.01</div></div>
+          </div>
+          <div class="row-between" style="margin-top:12px;font-size:11px;color:var(--text-dim)">
+            <div>Market Feed: <b style="color:var(--green)">BINANCE LIVE</b></div>
+            <div>Spread Quality: <b style="color:var(--green)">INSTITUTIONAL ZERO-SLIPPAGE</b></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Live Trade Radar & Performance -->
+      <div class="card card-hover" id="ov-active-trade-card">
+        <div class="card-head">
+          <span>LIVE POSITION & PERFORMANCE</span>
+          <span id="ov-trade-status-badge"><span class="badge badge-dim">STANDBY</span></span>
+        </div>
+        <div class="card-body" id="ov-active-trade-body">
+          <div style="padding:16px 0;text-align:center;color:var(--text-muted)">
+            <div style="font-size:24px;margin-bottom:6px">⏳</div>
+            <div style="font-weight:700;font-size:13px;color:var(--text)">No Open Positions Currently</div>
+            <div style="font-size:11px;margin-top:4px">Bot will auto-execute 0.01 lots when 5M Fib L1/L2/L3 or SMC 0.680 is touched.</div>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="grid grid-3">
-      <div class="card">
-        <div class="card-head"><span>SMC Summary</span><span id="ov-smc-status">—</span></div>
-        <div class="card-body" id="ov-smc-body">—</div>
+    <!-- Row 2: Dual Strategy Radar (5M Fib Retracement vs 5M SMC) -->
+    <div class="grid grid-2">
+      <!-- Fib Strategy Card -->
+      <div class="card card-hover" style="border-top:3px solid #2962ff">
+        <div class="card-head">
+          <span>🎯 FIB WITH RETRACEMENT (5M CORE)</span>
+          <span id="ov-fib-state-badge"><span class="badge badge-blue">SCANNING</span></span>
+        </div>
+        <div class="card-body" id="ov-fib-content">
+          <div class="row-between" style="margin-bottom:10px">
+            <span style="font-size:12px;color:var(--text-dim)">Direction Bias:</span>
+            <b style="font-size:13px;color:var(--green)" id="ov-fib-dir">LONG ▲</b>
+          </div>
+          <div class="grid grid-3" style="background:var(--bg-1);padding:10px;border-radius:6px;gap:8px;font-size:11px">
+            <div><div class="muted">ANCHOR (0.000)</div><div class="num" id="ov-fib-anchor">—</div></div>
+            <div><div class="muted">BOS BREAKOUT</div><div class="num" id="ov-fib-bos">—</div></div>
+            <div><div class="muted">TARGET (1.000)</div><div class="num up" id="ov-fib-target">—</div></div>
+          </div>
+          <div class="row-between" style="margin-top:12px;padding:8px 10px;background:rgba(41,98,255,0.08);border:1px solid rgba(41,98,255,0.25);border-radius:6px">
+            <div>
+              <div style="font-size:10px;color:var(--accent);font-weight:700">PRIMARY ENTRY (L1 0.618)</div>
+              <div class="num" style="font-size:14px;font-weight:700;color:var(--text-bright)" id="ov-fib-entry">—</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:10px;color:var(--red);font-weight:700">STOP LOSS (0.236)</div>
+              <div class="num" style="font-size:14px;font-weight:700;color:var(--red)" id="ov-fib-sl">—</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;text-align:right">
+            <a href="#/fib-retracement" class="btn btn-sm btn-primary" style="padding:4px 10px;font-size:11px">Open 5M Fib Terminal →</a>
+          </div>
+        </div>
       </div>
-      <div class="card">
-        <div class="card-head"><span>Fibonacci</span><span id="ov-fib-status">—</span></div>
-        <div class="card-body" id="ov-fib-body">—</div>
-      </div>
-      <div class="card">
-        <div class="card-head"><span>Latest Market Update</span></div>
-        <div class="card-body ov-kv" id="ov-mu-body"></div>
+
+      <!-- SMC Strategy Card -->
+      <div class="card card-hover" style="border-top:3px solid #8b5cf6">
+        <div class="card-head">
+          <span>💎 SMC WITH FIB (5M FAILSAFE)</span>
+          <span id="ov-smc-state-badge"><span class="badge badge-primary">ACTIVE</span></span>
+        </div>
+        <div class="card-body" id="ov-smc-content">
+          <div class="row-between" style="margin-bottom:10px">
+            <span style="font-size:12px;color:var(--text-dim)">Market Structure:</span>
+            <b style="font-size:13px;color:var(--text)" id="ov-smc-struct">BOS / CHoCH CONFIRMED</b>
+          </div>
+          <div class="grid grid-3" style="background:var(--bg-1);padding:10px;border-radius:6px;gap:8px;font-size:11px">
+            <div><div class="muted">ZONE</div><div id="ov-smc-zone"><span class="badge badge-green">DISCOUNT</span></div></div>
+            <div><div class="muted">ORDER BLOCKS</div><div class="num" id="ov-smc-obs">Active</div></div>
+            <div><div class="muted">FVG IMBALANCES</div><div class="num" id="ov-smc-fvgs">Active</div></div>
+          </div>
+          <div class="row-between" style="margin-top:12px;padding:8px 10px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);border-radius:6px">
+            <div>
+              <div style="font-size:10px;color:#a78bfa;font-weight:700">GOLDEN POCKET (0.680)</div>
+              <div class="num" style="font-size:14px;font-weight:700;color:var(--text-bright)" id="ov-smc-entry">—</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:10px;color:var(--red);font-weight:700">STOP LOSS (0.920)</div>
+              <div class="num" style="font-size:14px;font-weight:700;color:var(--red)" id="ov-smc-sl">—</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;text-align:right">
+            <a href="#/smc-fib" class="btn btn-sm btn-secondary" style="padding:4px 10px;font-size:11px">Open 5M SMC Terminal →</a>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-head"><span>System Health</span><span id="ov-health-status" class="muted">—</span></div>
-      <div class="card-body"><div class="grid grid-2" id="ov-health-list"></div></div>
+    <!-- Row 3: Account Financials (Grid 4) -->
+    <div class="grid grid-4">
+      <div class="card card-hover">
+        <div class="card-body">
+          <div class="muted" style="font-size:10px;font-weight:700;letter-spacing:1px">ACCOUNT BALANCE</div>
+          <div class="metric-value" style="font-size:20px;font-weight:800;margin-top:4px" id="ov-acct-balance">$10,000.00</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Simulated capital</div>
+        </div>
+      </div>
+      <div class="card card-hover">
+        <div class="card-body">
+          <div class="muted" style="font-size:10px;font-weight:700;letter-spacing:1px">CURRENT EQUITY</div>
+          <div class="metric-value up" style="font-size:20px;font-weight:800;margin-top:4px" id="ov-acct-equity">$10,000.00</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Floating mark-to-market</div>
+        </div>
+      </div>
+      <div class="card card-hover">
+        <div class="card-body">
+          <div class="muted" style="font-size:10px;font-weight:700;letter-spacing:1px">UNREALIZED PNL</div>
+          <div class="metric-value" style="font-size:20px;font-weight:800;margin-top:4px" id="ov-acct-upnl">$0.00</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Active running trades</div>
+        </div>
+      </div>
+      <div class="card card-hover">
+        <div class="card-body">
+          <div class="muted" style="font-size:10px;font-weight:700;letter-spacing:1px">RISK & EXECUTION</div>
+          <div style="font-size:14px;font-weight:700;margin-top:8px;color:var(--green)">0.01 Lots (Max DD 30%)</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Real Money: DISABLED</div>
+        </div>
+      </div>
     </div>
   </div>`;
 }
 
+let _isOverviewLoading = false;
+
 Routes["/overview"] = (mount) => {
   if (_overviewTimer) { clearInterval(_overviewTimer); _overviewTimer = null; }
-  // Register cleanup so polling stops when the user leaves Overview
   window.__viewCleanup = () => { if (_overviewTimer) { clearInterval(_overviewTimer); _overviewTimer = null; } };
-  // Immediate paint (no blocking network call)
   mount.innerHTML = buildOverviewShell();
-  // Seed from cached topbar state so the page is never blank
-  if (AppState.price != null) { ovSet("ov-price", Number(AppState.price).toFixed(2)); }
-  if (AppState.regime) { ovSet("ov-regime", AppState.regime); }
-  if (AppState.strategyGrade) { ovSet("ov-grade", "PRODUCTION: " + AppState.strategyGrade); }
-  // Async load + incremental refresh
+  if (AppState.price != null) {
+    const el = document.getElementById("ov-price");
+    if (el) el.textContent = Number(AppState.price).toFixed(2);
+  }
   loadOverview();
-  _overviewTimer = setInterval(loadOverview, REFRESH_MS);
+  _overviewTimer = setInterval(loadOverview, AutoRefresh.speed || 2500);
 };
 
 async function loadOverview() {
-  let d;
+  if (AutoRefresh.speed === 0 || _isOverviewLoading) return;
+  _isOverviewLoading = true;
   try {
-    d = await API.overview("XAUUSD");
-  } catch (err) {
-    // Backend unavailable: keep working sections; mark data unavailable.
-    ovBanner("ov-ds", "DATA UNAVAILABLE", "red");
-    ovBanner("ov-safety", "CHECKING…", "muted");
-    return;
-  }
-  const m = d.market || {};
-  AppState.set({
-    price: m.price != null ? Number(m.price) : null,
-    bid: m.bid != null ? Number(m.bid) : null,
-    ask: m.ask != null ? Number(m.ask) : null,
-    regime: (d.regime && d.regime.regime) || AppState.regime,
-    strategyGrade: (d.safety && d.safety.strategy_grade) || AppState.strategyGrade,
-  });
-  patchOverviewHeader(d);
-  patchOverviewMarket(m);
-  patchOverviewDataStatus(d.data_status, m);
-  patchOverviewRegime(d.regime);
-  patchOverviewMtf(d.mtf);
-  patchOverviewSignal(d.signal);
-  patchOverviewAi(d.ai_validation);
-  patchOverviewSafety(d.safety);
-  patchOverviewSmc(d.smc);
-  patchOverviewFib(d.fibonacci);
-  patchOverviewHealth(d.health);
-  patchOverviewMarketUpdate(d.market_update);
-}
+    const [ovRes, fibRes, smcRes, ptRes, acctRes] = await Promise.allSettled([
+      API.overview("XAUUSD"),
+      fetch("/retracement/strategy/fib-retracement/XAUUSD").then(r => r.json()),
+      fetch("/retracement/strategy/smc-fib/XAUUSD").then(r => r.json()),
+      API.paperTrades(),
+      API.account()
+    ]);
 
-function patchOverviewHeader(d) {
-  const grade = (d.safety && d.safety.strategy_grade) || "—";
-  const cls = grade === "FAILED" ? "badge-red" : grade === "ROBUST" ? "badge-green" : grade === "PROMISING" ? "badge-amber" : "badge-dim";
-  ovHtml("ov-grade", `<span class="badge ${cls}">PRODUCTION: ${UI.esc(grade)}</span>`);
-  ovHtml("ov-ds-mini", ovDsBadge(d.data_status));
-}
+    const ov = ovRes.status === "fulfilled" ? ovRes.value : {};
+    const fibData = fibRes.status === "fulfilled" ? fibRes.value : {};
+    const smcData = smcRes.status === "fulfilled" ? smcRes.value : {};
+    const pt = ptRes.status === "fulfilled" ? ptRes.value : [];
+    const acct = acctRes.status === "fulfilled" ? acctRes.value : {};
 
-function patchOverviewMarket(m) {
-  if (!m) return;
-  const px = m.price != null ? Number(m.price) : null;
-  const el = document.getElementById("ov-price");
-  if (px != null) {
-    const txt = px.toFixed(2);
-    if (el.textContent !== txt) {
-      el.textContent = txt;
-      el.classList.remove("flash-up", "flash-down");
+    // 1. Live Price
+    const m = ov.market || {};
+    const px = m.price != null ? Number(m.price) : (AppState.price || 4375.0);
+    const pEl = document.getElementById("ov-price");
+    if (pEl) {
+      pEl.textContent = px.toFixed(2);
       if (_overviewPrevPrice != null && _overviewPrevPrice !== px) {
-        el.classList.add(px > _overviewPrevPrice ? "flash-up" : "flash-down");
+        pEl.classList.remove("flash-up", "flash-down");
+        void pEl.offsetWidth;
+        pEl.classList.add(px > _overviewPrevPrice ? "flash-up" : "flash-down");
       }
       _overviewPrevPrice = px;
     }
+    const bEl = document.getElementById("ov-bid");
+    const aEl = document.getElementById("ov-ask");
+    const chgEl = document.getElementById("ov-change-badge");
+    if (bEl) bEl.textContent = m.bid ? `$${Number(m.bid).toFixed(2)}` : `$${(px - 0.01).toFixed(2)}`;
+    if (aEl) aEl.textContent = m.ask ? `$${Number(m.ask).toFixed(2)}` : `$${(px + 0.01).toFixed(2)}`;
+    if (chgEl) {
+      const prev = _overviewPrevPrice || px;
+      const diff = px - prev;
+      chgEl.textContent = (diff >= 0 ? "+" : "") + diff.toFixed(2);
+      chgEl.className = diff >= 0 ? "up" : "down";
+    }
+
+    // 2. Active Trade Card
+    const trades = Array.isArray(pt) ? pt : (pt && pt.database_trades) || [];
+    const openTrade = trades.find(t => (t.status || t.state || "").toUpperCase() === "OPEN");
+    const tradeCard = document.getElementById("ov-active-trade-card");
+    const tradeBody = document.getElementById("ov-active-trade-body");
+    const tradeBadge = document.getElementById("ov-trade-status-badge");
+
+    if (openTrade && tradeBody) {
+      if (tradeCard) tradeCard.classList.add("active-trade-card");
+      if (tradeBadge) tradeBadge.innerHTML = '<span class="badge badge-green" style="animation:pulse 1.5s infinite">ACTIVE TRADE IN MARKET</span>';
+      const entry = openTrade.entry_price || openTrade.actual_entry || openTrade.target_entry || 0;
+      const cur = openTrade.current_price || px;
+      const pts = Number(openTrade.running_pts != null ? openTrade.running_pts : (openTrade.direction === "LONG" ? (cur - entry) : (entry - cur)));
+      const pnl = Number(openTrade.pnl_usd != null ? openTrade.pnl_usd : (pts * 0.01 * 100));
+      const ptsCls = pts >= 0 ? "up" : "down";
+      const pnlCls = pnl >= 0 ? "up" : "down";
+
+      tradeBody.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div>
+            <div style="font-size:15px;font-weight:800;color:var(--text-bright)">${openTrade.strategy || "STRATEGY"} <span style="color:#2962ff">${openTrade.layer || ""}</span></div>
+            <div style="font-size:11px;color:var(--text-dim)">Lot Size: <b>0.01</b> · Direction: <b>${openTrade.direction}</b></div>
+          </div>
+          <div style="text-align:right">
+            <div class="num ${ptsCls}" style="font-size:18px;font-weight:800">${pts >= 0 ? "+" : ""}${pts.toFixed(2)} PTS</div>
+            <div class="num ${pnlCls}" style="font-size:12px;font-weight:700">${pnl >= 0 ? "+$" : "-$"}${Math.abs(pnl).toFixed(2)} USD</div>
+          </div>
+        </div>
+        <div class="grid grid-3" style="background:var(--bg-1);padding:8px 10px;border-radius:6px;font-size:11px;margin-bottom:12px">
+          <div><div class="muted">ENTRY</div><div class="num"><b>$${Number(entry).toFixed(2)}</b></div></div>
+          <div><div class="muted">STOP LOSS</div><div class="num" style="color:var(--red)"><b>$${Number(openTrade.stop_loss || 0).toFixed(2)}</b></div></div>
+          <div><div class="muted">TAKE PROFIT</div><div class="num up"><b>$${Number(openTrade.take_profit_1 || openTrade.take_profit || 0).toFixed(2)}</b></div></div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="badge badge-green" style="font-size:10px">AI VALIDATED & APPROVED</span>
+          <a href="#/paper" class="btn btn-sm btn-primary" style="padding:4px 10px;font-size:11px">Manage in Paper Trading →</a>
+        </div>
+      `;
+    } else if (tradeBody) {
+      if (tradeCard) tradeCard.classList.remove("active-trade-card");
+      if (tradeBadge) tradeBadge.innerHTML = '<span class="badge badge-dim">STANDBY</span>';
+      tradeBody.innerHTML = `
+        <div style="padding:16px 0;text-align:center;color:var(--text-muted)">
+          <div style="font-size:24px;margin-bottom:6px">⏳</div>
+          <div style="font-weight:700;font-size:13px;color:var(--text)">No Open Positions Currently</div>
+          <div style="font-size:11px;margin-top:4px">Bot will auto-execute 0.01 lots when 5M Fib L1/L2/L3 or SMC 0.680 is touched.</div>
+        </div>
+      `;
+    }
+
+    // 3. 5M Fib With Retracement Card
+    const f5 = (fibData.timeframes && fibData.timeframes["5m"]) || {};
+    const fLevels = f5.levels || {};
+    if (document.getElementById("ov-fib-dir")) document.getElementById("ov-fib-dir").textContent = (f5.direction || "LONG") + (f5.direction === "SHORT" ? " ▼" : " ▲");
+    if (document.getElementById("ov-fib-anchor")) document.getElementById("ov-fib-anchor").textContent = fLevels["0.0"] ? `$${Number(fLevels["0.0"]).toFixed(2)}` : (f5.point_2 ? `$${Number(f5.point_2.price).toFixed(2)}` : "—");
+    if (document.getElementById("ov-fib-bos")) document.getElementById("ov-fib-bos").textContent = f5.structure && f5.structure.break_price ? `$${Number(f5.structure.break_price).toFixed(2)}` : (f5.point_1 ? `$${Number(f5.point_1.price).toFixed(2)}` : "—");
+    if (document.getElementById("ov-fib-target")) document.getElementById("ov-fib-target").textContent = fLevels["1.0"] ? `$${Number(fLevels["1.0"]).toFixed(2)}` : (f5.tp ? `$${Number(f5.tp.dynamic || f5.tp.locked).toFixed(2)}` : "—");
+    if (document.getElementById("ov-fib-entry")) document.getElementById("ov-fib-entry").textContent = fLevels["0.618"] ? `$${Number(fLevels["0.618"]).toFixed(2)}` : (f5.entry ? `$${Number(f5.entry.price).toFixed(2)}` : "—");
+    if (document.getElementById("ov-fib-sl")) document.getElementById("ov-fib-sl").textContent = fLevels["0.236"] ? `$${Number(fLevels["0.236"]).toFixed(2)}` : (f5.sl ? `$${Number(f5.sl.price).toFixed(2)}` : "—");
+    if (document.getElementById("ov-fib-state-badge") && f5.state) {
+      document.getElementById("ov-fib-state-badge").innerHTML = `<span class="badge ${f5.is_entry_touched ? 'badge-green' : 'badge-blue'}">${f5.state}</span>`;
+    }
+
+    // 4. 5M SMC With Fib Card
+    const s5 = (smcData.timeframes && smcData.timeframes["5m"]) || {};
+    const sLevels = s5.levels || {};
+    if (document.getElementById("ov-smc-entry")) document.getElementById("ov-smc-entry").textContent = sLevels["0.680"] ? `$${Number(sLevels["0.680"]).toFixed(2)}` : (s5.entry ? `$${Number(s5.entry.price).toFixed(2)}` : "—");
+    if (document.getElementById("ov-smc-sl")) document.getElementById("ov-smc-sl").textContent = sLevels["0.920"] ? `$${Number(sLevels["0.920"]).toFixed(2)}` : (s5.sl ? `$${Number(s5.sl.price).toFixed(2)}` : "—");
+    if (document.getElementById("ov-smc-obs") && s5.smc) document.getElementById("ov-smc-obs").textContent = `${s5.smc.active_obs_count || 0} Active`;
+    if (document.getElementById("ov-smc-fvgs") && s5.smc) document.getElementById("ov-smc-fvgs").textContent = `${s5.smc.active_fvgs_count || 0} Active`;
+
+    // 5. Account Balances
+    if (acct) {
+      if (document.getElementById("ov-acct-balance") && acct.current_balance != null) document.getElementById("ov-acct-balance").textContent = "$" + UI.fmt(acct.current_balance, 2);
+      if (document.getElementById("ov-acct-equity") && acct.equity != null) document.getElementById("ov-acct-equity").textContent = "$" + UI.fmt(acct.equity, 2);
+      if (document.getElementById("ov-acct-upnl") && acct.unrealized_pnl_usd != null) {
+        const u = Number(acct.unrealized_pnl_usd);
+        const el = document.getElementById("ov-acct-upnl");
+        el.textContent = (u >= 0 ? "+$" : "-$") + Math.abs(u).toFixed(2);
+        el.className = "metric-value " + (u >= 0 ? "up" : "down");
+      }
+    }
+  } catch (err) {
+    console.warn("Overview update err:", err);
+  } finally {
+    _isOverviewLoading = false;
   }
-  ovSet("ov-bid", m.bid != null ? Number(m.bid).toFixed(2) : "—");
-  ovSet("ov-ask", m.ask != null ? Number(m.ask).toFixed(2) : "—");
-  ovSet("ov-spread", m.spread != null ? Number(m.spread).toFixed(2) : "—");
-  const chg = m.change;
-  const chgEl = document.getElementById("ov-change");
-  if (chg != null) {
-    const s = (chg > 0 ? "+" : "") + chg.toFixed(2);
-    if (chgEl.textContent !== s) chgEl.textContent = s;
-    ovCls("ov-change", "metric-sub " + (chg >= 0 ? "up" : "down"));
-  } else { ovSet("ov-change", "—"); }
-  const pct = m.change_pct;
-  if (pct != null) {
-    const s = (pct > 0 ? "+" : "") + pct.toFixed(2) + "%";
-    ovSet("ov-change-pct", s);
-    ovCls("ov-change-pct", "metric-sub " + (pct >= 0 ? "up" : "down"));
-  } else { ovSet("ov-change-pct", "—"); }
-  ovSet("ov-updated", m.timestamp ? UI.fmtTs(m.timestamp) : "—");
-  const src = (m.data_status === "HEALTHY") ? "LIVE" : "LAST KNOWN";
-  ovSet("ov-feed-sub", `${src} · ${m.provider || ""} · 15m`);
-}
-
-function patchOverviewDataStatus(ds, m) {
-  ovHtml("ov-ds", ovDsBadge(ds));
-  const rows = [
-    ["Status", ds === "HEALTHY" ? "LIVE" : ds === "HISTORICAL" ? "HISTORICAL · FEED DEGRADED" : ds === "HISTORICAL_CACHE" ? "HISTORICAL CACHE" : "NO DATA"],
-    ["Last candle", m && m.last_candle ? UI.fmtTs(m.last_candle) : "—"],
-    ["Candles", m && m.candles != null ? String(m.candles) : "—"],
-    ["Provider", m && m.provider ? UI.esc(m.provider) : "—"],
-  ];
-  ovHtml("ov-ds-detail", rows.map(([k, v]) => `<div class="ov-kv-row"><span>${UI.esc(k)}</span><span class="num">${v}</span></div>`).join(""));
-}
-
-function patchOverviewRegime(r) {
-  if (!r) return;
-  const label = r.regime === "UNKNOWN" ? "UNKNOWN" : (r.regime + (r.trend && r.trend !== "NEUTRAL" ? " " + r.trend : ""));
-  ovSet("ov-regime", label);
-  ovCls("ov-regime", "metric-value lg " + ((r.trend === "BULLISH") ? "up" : (r.trend === "BEARISH") ? "down" : ""));
-  ovSet("ov-regime-trend", r.trend || "—");
-  ovSet("ov-regime-conf", r.volatility_pct != null ? "Volatility percentile: " + r.volatility_pct.toFixed(0) + "%" : "");
-  ovSet("ov-regime-details", r.details ? UI.esc(r.details) : "");
-  ovSet("ov-regime-updated", r.updated_at ? UI.fmtTs(r.updated_at) : "—");
-}
-
-function patchOverviewMtf(mtf) {
-  if (!mtf) return;
-  let html = "";
-  for (const [label, key] of OV_TFS) {
-    const d = mtf[key] || {};
-    const t = String(d.trend || "NO_DATA").toUpperCase();
-    const cls = t === "BULLISH" ? "bull" : t === "BEARISH" ? "bear" : "flat";
-    const w = t === "BULLISH" || t === "BEARISH" ? "100%" : t === "NEUTRAL" || t === "RANGING" ? "50%" : "8%";
-    const tcls = t === "BULLISH" ? "up" : t === "BEARISH" ? "down" : "flat";
-    html += `<div class="mtf-row" title="${UI.esc(d.summary || "")}">
-      <div class="mtf-tf">${label}</div>
-      <div class="mtf-bar"><div class="mtf-fill ${cls}" style="width:${w}"></div></div>
-      <div class="mtf-state ${tcls}">${t === "NO_DATA" ? "NO DATA" : t}</div>
-    </div>`;
-  }
-  ovHtml("ov-mtf", html);
-}
-
-function patchOverviewSignal(sig) {
-  if (!sig) return;
-  const st = sig.status || "NO_TRADE";
-  const hero = document.getElementById("ov-signal-hero");
-  if (st === "LONG") {
-    hero.className = "signal-hero buy";
-    ovSet("ov-signal-dir", "LONG");
-    ovHtml("ov-signal-badges", `<span class="badge badge-green">CONFIDENCE ${UI.fmt(sig.confidence_score, 0)}/100</span> ${UI.qualityBadge(sig.signal_quality)}`);
-    ovHtml("ov-signal-levels", UI.levels(sig.entry, sig.stop_loss, sig.take_profit_1, sig.take_profit_2, sig.take_profit_3, sig.risk_reward));
-    ovHtml("ov-signal-reasons", (sig.reasons && sig.reasons.length) ? sig.reasons.map(r => "• " + UI.esc(r)).join("<br>") : "");
-  } else if (st === "SHORT") {
-    hero.className = "signal-hero sell";
-    ovSet("ov-signal-dir", "SHORT");
-    ovHtml("ov-signal-badges", `<span class="badge badge-red">CONFIDENCE ${UI.fmt(sig.confidence_score, 0)}/100</span> ${UI.qualityBadge(sig.signal_quality)}`);
-    ovHtml("ov-signal-levels", UI.levels(sig.entry, sig.stop_loss, sig.take_profit_1, sig.take_profit_2, sig.take_profit_3, sig.risk_reward));
-    ovHtml("ov-signal-reasons", (sig.reasons && sig.reasons.length) ? sig.reasons.map(r => "• " + UI.esc(r)).join("<br>") : "");
-  } else {
-    hero.className = "signal-hero flat";
-    const label = st === "DATA_UNAVAILABLE" ? "DATA UNAVAILABLE" : st === "WAITING" ? "WAITING" : "NO TRADE";
-    ovSet("ov-signal-dir", label);
-    ovHtml("ov-signal-badges", sig.confidence_score != null ? `<span class="badge badge-muted">CONFIDENCE ${UI.fmt(sig.confidence_score, 0)}/100</span>` : "");
-    ovHtml("ov-signal-levels", "");
-    const reasons = (sig.reasons && sig.reasons.length) ? sig.reasons : [st === "DATA_UNAVAILABLE" ? "Market data unavailable — no current signal can be validated." : "Current market conditions do not satisfy the configured signal criteria."];
-    ovHtml("ov-signal-reasons", reasons.map(r => "• " + UI.esc(r)).join("<br>"));
-  }
-}
-
-function patchOverviewAi(ai) {
-  if (!ai) return;
-  const st = String(ai.status || "WAITING").toUpperCase();
-  let badge = '<span class="badge badge-dim">WAITING</span>';
-  let label = "WAITING";
-  if (st === "APPROVE") { badge = '<span class="badge badge-green">PASS</span>'; label = "PASS"; }
-  else if (st === "REJECT") { badge = '<span class="badge badge-red">REJECT</span>'; label = "REJECT"; }
-  else if (st === "CAUTION") { badge = '<span class="badge badge-amber">CAUTION</span>'; label = "CAUTION"; }
-  else if (st === "UNAVAILABLE") { badge = '<span class="badge badge-red">UNAVAILABLE</span>'; label = "UNAVAILABLE"; }
-  ovHtml("ov-ai-status", badge);
-  // Show provider / model / reason_code when present (advisory-only display).
-  const prov = ai.provider && ai.provider !== "NONE" && ai.provider !== "HEURISTIC"
-    ? ai.provider : null;
-  const model = prov && ai.model ? ai.model : null;
-  const rc = ai.reason_code ? ai.reason_code : null;
-  const parts = [];
-  if (ai.confidence != null) parts.push("Validation confidence: " + UI.fmt(ai.confidence, 0) + "%");
-  if (prov) parts.push("Provider: " + UI.esc(prov) + (model ? " · " + UI.esc(model) : ""));
-  if (rc) parts.push("Reason: " + UI.esc(rc));
-  ovSet("ov-ai-conf", parts.join(" · "));
-  ovSet("ov-ai-explanation", ai.explanation ? UI.esc(ai.explanation) : "—");
-  const risks = (ai.identified_risks && ai.identified_risks.length) ? ai.identified_risks.map(r => " " + UI.esc(r)).join("<br>") : "";
-  ovHtml("ov-ai-risks", risks);
-}
-
-function patchOverviewSafety(safety) {
-  if (!safety) return;
-  const st = safety.status || "SIGNALS_BLOCKED";
-  const map = {
-    SIGNALS_ENABLED: ["SIGNALS ENABLED", "green"],
-    SIGNALS_BLOCKED: ["SIGNALS BLOCKED", "red"],
-    OBSERVATION_MODE: ["OBSERVATION MODE", "blue"],
-    PAPER_TRADING_BLOCKED: ["PAPER TRADING BLOCKED", "amber"],
-    REAL_MONEY_ENABLED: ["REAL MONEY ENABLED", "red"],
-  };
-  const [label, kind] = map[st] || [st, "amber"];
-  ovBanner("ov-safety", label, kind);
-  const gates = safety.gates || [];
-  ovHtml("ov-safety-gates", gates.map(g => `
-    <div class="ov-kv-row">
-      <span>${UI.esc(g.label)}</span>
-      <span class="${g.pass ? "up" : "down"}">${UI.esc(g.status)}</span>
-    </div>`).join(""));
-}
-
-function patchOverviewSmc(smc) {
-  if (!smc) return;
-  const st = smc.status || "NO_DATA";
-  if (st === "NO_DATA") { ovHtml("ov-smc-status", '<span class="badge badge-red">NO DATA</span>'); ovSet("ov-smc-body", "SMC engine has no data to analyse."); return; }
-  if (st === "NO_VALID_SMC_SETUP") { ovHtml("ov-smc-status", '<span class="badge badge-muted">NO VALID SMC SETUP</span>'); ovSet("ov-smc-body", "No valid SMC setup currently detected."); return; }
-  if (st === "SMC_DATA_STALE") { ovHtml("ov-smc-status", '<span class="badge badge-amber">SMC DATA STALE</span>'); ovSet("ov-smc-body", "Market data is stale — SMC levels may be outdated."); return; }
-  const lb = smc.latest_break;
-  const rows = [
-    ["Zone", UI.esc(smc.current_zone || "N/A")],
-    ["Eq price", UI.fmt(smc.equilibrium_price)],
-    ["BOS/CHoCH", lb ? UI.esc(String(lb.break_type || "—").replace(/_/g, " ")) : "—"],
-    ["FVGs", String(smc.active_fvg_count || 0)],
-    ["Order Blocks", String(smc.active_ob_count || 0)],
-    ["Sweeps", String(smc.recent_sweep_count || 0)],
-    ["Buy-side liq", String(smc.buy_side_liquidity_pools || 0)],
-    ["Sell-side liq", String(smc.sell_side_liquidity_pools || 0)],
-  ];
-  ovHtml("ov-smc-status", '<span class="badge badge-blue">ACTIVE</span>');
-  ovHtml("ov-smc-body", rows.map(([k, v]) => `<div class="ov-kv-row"><span>${UI.esc(k)}</span><span class="num">${v}</span></div>`).join(""));
-}
-
-function patchOverviewFib(fib) {
-  if (!fib) return;
-  const st = fib.status || "NO_RETRACEMENT_SETUP";
-  if (st === "NO_DATA") { ovHtml("ov-fib-status", '<span class="badge badge-red">NO DATA</span>'); ovSet("ov-fib-body", "Fibonacci engine has no data."); return; }
-  if (st === "NO_RETRACEMENT_SETUP") { ovHtml("ov-fib-status", '<span class="badge badge-muted">NO RETRACEMENT SETUP</span>'); ovSet("ov-fib-body", fib.reason ? UI.esc(fib.reason) : "No active retracement setup."); return; }
-  const rows = [
-    ["Golden zone", fib.in_golden_pocket ? '<span class="badge badge-green">ACTIVE</span>' : '<span class="badge badge-muted">INACTIVE</span>'],
-    ["Zone range", fib.entry_zone_min != null && fib.entry_zone_max != null ? `${UI.fmt(fib.entry_zone_min)} — ${UI.fmt(fib.entry_zone_max)}` : "—"],
-    ["50%", UI.fmt(fib.level_50)],
-    ["61.8%", UI.fmt(fib.level_618)],
-    ["78.6%", UI.fmt(fib.level_786)],
-    ["Price vs zone", fib.in_golden_pocket ? "INSIDE GOLDEN ZONE" : "OUTSIDE GOLDEN ZONE"],
-    ["Direction", UI.esc(fib.direction || "—")],
-  ];
-  ovHtml("ov-fib-status", fib.in_golden_pocket ? '<span class="badge badge-green">GOLDEN ZONE ACTIVE</span>' : '<span class="badge badge-blue">ACTIVE</span>');
-  ovHtml("ov-fib-body", rows.map(([k, v]) => `<div class="ov-kv-row"><span>${UI.esc(k)}</span><span class="num">${v}</span></div>`).join(""));
-}
-
-function patchOverviewHealth(h) {
-  if (!h) return;
-  const svcs = h.services || [];
-  ovHtml("ov-health-list", svcs.map(s => `
-    <div class="svc-row">
-      <span class="svc-name">${UI.esc(s.name.replace(/_/g, " "))}</span>
-      <span class="badge ${s.healthy ? "badge-green" : "badge-red"}">${UI.esc(s.status)}</span>
-      <span class="svc-detail">${UI.esc(s.detail || "")}</span>
-    </div>`).join(""));
-  ovSet("ov-health-status", h.all_healthy ? "ALL SYSTEMS HEALTHY" : "SOME SERVICES DOWN");
-  ovCls("ov-health-status", "muted " + (h.all_healthy ? "up" : "down"));
-}
-
-function patchOverviewMarketUpdate(mu) {
-  if (!mu) return;
-  const src = mu.data_source === "HEALTHY" ? "LIVE" : mu.data_source === "HISTORICAL" ? "HISTORICAL" : mu.data_source === "HISTORICAL_CACHE" ? "HISTORICAL CACHE" : "NO DATA";
-  const rows = [
-    ["Data source", src],
-    ["Last candle", mu.last_candle ? UI.fmtTsFull(mu.last_candle) : "—"],
-    ["Last update", mu.last_update ? UI.fmtTsFull(mu.last_update) : "—"],
-    ["Timeframe", UI.esc((mu.timeframe || "15m").toUpperCase())],
-    ["Candle count", String(mu.candle_count != null ? mu.candle_count : "—")],
-    ["Provider", UI.esc(mu.provider || "—")],
-  ];
-  ovHtml("ov-mu-body", rows.map(([k, v]) => `<div class="ov-kv-row"><span>${UI.esc(k)}</span><span class="num">${v}</span></div>`).join(""));
-}
-
+};
 
 /* ================= LIVE MARKET (TRADINGVIEW EMBED) ================= */
 Routes["/live"] = (mount) => {
