@@ -93,6 +93,8 @@ _MIGRATIONS = [
     ("retracement_setups", "validation_passed", "DATETIME"),
     ("retracement_setups", "insufficient_structure_reason", "TEXT"),
     ("retracement_setups", "tp_before_freeze", "FLOAT"),
+    ("retracement_setups", "layers_json", "TEXT"),
+    ("retracement_setups", "escape_armed", "VARCHAR(5)"),
     ("notification_logs", "signal_id", "VARCHAR(36)"),
 ]
 

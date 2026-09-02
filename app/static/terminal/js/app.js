@@ -702,7 +702,7 @@ Routes["/live"] = (mount) => {
     AppState.set({ price: state.currentPrice, dataStatus: ds });
   }
 
-  function renderChart(incremental) {
+  async function renderChart(incremental) {
     const cv = document.getElementById("live-chart");
     if (!cv) return;
     if (!state.candles.length) {
@@ -716,6 +716,16 @@ Routes["/live"] = (mount) => {
       showLatest: true,
       noMessage: "Waiting for candle data…",
     };
+    // Fetch BOS/CHOCH markers from market structure
+    try {
+      const structRes = await fetch('/structure/XAUUSD');
+      if (structRes.ok) {
+        const structData = await structRes.json();
+        opts.markers = (structData.swing_points || []).filter(sp => sp.type === 'BOS' || sp.type === 'CHOCH').map(sp => ({
+          timestamp: sp.timestamp, price: sp.price, type: sp.type, direction: sp.direction || 'UP'
+        }));
+      }
+    } catch(e) {}
     if (incremental) Charts.candlesLive(cv, state.candles, opts);
     else Charts.candles(cv, state.candles, opts);
     // Wire ResizeObserver on the chart box (parent) for stability
@@ -986,8 +996,7 @@ Routes["/signals"] = (mount, query) => {
     return API.signals({ limit: 200, ...Object.fromEntries(params) });
   }, (rows) => {
     if (!rows || !rows.length) {
-      mount.appendChild(UI.state("No Signals", "No signals recorded yet. Observation mode is active and will store the next setup."));
-      return "";
+      return `<div class="stack">${UI.state("No Signals", "No signals recorded yet. Observation mode is active and will store the next setup.").outerHTML}</div>`;
     }
     const table = `<div class="table-wrap"><table class="term">
       <thead><tr>
@@ -2495,7 +2504,8 @@ Routes["/paper"] = (mount) => {
     return { acct: acct.status === "fulfilled" ? acct.value : null, pt: pt.status === "fulfilled" ? pt.value : [], ov: ov.status === "fulfilled" ? ov.value : null };
   }, (d) => {
     const acct = d.acct || {};
-    const trades = Array.isArray(d.pt) ? d.pt : [];
+    const raw = d.pt;
+    const trades = Array.isArray(raw) ? raw : (raw && raw.database_trades) || [];
     const safety = (d.ov && d.ov.safety) || {};
     const blocked = safety.headline === "PAPER_TRADING_BLOCKED" || safety.headline === "SIGNALS_BLOCKED";
     const obsMode = safety.observation_mode || false;
@@ -2519,10 +2529,10 @@ Routes["/paper"] = (mount) => {
         </div>
       </div>
       <div class="grid grid-4">
-        ${UI.metric("Balance", acct.balance != null ? "$" + UI.fmt(acct.balance, 2) : "—").outerHTML}
+        ${UI.metric("Balance", acct.current_balance != null ? "$" + UI.fmt(acct.current_balance, 2) : "—").outerHTML}
         ${UI.metric("Equity", acct.equity != null ? "$" + UI.fmt(acct.equity, 2) : "—").outerHTML}
-        ${UI.metric("Realized PnL", acct.realized_pnl != null ? UI.fmt(acct.realized_pnl, 2) : "—").outerHTML}
-        ${UI.metric("Unrealized PnL", acct.unrealized_pnl != null ? UI.fmt(acct.unrealized_pnl, 2) : "—").outerHTML}
+        ${UI.metric("Realized PnL", acct.realized_pnl_usd != null ? UI.fmt(acct.realized_pnl_usd, 2) : "—").outerHTML}
+        ${UI.metric("Unrealized PnL", acct.unrealized_pnl_usd != null ? UI.fmt(acct.unrealized_pnl_usd, 2) : "—").outerHTML}
       </div>
       <div class="card">
         <div class="card-head"><span>Trade history</span></div>
@@ -2988,7 +2998,6 @@ async function drawFibChart(containerId, tf, strategyKey) {
   } catch (err) {
     container.innerHTML = `<div style="padding:20px;color:#ef5350;font-size:12px;font-family:monospace;white-space:pre-wrap">Chart Error: ${err.message}\n${err.stack}</div>`;
   }
-  ro.observe(container);
 }
 
 /* ================= SMC WITH FIB ================= */

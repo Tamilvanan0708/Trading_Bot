@@ -150,6 +150,13 @@ class RetracementSetup(BaseModel):
     entry_touched: bool = False
     entry_timestamp: datetime | None = None
 
+    # 3-Tranche Scaling System (Fib With Retracement) + 2-Tranche (SMC With Fib)
+    # Each layer: {"layer","entry_ratio","entry_price","tp","sl","lots",
+    #              "state": PENDING|FILLED|TP_HIT|SL_HIT|ESCAPE_CLOSED,
+    #              "filled_at"}
+    layers: dict[str, dict] = Field(default_factory=dict)
+    escape_armed: bool = False
+
     # Validation / structure adequacy
     validation_passed: bool = False
     insufficient_structure_reason: str = ""

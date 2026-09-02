@@ -116,6 +116,29 @@ const Charts = {
   candles(canvas, data, opts = {}) {
     const lay = Charts._layout(canvas, data, opts);
     Charts._drawFull(lay, data, opts);
+    // BOS/CHOCH markers (from market structure data, if provided)
+    const { ctx, px0, bw: bW, Y: yVal } = lay;
+    const candles = data;
+    if (opts.markers && Array.isArray(opts.markers)) {
+      for (const m of opts.markers) {
+        const idx = candles.findIndex(c => c.timestamp === m.timestamp);
+        if (idx === -1) continue;
+        const x = px0 + idx * bW;
+        const y = yVal(m.price);
+        ctx.beginPath();
+        ctx.strokeStyle = m.type === 'BOS' ? '#00ff88' : '#ffaa00';
+        ctx.fillStyle = m.type === 'BOS' ? '#00ff88' : '#ffaa00';
+        const size = 6;
+        if (m.direction === 'UP') {
+          ctx.moveTo(x - size, y + size); ctx.lineTo(x, y); ctx.lineTo(x + size, y + size);
+        } else {
+          ctx.moveTo(x - size, y - size); ctx.lineTo(x, y); ctx.lineTo(x + size, y - size);
+        }
+        ctx.fill();
+        ctx.font = '9px monospace';
+        ctx.fillText(m.type, x + size + 2, y + 3);
+      }
+    }
     Charts._storeLast(canvas, lay, data, opts);
     if (typeof canvas.onmousemove !== "function") Charts._bindHover(canvas);
   },

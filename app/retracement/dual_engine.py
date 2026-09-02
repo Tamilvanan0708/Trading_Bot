@@ -1,25 +1,32 @@
 """
 Dual-Direction Retracement BOS Engine (Bullish LONG & Bearish SHORT).
-
+ 
 Exact User Fibonacci Semantics (Zero Look-Ahead & Instant Level Freeze):
-
+ 
 BULLISH RETRACEMENT (LONG):
-  - BOS: Price breaks above previous confirmed Swing High.
-  - Point 2 (Anchor 0.000): Lowest low of the BOS leg.
-  - Level 1.000 (Target TP): Dynamic trailing on every new swing high before entry touch.
-  - Level 0.618 (Entry): Pullback entry price.
-  - Level 0.236 (SL): Invalidation stop loss.
-  - Level 1.618: Extension reference.
-  - On Entry Touch (0.618): FREEZE & LOCK Level 1.000 TP and Level 0.236 SL immediately!
-
+   - BOS: Price breaks above previous confirmed Swing High.
+   - Point 2 (Anchor 0.000): Lowest low of the BOS leg.
+   - Level 1.000 (Target TP): Dynamic trailing on every new swing high before entry touch.
+   - Level 0.618 (Entry): Pullback entry price.
+   - Level 0.236 (SL): Invalidation stop loss.
+   - Level 1.618: Extension reference.
+   - On Entry Touch (0.618): FREEZE & LOCK Level 1.000 TP and Level 0.236 SL immediately!
+ 
 BEARISH RETRACEMENT (SHORT):
-  - BOS: Price breaks below previous confirmed Swing Low.
-  - Point 2 (Anchor 0.000): Highest high of the BOS leg.
-  - Level 1.000 (Target TP): Dynamic trailing on every new swing low before entry touch.
-  - Level 0.618 (Entry): Pullback entry price.
-  - Level 0.236 (SL): Invalidation stop loss.
-  - Level 1.618: Extension reference.
-  - On Entry Touch (0.618): FREEZE & LOCK Level 1.000 TP and Level 0.236 SL immediately!
+   - BOS: Price breaks below previous confirmed Swing Low.
+   - Point 2 (Anchor 0.000): Highest high of the BOS leg.
+   - Level 1.000 (Target TP): Dynamic trailing on every new swing low before entry touch.
+   - Level 0.618 (Entry): Pullback entry price.
+   - Level 0.236 (SL): Invalidation stop loss.
+   - Level 1.618: Extension reference.
+   - On Entry Touch (0.618): FREEZE & LOCK Level 1.000 TP and Level 0.236 SL immediately!
+ 
+3-TRANCHE SCALING SYSTEM (strict 0.01 lots each, max 0.03 lots):
+   L1 @ 0.618: 0.01 lots, TP 1.000, SL 0.236
+   L2 @ 0.500: 0.01 lots, TP 0.618, SL 0.236
+   L3 @ 0.382: 0.01 lots, TP 0.618, SL 0.236
+   Escape Plan: if price reaches 0.382 (all 3 filled) and bounces to 0.618,
+   L2 and L3 hit TP, L1 closes at breakeven — no waiting for 1.000.
 """
 
 from __future__ import annotations
@@ -54,12 +61,28 @@ class DualRetracementEngine:
         self._candles: list[Candle] = []
         self._events: list[RetracementEvent] = []
         self._archived_setups: list[RetracementSetup] = []
+        self._candles_since_bos: int = 0
+        self._max_expiry_candles: int = 200
 
     def reset(self) -> None:
         self.setup = None
         self._candles = []
         self._events = []
         self._archived_setups = []
+        self._candles_since_bos = 0
+
+    def _anchor_lookback_bars(self) -> int:
+        """Timeframe-aware anchor lookback.
+
+        Low timeframes (1m/3m/5m) use a short 20-bar window so the Fibonacci
+        anchor isolates recent internal micro-structure swings instead of
+        anchoring to a Macro swing many hours old.  All other timeframes keep
+        the original 60-bar window.
+        """
+        tf = str(self.timeframe).lower()
+        if tf in ("1m", "3m", "5m"):
+            return 20
+        return 60
 
     def process_candle(self, candle: Candle) -> list[RetracementEvent]:
         self._candles.append(candle)
@@ -100,12 +123,16 @@ class DualRetracementEngine:
         last_sh = confirmed_highs[-1]
         last_sl = confirmed_lows[-1]
 
+        # Timeframe-aware anchor lookback: low timeframes (1m/3m/5m) isolate
+        # recent internal micro-structure, higher timeframes keep macro swings.
+        lookback_bars = self._anchor_lookback_bars()
+
         # 1. Check Bullish BOS (Close > last confirmed swing high)
         if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-            # Bullish anchor = LOWEST swing low in the preceding sequence (within 60 bars)
+            # Bullish anchor = LOWEST swing low in the preceding sequence
             lows_before_bos = [
                 s for s in confirmed_lows
-                if s.index <= last_sh.index and (last_sh.index - s.index) <= 60
+                if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
             ]
             anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_sl
             p2_low = anchor_low.price
@@ -129,14 +156,15 @@ class DualRetracementEngine:
             )
             self._apply_bullish_fib(setup, p2_low, candle.high)
             self.setup = setup
+            self._candles_since_bos = 0
             return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
 
         # 2. Check Bearish BOS (Close < last confirmed swing low)
         elif candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-            # Bearish anchor = HIGHEST swing high in the preceding sequence (within 60 bars)
+            # Bearish anchor = HIGHEST swing high in the preceding sequence
             highs_before_bos = [
                 s for s in confirmed_highs
-                if s.index <= last_sl.index and (last_sl.index - s.index) <= 60
+                if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
             ]
             anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_sh
             p2_high = anchor_high.price
@@ -160,6 +188,7 @@ class DualRetracementEngine:
             )
             self._apply_bearish_fib(setup, p2_high, candle.low)
             self.setup = setup
+            self._candles_since_bos = 0
             return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
 
         return []
@@ -198,38 +227,143 @@ class DualRetracementEngine:
             return []
         events: list[RetracementEvent] = []
 
+        # Time-stop: invalidate the setup if the entry is never touched
+        # within the expiry window (mirrors the SMC engine's max expiry).
+        self._candles_since_bos += 1
+        if self._candles_since_bos > self._max_expiry_candles:
+            setup.state = RetracementState.INVALIDATED
+            setup.invalidation_reason = f"Setup expired after {self._max_expiry_candles} candles without entry touch."
+            return events
+
         if setup.direction == "LONG":
-            # 1. Update dynamic target if new high forms
-            if candle.high > (setup.current_high_price or 0.0):
+            # 1. Update dynamic target if new high forms (before any layer fills)
+            if not setup.layers and candle.high > (setup.current_high_price or 0.0):
                 setup.current_high_price = candle.high
                 setup.current_high_timestamp = candle.timestamp
                 self._apply_bullish_fib(setup, setup.point_2_price, candle.high)
 
-            # 2. Check Entry Touch (0.618 touched)
-            if setup.entry_price is not None and candle.low <= setup.entry_price:
+            # 2. Fill layers on pullback touch (3-Tranche Scaling System)
+            #    L1 @ 0.618, L2 @ 0.500, L3 @ 0.382 — all SL @ 0.236.
+            new_fills = self._fill_long_layers(candle)
+            for layer in new_fills:
+                events.append(RetracementEvent(
+                    setup_id=setup.setup_id,
+                    event_type=RetracementEventType.ENTRY_TOUCHED,
+                    state_before=RetracementState.TP_DYNAMIC,
+                    state_after=RetracementState.TRADE_ACTIVE,
+                    timestamp=candle.timestamp,
+                    price=layer["entry_price"],
+                    metadata={"layer": layer["layer"], "lots": layer["lots"]},
+                ))
+
+            # 3. Same-candle SL violation: any fill that also broke 0.236 is invalidated.
+            if setup.layers and setup.sl_price is not None and candle.low <= setup.sl_price:
+                setup.state = RetracementState.INVALIDATED
+                setup.invalidation_reason = "Price breached Stop Loss (0.236) on entry candle."
+                return events
+
+            if setup.layers:
                 setup.entry_touched = True
                 setup.entry_timestamp = candle.timestamp
-                setup.tp_locked = True
-                setup.locked_tp = setup.dynamic_tp
                 setup.state = RetracementState.TRADE_ACTIVE
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.ENTRY_TOUCHED, state_before=RetracementState.TP_DYNAMIC, state_after=RetracementState.TRADE_ACTIVE, timestamp=candle.timestamp, price=setup.entry_price))
         else:
-            # 1. Update dynamic target if new low forms
-            if candle.low < (setup.current_high_price or float("inf")):
+            # 1. Update dynamic target if new low forms (before any layer fills)
+            if not setup.layers and candle.low < (setup.current_high_price or float("inf")):
                 setup.current_high_price = candle.low
                 setup.current_high_timestamp = candle.timestamp
                 self._apply_bearish_fib(setup, setup.point_2_price, candle.low)
 
-            # 2. Check Entry Touch (0.618 touched)
-            if setup.entry_price is not None and candle.high >= setup.entry_price:
+            # 2. Fill layers on pullback touch (SHORT: price rallies UP to the level)
+            new_fills = self._fill_short_layers(candle)
+            for layer in new_fills:
+                events.append(RetracementEvent(
+                    setup_id=setup.setup_id,
+                    event_type=RetracementEventType.ENTRY_TOUCHED,
+                    state_before=RetracementState.TP_DYNAMIC,
+                    state_after=RetracementState.TRADE_ACTIVE,
+                    timestamp=candle.timestamp,
+                    price=layer["entry_price"],
+                    metadata={"layer": layer["layer"], "lots": layer["lots"]},
+                ))
+
+            # 3. Same-candle SL violation
+            if setup.layers and setup.sl_price is not None and candle.high >= setup.sl_price:
+                setup.state = RetracementState.INVALIDATED
+                setup.invalidation_reason = "Price breached Stop Loss (0.236) on entry candle."
+                return events
+
+            if setup.layers:
                 setup.entry_touched = True
                 setup.entry_timestamp = candle.timestamp
-                setup.tp_locked = True
-                setup.locked_tp = setup.dynamic_tp
                 setup.state = RetracementState.TRADE_ACTIVE
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.ENTRY_TOUCHED, state_before=RetracementState.TP_DYNAMIC, state_after=RetracementState.TRADE_ACTIVE, timestamp=candle.timestamp, price=setup.entry_price))
 
         return events
+
+    def _fill_long_layers(self, candle: Candle) -> list[dict]:
+        """Fill L1/L2/L3 for a bullish setup as price retraces DOWN the grid."""
+        setup = self.setup
+        fills = []
+        for layer, ratio, tp_ratio in (
+            ("L1", 0.618, 1.000),
+            ("L2", 0.500, 0.618),
+            ("L3", 0.382, 0.618),
+        ):
+            if layer in setup.layers:
+                continue  # already filled
+            attr = f"fib_{ratio:.3f}".replace(".", "_")
+            entry_level = getattr(setup, attr, None)
+            if entry_level is None:
+                continue
+            if candle.low <= entry_level:
+                tp = setup.layers.get("L1", {}).get("locked_tp") or (
+                    setup.fib_1_000 if tp_ratio >= 1.0 else setup.fib_0_618
+                )
+                layer_info = {
+                    "layer": layer,
+                    "entry_ratio": ratio,
+                    "entry_price": round(entry_level, 2),
+                    "tp": round(tp, 2),
+                    "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                    "lots": 0.01,
+                    "state": "FILLED",
+                    "filled_at": candle.timestamp.isoformat(),
+                }
+                setup.layers[layer] = layer_info
+                fills.append(layer_info)
+        return fills
+
+    def _fill_short_layers(self, candle: Candle) -> list[dict]:
+        """Fill L1/L2/L3 for a bearish setup as price retraces UP the grid."""
+        setup = self.setup
+        fills = []
+        for layer, ratio, tp_ratio in (
+            ("L1", 0.618, 1.000),
+            ("L2", 0.500, 0.618),
+            ("L3", 0.382, 0.618),
+        ):
+            if layer in setup.layers:
+                continue
+            attr = f"fib_{ratio:.3f}".replace(".", "_")
+            entry_level = getattr(setup, attr, None)
+            if entry_level is None:
+                continue
+            if candle.high >= entry_level:
+                tp = setup.layers.get("L1", {}).get("locked_tp") or (
+                    setup.fib_1_000 if tp_ratio >= 1.0 else setup.fib_0_618
+                )
+                layer_info = {
+                    "layer": layer,
+                    "entry_ratio": ratio,
+                    "entry_price": round(entry_level, 2),
+                    "tp": round(tp, 2),
+                    "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                    "lots": 0.01,
+                    "state": "FILLED",
+                    "filled_at": candle.timestamp.isoformat(),
+                }
+                setup.layers[layer] = layer_info
+                fills.append(layer_info)
+        return fills
 
     def _track_active_trade(self, candle: Candle) -> list[RetracementEvent]:
         setup = self.setup
@@ -237,28 +371,109 @@ class DualRetracementEngine:
             return []
         events: list[RetracementEvent] = []
 
+        # Freeze the L1 TP (1.000) on the first layer fill if not already locked.
+        if setup.layers and "L1" in setup.layers:
+            l1 = setup.layers["L1"]
+            if not l1.get("locked_tp"):
+                l1["locked_tp"] = l1["tp"]
+                setup.locked_tp = l1["tp"]
+                setup.tp_locked = True
+
+        # ESCAPE PLAN: all 3 layers filled (price reached 0.382) and price
+        # bounces back to 0.618 → L2/L3 hit TP, L1 closes at breakeven.
+        all_filled = {"L1", "L2", "L3"}.issubset(setup.layers.keys())
+        if all_filled and setup.escape_armed is False:
+            setup.escape_armed = True
+        if setup.escape_armed:
+            escape_level = setup.fib_0_618
+            if escape_level is not None:
+                if setup.direction == "LONG" and candle.high >= escape_level:
+                    setup.state = RetracementState.COMPLETED
+                    setup.outcome = "ESCAPE"
+                    setup.completion_reason = (
+                        f"Escape plan: all layers filled, price returned to 0.618 — "
+                        f"L2/L3 TP hit, L1 closed at breakeven."
+                    )
+                    for layer in setup.layers.values():
+                        layer["state"] = "ESCAPE_CLOSED"
+                    events.append(RetracementEvent(
+                        setup_id=setup.setup_id,
+                        event_type=RetracementEventType.COMPLETED,
+                        state_before=RetracementState.TRADE_ACTIVE,
+                        state_after=RetracementState.COMPLETED,
+                        timestamp=candle.timestamp,
+                        price=escape_level,
+                        metadata={"reason": "ESCAPE_PLAN"},
+                    ))
+                    return events
+                elif setup.direction == "SHORT" and candle.low <= escape_level:
+                    setup.state = RetracementState.COMPLETED
+                    setup.outcome = "ESCAPE"
+                    setup.completion_reason = (
+                        f"Escape plan: all layers filled, price returned to 0.618 — "
+                        f"L2/L3 TP hit, L1 closed at breakeven."
+                    )
+                    for layer in setup.layers.values():
+                        layer["state"] = "ESCAPE_CLOSED"
+                    events.append(RetracementEvent(
+                        setup_id=setup.setup_id,
+                        event_type=RetracementEventType.COMPLETED,
+                        state_before=RetracementState.TRADE_ACTIVE,
+                        state_after=RetracementState.COMPLETED,
+                        timestamp=candle.timestamp,
+                        price=escape_level,
+                        metadata={"reason": "ESCAPE_PLAN"},
+                    ))
+                    return events
+
+        # SL: shared stop at 0.236 — stops out ALL open layers.
+        if setup.sl_price is not None:
+            sl_hit = (candle.low <= setup.sl_price) if setup.direction == "LONG" else (candle.high >= setup.sl_price)
+            if sl_hit:
+                setup.state = RetracementState.COMPLETED
+                setup.outcome = "SL_HIT"
+                setup.completion_reason = f"Stop Loss hit at {setup.sl_price}"
+                for layer in setup.layers.values():
+                    if layer["state"] == "FILLED":
+                        layer["state"] = "SL_HIT"
+                events.append(RetracementEvent(
+                    setup_id=setup.setup_id,
+                    event_type=RetracementEventType.SL_HIT,
+                    state_before=RetracementState.TRADE_ACTIVE,
+                    state_after=RetracementState.COMPLETED,
+                    timestamp=candle.timestamp,
+                    price=setup.sl_price,
+                ))
+                return events
+
+        # Individual TP checks per layer.
         if setup.direction == "LONG":
-            if setup.locked_tp is not None and candle.high >= setup.locked_tp:
-                setup.state = RetracementState.COMPLETED
-                setup.outcome = "TP_HIT"
-                setup.completion_reason = f"Take Profit reached at {setup.locked_tp}"
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.TP_HIT, state_before=RetracementState.TRADE_ACTIVE, state_after=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.locked_tp))
-            elif setup.sl_price is not None and candle.low <= setup.sl_price:
-                setup.state = RetracementState.COMPLETED
-                setup.outcome = "SL_HIT"
-                setup.completion_reason = f"Stop Loss hit at {setup.sl_price}"
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.SL_HIT, state_before=RetracementState.TRADE_ACTIVE, state_after=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.sl_price))
+            for layer in setup.layers.values():
+                if layer["state"] != "FILLED" or layer.get("tp") is None:
+                    continue
+                if candle.high >= layer["tp"]:
+                    layer["state"] = "TP_HIT"
         else:
-            if setup.locked_tp is not None and candle.low <= setup.locked_tp:
-                setup.state = RetracementState.COMPLETED
-                setup.outcome = "TP_HIT"
-                setup.completion_reason = f"Take Profit reached at {setup.locked_tp}"
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.TP_HIT, state_before=RetracementState.TRADE_ACTIVE, state_after=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.locked_tp))
-            elif setup.sl_price is not None and candle.high >= setup.sl_price:
-                setup.state = RetracementState.COMPLETED
-                setup.outcome = "SL_HIT"
-                setup.completion_reason = f"Stop Loss hit at {setup.sl_price}"
-                events.append(RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.SL_HIT, state_before=RetracementState.TRADE_ACTIVE, state_after=RetracementState.COMPLETED, timestamp=candle.timestamp, price=setup.sl_price))
+            for layer in setup.layers.values():
+                if layer["state"] != "FILLED" or layer.get("tp") is None:
+                    continue
+                if candle.low <= layer["tp"]:
+                    layer["state"] = "TP_HIT"
+
+        # Setup completes only when EVERY filled layer has resolved (TP/SL/escape).
+        open_layers = [l for l in setup.layers.values() if l["state"] == "FILLED"]
+        if not open_layers and setup.layers:
+            setup.state = RetracementState.COMPLETED
+            setup.outcome = "TP_HIT"
+            setup.completion_reason = "All layers reached their take profit targets."
+            events.append(RetracementEvent(
+                setup_id=setup.setup_id,
+                event_type=RetracementEventType.TP_HIT,
+                state_before=RetracementState.TRADE_ACTIVE,
+                state_after=RetracementState.COMPLETED,
+                timestamp=candle.timestamp,
+                price=setup.locked_tp,
+            ))
 
         return events
 

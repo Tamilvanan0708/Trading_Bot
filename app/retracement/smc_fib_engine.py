@@ -80,12 +80,30 @@ class SMCFibEngine:
         self.completion_reason: str | None = None
         self.invalidation_reason: str | None = None
 
+        # 2-Tranche Scaling System
+        self.layers: dict[str, dict] = {}  # L1/L2 state
+        self.escape_armed: bool = False
+        self.pocket_filled: bool = False
+
         self.candles_since_point_2: int = 0
         self.max_expiry_candles: int = 200
 
         self.levels: dict[str, RetracementLevel] = {}
         self._events: list[RetracementEvent] = []
         self._history: list[Candle] = []
+
+    def _anchor_lookback_bars(self) -> int:
+        """Timeframe-aware anchor lookback.
+
+        Low timeframes (1m/3m/5m) use a short 20-bar window so the Fibonacci
+        anchor isolates recent internal micro-structure swings instead of
+        anchoring to a Macro swing many hours old.  All other timeframes keep
+        the original 60-bar window.
+        """
+        tf = str(self.timeframe).lower()
+        if tf in ("1m", "3m", "5m"):
+            return 20
+        return 60
 
     def _reset_setup(self) -> None:
         """Clear setup variables while preserving candle history for continuous scanning."""
@@ -109,6 +127,9 @@ class SMCFibEngine:
         self.completion_reason = None
         self.invalidation_reason = None
         self.candles_since_point_2 = 0
+        self.layers = {}
+        self.escape_armed = False
+        self.pocket_filled = False
         self.levels = {}
         self._events = []
 
@@ -144,12 +165,16 @@ class SMCFibEngine:
         last_high = confirmed_highs[-1]
         last_low = confirmed_lows[-1]
 
+        # Timeframe-aware anchor lookback: low timeframes (1m/3m/5m) isolate
+        # recent internal micro-structure, higher timeframes keep macro swings.
+        lookback_bars = self._anchor_lookback_bars()
+
         # Check for Bullish BOS (Price broke above previous confirmed swing high)
         if candle.close > last_high.price and last_high.index < len(self._history) - 1:
-            # Bullish anchor = LOWEST swing low of the preceding swing sequence (within 60 bars)
+            # Bullish anchor = LOWEST swing low of the preceding swing sequence
             lows_before_bos = [
                 s for s in confirmed_lows
-                if s.index <= last_high.index and (last_high.index - s.index) <= 60
+                if s.index <= last_high.index and (last_high.index - s.index) <= lookback_bars
             ]
             anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_low
             self._initiate_setup(
@@ -162,10 +187,10 @@ class SMCFibEngine:
             )
         # Check for Bearish BOS (Price broke below previous confirmed swing low)
         elif candle.close < last_low.price and last_low.index < len(self._history) - 1:
-            # Bearish anchor = HIGHEST swing high of the preceding swing sequence (within 60 bars)
+            # Bearish anchor = HIGHEST swing high of the preceding swing sequence
             highs_before_bos = [
                 s for s in confirmed_highs
-                if s.index <= last_low.index and (last_low.index - s.index) <= 60
+                if s.index <= last_low.index and (last_low.index - s.index) <= lookback_bars
             ]
             anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_high
             self._initiate_setup(
@@ -261,58 +286,131 @@ class SMCFibEngine:
                 self.target_tp_price = candle.high
                 self.target_tp_ts = candle.timestamp
                 self._recompute_fib_levels()
-            # Check entry touch (0.68 touched)
-            if self.entry_price is not None and candle.low <= self.entry_price:
-                # Check for instant SL violation
+            # 2-Tranche fill: L1 @ 0.680, L2 @ 0.790 (golden pocket)
+            if self.entry_price is not None and candle.low <= self.entry_price and "L1" not in self.layers:
                 if self.sl_price is not None and candle.low <= self.sl_price:
                     self.state = RetracementState.INVALIDATED
                     self.invalidation_reason = "Price breached Stop Loss on entry candle."
                     return
+                self.layers["L1"] = {
+                    "layer": "L1", "entry_ratio": 0.680,
+                    "entry_price": round(self.entry_price, 2),
+                    "tp": round(self.target_tp_price, 2), "sl": round(self.sl_price, 2),
+                    "lots": 0.01, "state": "FILLED",
+                    "filled_at": candle.timestamp.isoformat(),
+                }
                 self.entry_touched = True
                 self.entry_timestamp = candle.timestamp
                 self.tp_locked = True
                 self.locked_tp = self.target_tp_price
                 self.state = RetracementState.TRADE_ACTIVE
+            # L2 fill: deeper golden pocket
+            if self.pocket_price is not None and candle.low <= self.pocket_price and "L2" not in self.layers:
+                self.layers["L2"] = {
+                    "layer": "L2", "entry_ratio": 0.790,
+                    "entry_price": round(self.pocket_price, 2),
+                    "tp": round(self.equilibrium_50, 2) if self.equilibrium_50 else None,
+                    "sl": round(self.sl_price, 2),
+                    "lots": 0.01, "state": "FILLED",
+                    "filled_at": candle.timestamp.isoformat(),
+                }
+                self.pocket_filled = True
+                if self.state != RetracementState.TRADE_ACTIVE:
+                    self.state = RetracementState.TRADE_ACTIVE
         else:
             if candle.low < (self.target_tp_price or float("inf")):
                 self.target_tp_price = candle.low
                 self.target_tp_ts = candle.timestamp
                 self._recompute_fib_levels()
-            # Check entry touch
-            if self.entry_price is not None and candle.high >= self.entry_price:
+            if self.entry_price is not None and candle.high >= self.entry_price and "L1" not in self.layers:
                 if self.sl_price is not None and candle.high >= self.sl_price:
                     self.state = RetracementState.INVALIDATED
                     self.invalidation_reason = "Price breached Stop Loss on entry candle."
                     return
+                self.layers["L1"] = {
+                    "layer": "L1", "entry_ratio": 0.680,
+                    "entry_price": round(self.entry_price, 2),
+                    "tp": round(self.target_tp_price, 2), "sl": round(self.sl_price, 2),
+                    "lots": 0.01, "state": "FILLED",
+                    "filled_at": candle.timestamp.isoformat(),
+                }
                 self.entry_touched = True
                 self.entry_timestamp = candle.timestamp
                 self.tp_locked = True
                 self.locked_tp = self.target_tp_price
                 self.state = RetracementState.TRADE_ACTIVE
+            if self.pocket_price is not None and candle.high >= self.pocket_price and "L2" not in self.layers:
+                self.layers["L2"] = {
+                    "layer": "L2", "entry_ratio": 0.790,
+                    "entry_price": round(self.pocket_price, 2),
+                    "tp": round(self.equilibrium_50, 2) if self.equilibrium_50 else None,
+                    "sl": round(self.sl_price, 2),
+                    "lots": 0.01, "state": "FILLED",
+                    "filled_at": candle.timestamp.isoformat(),
+                }
+                self.pocket_filled = True
+                if self.state != RetracementState.TRADE_ACTIVE:
+                    self.state = RetracementState.TRADE_ACTIVE
 
     def _track_active_trade(self, candle: Candle) -> None:
+        # ESCAPE PLAN: if L2 (golden pocket) filled and price bounces to Equilibrium (0.500),
+        # close both L1 and L2 at 0.500.
+        if "L2" in self.layers and not self.escape_armed:
+            self.escape_armed = True
+        if self.escape_armed and self.equilibrium_50 is not None:
+            if self.direction == SignalDirection.LONG and candle.high >= self.equilibrium_50:
+                self.state = RetracementState.COMPLETED
+                self.outcome = "ESCAPE"
+                self.completion_reason = (
+                    f"Escape: L2 filled at golden pocket, price returned to "
+                    f"equilibrium {self.equilibrium_50}. Both L1 and L2 closed at profit."
+                )
+                for layer in self.layers.values():
+                    layer["state"] = "ESCAPE_CLOSED"
+                return
+            elif self.direction == SignalDirection.SHORT and candle.low <= self.equilibrium_50:
+                self.state = RetracementState.COMPLETED
+                self.outcome = "ESCAPE"
+                self.completion_reason = (
+                    f"Escape: L2 filled at golden pocket, price returned to "
+                    f"equilibrium {self.equilibrium_50}. Both L1 and L2 closed at profit."
+                )
+                for layer in self.layers.values():
+                    layer["state"] = "ESCAPE_CLOSED"
+                return
+
+        # SL: shared stop — stops out ALL open layers.
+        if self.sl_price is not None:
+            sl_hit = (candle.low <= self.sl_price) if self.direction == SignalDirection.LONG else (candle.high >= self.sl_price)
+            if sl_hit:
+                self.state = RetracementState.COMPLETED
+                self.outcome = "SL_HIT"
+                self.completion_reason = f"Stop Loss hit at {self.sl_price}."
+                for layer in self.layers.values():
+                    if layer["state"] == "FILLED":
+                        layer["state"] = "SL_HIT"
+                return
+
+        # Individual TP checks per layer.
         if self.direction == SignalDirection.LONG:
-            # Check TP Hit
-            if self.locked_tp is not None and candle.high >= self.locked_tp:
-                self.state = RetracementState.COMPLETED
-                self.outcome = "TP_HIT"
-                self.completion_reason = f"Take Profit hit at {self.locked_tp}."
-            # Check SL Hit
-            elif self.sl_price is not None and candle.low <= self.sl_price:
-                self.state = RetracementState.COMPLETED
-                self.outcome = "SL_HIT"
-                self.completion_reason = f"Stop Loss hit at {self.sl_price}."
+            for layer in self.layers.values():
+                if layer["state"] != "FILLED" or layer.get("tp") is None:
+                    continue
+                if candle.high >= layer["tp"]:
+                    layer["state"] = "TP_HIT"
         else:
-            # Check TP Hit
-            if self.locked_tp is not None and candle.low <= self.locked_tp:
-                self.state = RetracementState.COMPLETED
-                self.outcome = "TP_HIT"
-                self.completion_reason = f"Take Profit hit at {self.locked_tp}."
-            # Check SL Hit
-            elif self.sl_price is not None and candle.high >= self.sl_price:
-                self.state = RetracementState.COMPLETED
-                self.outcome = "SL_HIT"
-                self.completion_reason = f"Stop Loss hit at {self.sl_price}."
+            for layer in self.layers.values():
+                if layer["state"] != "FILLED" or layer.get("tp") is None:
+                    continue
+                if candle.low <= layer["tp"]:
+                    layer["state"] = "TP_HIT"
+
+        # Setup completes when all filled layers have resolved.
+        open_layers = [l for l in self.layers.values() if l["state"] == "FILLED"]
+        if not open_layers and self.layers:
+            self.state = RetracementState.COMPLETED
+            self.outcome = "TP_HIT"
+            self.completion_reason = "All layers reached their take profit targets."
 
     def to_dict(self, live_price: float | None = None) -> dict[str, Any]:
         """Serialize state for API and frontend display."""
@@ -376,4 +474,6 @@ class SMCFibEngine:
             "invalidation_reason": self.invalidation_reason,
             "completion_reason": self.completion_reason,
             "outcome": self.outcome,
+            "layers": self.layers,
+            "escape_armed": self.escape_armed,
         }

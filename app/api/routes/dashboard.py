@@ -470,7 +470,7 @@ DASHBOARD_HTML = """
             const live = data.live || {};
 
             // Live indicator
-            document.getElementById('live-price').innerText = data.current_price != null ? '$' + Number(data.current_price).toFixed(2) : '--';
+            document.getElementById('live-price').innerText = data.current_price != null ? '$' + Number(data.current_price || 0).toFixed(2) : '--';
             document.getElementById('live-bid').innerText = live.bid != null ? '$' + live.bid.toFixed(2) : '--';
             document.getElementById('live-ask').innerText = live.ask != null ? '$' + live.ask.toFixed(2) : '--';
             document.getElementById('live-provider').innerText = live.provider || '--';
@@ -485,35 +485,35 @@ DASHBOARD_HTML = """
             }
 
             // Biases
-            setBias('bias-4h', 'bias-4h-desc', data.market_bias['4h'].trend, data.market_bias['4h'].summary);
-            setBias('bias-1h', 'bias-1h-desc', data.market_bias['1h'].trend, data.market_bias['1h'].summary);
-            setBias('bias-15m', 'bias-15m-desc', data.market_bias['15m'].trend, data.market_bias['15m'].summary);
+            setBias('bias-4h', 'bias-4h-desc', (data.market_bias || {})['4h']?.trend || '--', (data.market_bias || {})['4h']?.summary || '--');
+            setBias('bias-1h', 'bias-1h-desc', (data.market_bias || {})['1h']?.trend || '--', (data.market_bias || {})['1h']?.summary || '--');
+            setBias('bias-15m', 'bias-15m-desc', (data.market_bias || {})['15m']?.trend || '--', (data.market_bias || {})['15m']?.summary || '--');
 
             // Signal
             const sig = data.signal;
-            document.getElementById('signal-direction').innerText = sig.direction;
-            document.getElementById('signal-direction').className = sig.direction === 'LONG' ? 'mb-0 text-success' : (sig.direction === 'SHORT' ? 'mb-0 text-danger' : 'mb-0 text-secondary');
-            document.getElementById('signal-strategy').innerText = sig.strategy.replace(/_/g, ' ');
-            document.getElementById('signal-score').innerText = sig.confidence_score.toFixed(0) + ' / 100';
+            document.getElementById('signal-direction').innerText = (sig || {}).direction;
+            document.getElementById('signal-direction').className = (sig || {}).direction === 'LONG' ? 'mb-0 text-success' : ((sig || {}).direction === 'SHORT' ? 'mb-0 text-danger' : 'mb-0 text-secondary');
+            document.getElementById('signal-strategy').innerText = ((sig || {}).strategy || '').replace(/_/g, ' ');
+            document.getElementById('signal-score').innerText = Number((sig || {}).confidence_score || 0).toFixed(0) + ' / 100';
 
-            document.getElementById('sig-entry').innerText = '$' + sig.entry.toFixed(2);
-            document.getElementById('sig-sl').innerText = '$' + sig.stop_loss.toFixed(2);
-            document.getElementById('sig-tp1').innerText = '$' + sig.take_profit_1.toFixed(2);
-            document.getElementById('sig-tp2').innerText = '$' + sig.take_profit_2.toFixed(2);
-            document.getElementById('sig-tp3').innerText = '$' + sig.take_profit_3.toFixed(2);
-            document.getElementById('sig-rr').innerText = '1:' + sig.risk_reward.toFixed(1);
+            document.getElementById('sig-entry').innerText = '$' + Number((sig || {}).entry || 0).toFixed(2);
+            document.getElementById('sig-sl').innerText = '$' + Number((sig || {}).stop_loss || 0).toFixed(2);
+            document.getElementById('sig-tp1').innerText = '$' + Number((sig || {}).take_profit_1 || 0).toFixed(2);
+            document.getElementById('sig-tp2').innerText = '$' + Number((sig || {}).take_profit_2 || 0).toFixed(2);
+            document.getElementById('sig-tp3').innerText = '$' + Number((sig || {}).take_profit_3 || 0).toFixed(2);
+            document.getElementById('sig-rr').innerText = '1:' + Number((sig || {}).risk_reward || 0).toFixed(1);
 
             const reasonsList = document.getElementById('signal-reasons');
             reasonsList.innerHTML = '';
-            sig.reasons.forEach(r => {
+            ((sig || {}).reasons || []).forEach(r => {
                 const li = document.createElement('li');
                 li.innerText = r;
                 reasonsList.appendChild(li);
             });
 
             // AI
-            const ai = data.ai_validation;
-            document.getElementById('ai-status').innerText = ai.status;
+            const ai = (data || {}).ai_validation || {};
+            document.getElementById('ai-status').innerText = ((data || {}).ai_validation || {}).status || '--';
             document.getElementById('ai-status').className = ai.status === 'APPROVE' ? 'badge bg-success' : (ai.status === 'REJECT' ? 'badge bg-danger' : 'badge bg-warning');
             document.getElementById('ai-explanation').innerText = ai.explanation;
 
@@ -537,11 +537,11 @@ DASHBOARD_HTML = """
             document.getElementById('signal-explanation').innerText = data.explanation || '--';
 
             // SMC & Fib Details
-            const smc = data.smc_analysis;
-            document.getElementById('smc-zone-info').innerText = `Zone: ${smc.current_zone} | Eq: $${smc.equilibrium_price} | FVGs: ${smc.active_fvgs.length}`;
+            const smc = (data || {}).smc_analysis || {};
+            document.getElementById('smc-zone-info').innerText = `Zone: ${((data || {}).smc_analysis || {}).current_zone || '--'} | Eq: $${((data || {}).smc_analysis || {}).equilibrium_price || '--'} | FVGs: ${(((data || {}).smc_analysis || {}).active_fvgs || []).length}`;
 
-            const fib = data.fibonacci_setup;
-            document.getElementById('fib-zone-info').innerText = fib ? `Golden Pocket: $${fib.entry_zone_min} - $${fib.entry_zone_max} (In Zone: ${fib.in_golden_pocket})` : 'No active setup';
+            const fib = (data || {}).fibonacci_setup;
+            document.getElementById('fib-zone-info').innerText = ((data || {}).fibonacci_setup) ? `Golden Pocket: $${fib.entry_zone_min} - $${fib.entry_zone_max} (In Zone: ${fib.in_golden_pocket})` : 'No active setup';
         }
 
         function showLiveDisconnected() {

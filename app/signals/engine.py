@@ -107,6 +107,7 @@ class SignalEngine:
             return self._no_trade_payload(
                 snapshot, confluence,
                 reason=f"Final score {final_score} ({final_quality.value}) below STRONG threshold.",
+                confidence_score=final_score,
             )
 
         mbias = MarketBias.BULLISH if confluence.direction == SignalDirection.LONG else MarketBias.BEARISH
@@ -141,7 +142,7 @@ class SignalEngine:
         payload.explanation = payload.build_explanation()
         return payload
 
-    def _no_trade_payload(self, snapshot: MultiTimeframeSnapshot, confluence, reason: str = "", mtf=None) -> SignalPayload:
+    def _no_trade_payload(self, snapshot: MultiTimeframeSnapshot, confluence, reason: str = "", mtf=None, confidence_score: float | None = None) -> SignalPayload:
         from app.core.mtf_config import resolve_mtf
         mtf = resolve_mtf(mtf)
         curr_p = snapshot.current_price
@@ -157,7 +158,7 @@ class SignalEngine:
             take_profit_2=curr_p,
             take_profit_3=curr_p,
             risk_reward=0.0,
-            confidence_score=confluence.total_score,
+            confidence_score=confidence_score if confidence_score is not None else confluence.total_score,
             signal_quality=confluence.quality,
             market_bias=MarketBias.NEUTRAL,
             strategy_version=derive_strategy_version(self.settings, mtf_name=mtf.name),

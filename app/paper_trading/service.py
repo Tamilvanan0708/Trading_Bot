@@ -66,8 +66,13 @@ class PaperTradingService:
         self,
         signal: SignalPayload,
         repo: Repository | None = None,
+        fixed_lot_size: float | None = None,
     ) -> PaperPosition | None:
-        """Creates a pending paper position from a valid signal and persists it."""
+        """Creates a pending paper position from a valid signal and persists it.
+
+        When ``fixed_lot_size`` is set (e.g. 0.01 for strategy tranches), the
+        position is opened at that exact lot size, bypassing the risk manager.
+        """
         if not signal.is_tradable or signal.direction == SignalDirection.NO_TRADE:
             return None
 
@@ -77,21 +82,30 @@ class PaperTradingService:
             logger.info("Max open trades (%s) reached; ignoring signal %s.", self.settings.MAX_OPEN_TRADES, signal.signal_id)
             return None
 
-        risk_req = RiskCalculationRequest(
-            account_balance=max(100.0, self.balance),
-            risk_percent=self.settings.RISK_PERCENT,
-            entry_price=signal.entry,
-            stop_loss=signal.stop_loss,
-            take_profit_1=signal.take_profit_1,
-            take_profit_2=signal.take_profit_2,
-            take_profit_3=signal.take_profit_3,
-            direction=signal.direction,
-            contract_size=self.settings.LOT_CONTRACT_SIZE,
-        )
-        pos_size = self.risk_manager.calculate_position_size(risk_req)
-        if not pos_size.is_valid or pos_size.lot_size <= 0:
-            logger.info("Position sizing rejected signal %s: %s", signal.signal_id, pos_size.rejection_reason)
-            return None
+        if fixed_lot_size is not None and fixed_lot_size > 0:
+            lot_size = fixed_lot_size
+            risk_amount_usd = round(
+                lot_size * abs(signal.entry - signal.stop_loss) * self.settings.LOT_CONTRACT_SIZE,
+                2,
+            )
+        else:
+            risk_req = RiskCalculationRequest(
+                account_balance=max(100.0, self.balance),
+                risk_percent=self.settings.RISK_PERCENT,
+                entry_price=signal.entry,
+                stop_loss=signal.stop_loss,
+                take_profit_1=signal.take_profit_1,
+                take_profit_2=signal.take_profit_2,
+                take_profit_3=signal.take_profit_3,
+                direction=signal.direction,
+                contract_size=self.settings.LOT_CONTRACT_SIZE,
+            )
+            pos_size = self.risk_manager.calculate_position_size(risk_req)
+            if not pos_size.is_valid or pos_size.lot_size <= 0:
+                logger.info("Position sizing rejected signal %s: %s", signal.signal_id, pos_size.rejection_reason)
+                return None
+            lot_size = pos_size.lot_size
+            risk_amount_usd = pos_size.risk_amount_usd
 
         pos_id = str(uuid.uuid4())
         pos = PaperPosition(
@@ -99,8 +113,8 @@ class PaperTradingService:
             signal_id=signal.signal_id,
             symbol=signal.instrument,
             direction=signal.direction,
-            lot_size=pos_size.lot_size,
-            risk_amount_usd=pos_size.risk_amount_usd,
+            lot_size=lot_size,
+            risk_amount_usd=risk_amount_usd,
             target_entry=signal.entry,
             stop_loss=signal.stop_loss,
             take_profit_1=signal.take_profit_1,

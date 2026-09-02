@@ -92,6 +92,8 @@ def _serialize_setup(setup, live_price=None, data_status=None, symbol="XAUUSD",
         "invalidation_reason": setup.invalidation_reason or None,
         "completion_reason": setup.completion_reason or None,
         "outcome": setup.outcome,
+        "layers": getattr(setup, "layers", {}) or {},
+        "escape_armed": getattr(setup, "escape_armed", False),
         "timestamps": {
             "created": setup.created_at.isoformat() if setup.created_at else None,
             "updated": setup.updated_at.isoformat() if setup.updated_at else None,
@@ -469,6 +471,8 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
                     "point_2": None,
                     "bos": None,
                     "levels": {},
+                    "layers": {},
+                    "escape_armed": False,
                     "metrics": {
                         "total_range_pts": 0.0,
                         "entry_to_tp_pts": 0.0,

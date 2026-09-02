@@ -78,6 +78,9 @@ class RetracementSetupModel(Base):
     mae_r = Column(Float, nullable=True)
     mfe_r = Column(Float, nullable=True)
 
+    layers_json = Column(Text, nullable=True)  # 3/2-tranche layer state (JSON)
+    escape_armed = Column(String(5), nullable=True)  # "1"/"0"
+
     # JSON column-free: event history stored separately
     def to_domain(self) -> RetracementSetup:
         return RetracementSetup(
