@@ -52,11 +52,13 @@ from app.retracement.models import (
 class DualRetracementEngine:
     """Exact deterministic dual-direction (Bullish/Bearish) Retracement BOS Engine."""
 
-    def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int = 2, right_bars: int = 2):
+    def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int | None = None, right_bars: int | None = None):
         self.symbol = symbol
         self.timeframe = timeframe
-        self.left_bars = left_bars
-        self.right_bars = right_bars
+        # 4-bar fractal swings filter out inside wiggles and capture true institutional swings (Image 1 exact match)
+        default_bars = 4 if timeframe.lower() in ("5m", "1m", "3m") else 3
+        self.left_bars = left_bars if left_bars is not None else default_bars
+        self.right_bars = right_bars if right_bars is not None else default_bars
         self.setup: RetracementSetup | None = None
         self._candles: list[Candle] = []
         self._events: list[RetracementEvent] = []
@@ -138,9 +140,8 @@ class DualRetracementEngine:
 
         # 1. Check Bullish BOS (Body Close > last confirmed swing high)
         if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-            # Immediate Local Parent Swing Anchor: The swing low directly preceding this breakout (Image 2 style)
-            lows_before_bos = [s for s in confirmed_lows if s.index <= last_sh.index]
-            anchor_low = lows_before_bos[-1] if lows_before_bos else last_sl
+            # Anchor Low: The confirmed swing low from which this breakout leg launched (Image 1 match)
+            anchor_low = confirmed_lows[-1]
             p2_low = anchor_low.price
             p2_ts = anchor_low.timestamp
 
@@ -167,9 +168,8 @@ class DualRetracementEngine:
 
         # 2. Check Bearish BOS (Body Close < last confirmed swing low)
         elif candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-            # Immediate Local Parent Swing Anchor: The swing high directly preceding this breakout (Image 2 style)
-            highs_before_bos = [s for s in confirmed_highs if s.index <= last_sl.index]
-            anchor_high = highs_before_bos[-1] if highs_before_bos else last_sh
+            # Anchor High: The confirmed swing high from which this breakout leg launched (Image 1 match)
+            anchor_high = confirmed_highs[-1]
             p2_high = anchor_high.price
             p2_ts = anchor_high.timestamp
 
@@ -238,50 +238,7 @@ class DualRetracementEngine:
             setup.invalidation_reason = f"Setup expired after {self._max_expiry_candles} candles without entry touch."
             return events
 
-        # Continuation BOS detection: while waiting for entry (no layers filled yet),
-        # if price makes a fresh BOS in the trend direction, update the dealing range
-        # to the active impulse leg so we track the latest Lower High / Higher Low.
-        if not setup.layers:
-            swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
-            confirmed_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._candles) - 1]
-            confirmed_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._candles) - 1]
-            lookback_bars = self._anchor_lookback_bars()
-
-            if setup.direction == "SHORT" and confirmed_highs and confirmed_lows:
-                last_sl = confirmed_lows[-1]
-                if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-                    if setup.point_1_timestamp and last_sl.timestamp > setup.point_1_timestamp:
-                        highs_before_bos = [s for s in confirmed_highs if s.index <= last_sl.index]
-                        anchor_high = highs_before_bos[-1] if highs_before_bos else confirmed_highs[-1]
-                        setup.point_1_price = last_sl.price
-                        setup.point_1_timestamp = last_sl.timestamp
-                        setup.bos_price = last_sl.price
-                        setup.bos_timestamp = last_sl.timestamp
-                        setup.point_2_price = anchor_high.price
-                        setup.point_2_timestamp = anchor_high.timestamp
-                        setup.current_high_price = candle.low
-                        setup.current_high_timestamp = candle.timestamp
-                        setup.dynamic_tp = candle.low
-                        self._apply_bearish_fib(setup, anchor_high.price, candle.low)
-                        self._candles_since_bos = 0
-
-            elif setup.direction == "LONG" and confirmed_highs and confirmed_lows:
-                last_sh = confirmed_highs[-1]
-                if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-                    if setup.point_1_timestamp and last_sh.timestamp > setup.point_1_timestamp:
-                        lows_before_bos = [s for s in confirmed_lows if s.index <= last_sh.index]
-                        anchor_low = lows_before_bos[-1] if lows_before_bos else confirmed_lows[-1]
-                        setup.point_1_price = last_sh.price
-                        setup.point_1_timestamp = last_sh.timestamp
-                        setup.bos_price = last_sh.price
-                        setup.bos_timestamp = last_sh.timestamp
-                        setup.point_2_price = anchor_low.price
-                        setup.point_2_timestamp = anchor_low.timestamp
-                        setup.current_high_price = candle.high
-                        setup.current_high_timestamp = candle.timestamp
-                        setup.dynamic_tp = candle.high
-                        self._apply_bullish_fib(setup, anchor_low.price, candle.high)
-                        self._candles_since_bos = 0
+        # As the impulse wave expands higher/lower, dynamically update Target 1.000 (Keep Anchor locked!)
 
         if setup.direction == "LONG":
             # 1. Update dynamic target if new high forms (before any layer fills)

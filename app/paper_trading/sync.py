@@ -1,10 +1,10 @@
 """
-Automatic Synchronization of Strategy Setups to Paper Trades.
+Automatic Synchronization of Strategy Setups to Paper Trades with AI Validation Gate.
 
 Whenever an entry is touched in Fib With Retracement or SMC With Fib,
-this service guarantees that a 0.01 lot paper trade is opened and managed
-with live running PnL and point tracking.
-Also dispatches Telegram alerts strictly for TAKEN TRADES and TP/SL CLOSES.
+this service sends the trade setup to the AI Validator (Gemini/Groq/OpenRouter).
+Only if the AI APPROVES the setup will a 0.01 lot paper trade be opened
+and a Telegram alert dispatched.
 """
 
 from datetime import datetime, timezone
@@ -13,6 +13,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.validator import get_ai_validator
+from app.core.constants import MarketBias, SignalDirection, SignalQuality, StrategyType
 from app.core.logging import logger
 from app.data.live.service import get_live_service
 from app.database.models import PaperTradeModel
@@ -20,10 +22,11 @@ from app.database.repository import Repository
 from app.notifications.telegram_service import TelegramService
 from app.retracement.multi_tf import get_retracement_multi_tf_service
 from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
+from app.signals.models import SignalPayload
 
 
 async def sync_strategy_paper_trades(db: AsyncSession) -> None:
-    """Scan in-memory 5M strategy engine states and automatically open/update paper trades."""
+    """Scan in-memory 5M strategy engine states, run AI validation, and open/update paper trades."""
     ls = get_live_service()
     try:
         live_price = await ls.get_latest_price("XAUUSD")
@@ -31,6 +34,7 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
         live_price = None
 
     tg = TelegramService()
+    validator = get_ai_validator()
 
     # 1. Fib With Retracement 5M: Check each tranche layer
     try:
@@ -50,6 +54,36 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                     tp_px = float(layer.get("tp") or f5.fib_1_000 or 0.0)
 
                     if not existing and entry_px > 0:
+                        # --- AI VALIDATION GATE ---
+                        ai_approved = True
+                        ai_verdict = "APPROVED"
+                        try:
+                            val_sig = SignalPayload(
+                                signal_id=sig_id,
+                                instrument="XAUUSD",
+                                direction=SignalDirection.LONG if f5.direction == "LONG" else SignalDirection.SHORT,
+                                strategy=StrategyType.RETRACEMENT,
+                                timeframe="5m",
+                                entry=entry_px,
+                                stop_loss=sl_px,
+                                take_profit_1=tp_px,
+                                take_profit_2=tp_px,
+                                take_profit_3=tp_px,
+                                confidence_score=0.95,
+                                signal_quality=SignalQuality.VERY_STRONG,
+                                market_bias=MarketBias.BULLISH if f5.direction == "LONG" else MarketBias.BEARISH,
+                            )
+                            ai_res = await validator.validate_signal(val_sig)
+                            ai_verdict = f"{ai_res.status.value} (conf={ai_res.confidence:.0f}%) — {ai_res.explanation}"
+                            if ai_res.status.value == "REJECT":
+                                logger.warning("[AI-GATE] Fib Retracement %s REJECTED by AI Validator: %s", sig_id, ai_res.explanation)
+                                ai_approved = False
+                        except Exception as ai_err:  # noqa: BLE001
+                            logger.warning("[AI-GATE] AI Validation check error: %s", ai_err)
+
+                        if not ai_approved:
+                            continue
+
                         new_trade = PaperTradeModel(
                             id=str(uuid.uuid4()),
                             signal_id=sig_id,
@@ -67,11 +101,11 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                             opened_at=datetime.now(timezone.utc),
                             realized_pnl=0.0,
                             realized_r=0.0,
-                            state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "layer": l_key}],
+                            state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "layer": l_key, "ai_validation": ai_verdict}],
                         )
                         db.add(new_trade)
                         await db.commit()
-                        logger.info("[PAPER-AUTO] Opened trade %s (%s %s) @ %.2f", sig_id, f5.direction, l_key, entry_px)
+                        logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (%s %s) @ %.2f", sig_id, f5.direction, l_key, entry_px)
 
                         # Telegram: Dispatch Trade Opened Alert
                         try:
@@ -85,7 +119,7 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                                 f"💵 *Entry Price:* ${entry_px:.2f}\n"
                                 f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
                                 f"🎯 *Take Profit:* ${tp_px:.2f}\n"
-                                f"🧠 *AI Validation:* APPROVED\n"
+                                f"🧠 *AI Validation:* {ai_verdict}\n"
                                 f"━━━━━━━━━━━━━━━━━━━━"
                             )
                             await tg.send_raw_alert(msg)
@@ -113,6 +147,36 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
             dir_str = str(s5.get("direction", "LONG")).upper()
 
             if not existing and entry_px > 0:
+                # --- AI VALIDATION GATE ---
+                ai_approved = True
+                ai_verdict = "APPROVED"
+                try:
+                    val_sig = SignalPayload(
+                        signal_id=sig_id,
+                        instrument="XAUUSD",
+                        direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
+                        strategy=StrategyType.SMC,
+                        timeframe="5m",
+                        entry=entry_px,
+                        stop_loss=sl_px,
+                        take_profit_1=tp_px,
+                        take_profit_2=tp_px,
+                        take_profit_3=tp_px,
+                        confidence_score=0.95,
+                        signal_quality=SignalQuality.VERY_STRONG,
+                        market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
+                    )
+                    ai_res = await validator.validate_signal(val_sig)
+                    ai_verdict = f"{ai_res.status.value} (conf={ai_res.confidence:.0f}%) — {ai_res.explanation}"
+                    if ai_res.status.value == "REJECT":
+                        logger.warning("[AI-GATE] SMC With Fib %s REJECTED by AI Validator: %s", sig_id, ai_res.explanation)
+                        ai_approved = False
+                except Exception as ai_err:  # noqa: BLE001
+                    logger.warning("[AI-GATE] AI Validation check error: %s", ai_err)
+
+                if not ai_approved:
+                    return
+
                 new_trade = PaperTradeModel(
                     id=str(uuid.uuid4()),
                     signal_id=sig_id,
@@ -130,11 +194,11 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                     opened_at=datetime.now(timezone.utc),
                     realized_pnl=0.0,
                     realized_r=0.0,
-                    state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "strategy": "SMC_WITH_FIB"}],
+                    state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "strategy": "SMC_WITH_FIB", "ai_validation": ai_verdict}],
                 )
                 db.add(new_trade)
                 await db.commit()
-                logger.info("[PAPER-AUTO] Opened trade %s (SMC %s) @ %.2f", sig_id, dir_str, entry_px)
+                logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (SMC %s) @ %.2f", sig_id, dir_str, entry_px)
 
                 # Telegram: Dispatch Trade Opened Alert
                 try:
@@ -148,7 +212,7 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                         f"💵 *Entry Price:* ${entry_px:.2f}\n"
                         f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
                         f"🎯 *Take Profit:* ${tp_px:.2f}\n"
-                        f"🧠 *AI Validation:* APPROVED\n"
+                        f"🧠 *AI Validation:* {ai_verdict}\n"
                         f"━━━━━━━━━━━━━━━━━━━━"
                     )
                     await tg.send_raw_alert(msg)
