@@ -107,7 +107,45 @@ function wireShell() {
   if (settingsBtn) {
     settingsBtn.addEventListener("click", () => { location.hash = "/settings"; });
   }
+  const btnRefresh = document.getElementById("btn-live-refresh");
+  if (btnRefresh) {
+    btnRefresh.addEventListener("click", () => AutoRefresh.cycle());
+  }
 }
+
+const AutoRefresh = {
+  speed: 2000,
+  modes: [
+    { speed: 2000, label: "⚡ 2s AUTO", color: "#22c55e", bg: "rgba(34,197,94,0.12)" },
+    { speed: 5000, label: "⏱️ 5s AUTO", color: "#60a5fa", bg: "rgba(96,165,250,0.12)" },
+    { speed: 0, label: "⏸️ PAUSED", color: "#8b97a8", bg: "rgba(139,151,168,0.12)" },
+  ],
+  currentIdx: 0,
+  cycle() {
+    this.currentIdx = (this.currentIdx + 1) % this.modes.length;
+    const m = this.modes[this.currentIdx];
+    this.speed = m.speed;
+    const btn = document.getElementById("btn-live-refresh");
+    const lbl = document.getElementById("refresh-speed-label");
+    if (btn && lbl) {
+      lbl.textContent = m.label;
+      btn.style.color = m.color;
+      btn.style.borderColor = m.color;
+      btn.style.background = m.bg;
+      const dot = btn.querySelector(".dot");
+      if (dot) {
+        dot.className = m.speed > 0 ? "dot dot-green" : "dot dot-muted";
+        dot.style.animation = m.speed > 0 ? "pulse 1.5s infinite" : "none";
+      }
+    }
+    if (_pricePollTimer) { clearInterval(_pricePollTimer); _pricePollTimer = null; }
+    if (this.speed > 0) {
+      pollPrice();
+      _pricePollTimer = setInterval(pollPrice, this.speed);
+    }
+  }
+};
+let _pricePollTimer = null;
 
 function setConn(id, ok) {
   const el = document.getElementById(id);
@@ -2307,8 +2345,70 @@ Routes["/observation"] = (mount) => {
   }, mount);
 };
 
+function renderPaperTradeRows(trades) {
+  if (!trades || !trades.length) {
+    return '<tr><td colspan="9" style="text-align:center;padding:32px 14px;color:var(--text-muted);font-size:13px">⏳ <b>No paper trades active yet.</b><br><span style="font-size:11px">A 0.01 lot paper trade is automatically opened with live PnL and running point tracking as soon as a 5M strategy entry (Fib L1/L2/L3 or SMC 0.680) is touched.</span></td></tr>';
+  }
+  return trades.map(t => {
+    const entry = t.entry_price || t.actual_entry || t.target_entry || 0;
+    const curPx = t.current_price || t.exit_price || entry;
+    const pts = Number(t.running_pts != null ? t.running_pts : 0);
+    const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0)));
+    const ptsSign = pts >= 0 ? "+" : "";
+    const pnlSign = pnl >= 0 ? "+$" : "-$";
+    const ptsCls = pts >= 0 ? "up" : "down";
+    const pnlCls = pnl >= 0 ? "up" : "down";
+    const stratBadge = `<span class="badge ${t.strategy === 'SMC WITH FIB' ? 'badge-primary' : 'badge-blue'}" style="font-size:11px">${t.strategy || 'STRATEGY'} <b style="color:#fff">${t.layer || ''}</b></span>`;
+    const sl = t.stop_loss ? `$${Number(t.stop_loss).toFixed(2)}` : '—';
+    const tp = t.take_profit_1 || t.take_profit ? `$${Number(t.take_profit_1 || t.take_profit).toFixed(2)}` : '—';
+
+    return `<tr>
+      <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
+      <td>${stratBadge}</td>
+      <td>${UI.dirBadge(t.direction)}</td>
+      <td class="num"><b>$${Number(entry).toFixed(2)}</b></td>
+      <td class="num"><b>$${Number(curPx).toFixed(2)}</b></td>
+      <td class="num ${ptsCls}"><b>${ptsSign}${pts.toFixed(2)} PTS</b></td>
+      <td class="num ${pnlCls}"><b>${pnlSign}${Math.abs(pnl).toFixed(2)}</b></td>
+      <td style="font-size:11px;color:var(--text-dim)">SL: ${sl}<br>TP: ${tp}</td>
+      <td>${UI.statusBadge(t.status || t.state || t.exit_reason || "OPEN")}</td>
+    </tr>`;
+  }).join("");
+}
+
 /* ================= PAPER TRADING ================= */
 Routes["/paper"] = (mount) => {
+  let _paperTimer = null;
+  let isUpdating = false;
+
+  async function updatePaperInPlace() {
+    if (AutoRefresh.speed === 0 || isUpdating) return;
+    isUpdating = true;
+    try {
+      const [acctRes, ptRes] = await Promise.allSettled([API.account(), API.paperTrades()]);
+      const acct = acctRes.status === "fulfilled" ? acctRes.value : null;
+      const raw = ptRes.status === "fulfilled" ? ptRes.value : null;
+      if (acct) {
+        const elB = document.getElementById("paper-metric-balance");
+        const elE = document.getElementById("paper-metric-equity");
+        const elR = document.getElementById("paper-metric-rpnl");
+        const elU = document.getElementById("paper-metric-upnl");
+        if (elB && acct.current_balance != null) elB.textContent = "$" + UI.fmt(acct.current_balance, 2);
+        if (elE && acct.equity != null) elE.textContent = "$" + UI.fmt(acct.equity, 2);
+        if (elR && acct.realized_pnl_usd != null) elR.textContent = UI.fmt(acct.realized_pnl_usd, 2);
+        if (elU && acct.unrealized_pnl_usd != null) elU.textContent = UI.fmt(acct.unrealized_pnl_usd, 2);
+      }
+      const trades = Array.isArray(raw) ? raw : (raw && raw.database_trades) || [];
+      const tbody = document.getElementById("paper-trades-tbody");
+      if (tbody) {
+        tbody.innerHTML = renderPaperTradeRows(trades);
+      }
+    } catch (_) {}
+    finally {
+      isUpdating = false;
+    }
+  }
+
   renderWith(async () => {
     const [acct, pt, ov] = await Promise.allSettled([API.account(), API.paperTrades(), API.overview("XAUUSD")]);
     return { acct: acct.status === "fulfilled" ? acct.value : null, pt: pt.status === "fulfilled" ? pt.value : [], ov: ov.status === "fulfilled" ? ov.value : null };
@@ -2322,7 +2422,10 @@ Routes["/paper"] = (mount) => {
     return `<div class="stack">
       <div class="row-between">
         <div class="section-title">Paper Trading</div>
-        ${blocked ? '<span class="badge badge-red">BLOCKED</span>' : '<span class="badge badge-green">ENABLED</span>'}
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="badge badge-green" style="display:flex;align-items:center;gap:4px"><span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>LIVE AUTO-REFRESH</span>
+          ${blocked ? '<span class="badge badge-red">BLOCKED</span>' : '<span class="badge badge-green">ENABLED</span>'}
+        </div>
       </div>
       <div class="card" style="border-color:${blocked ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'}">
         <div class="card-head"><span>Safety status</span></div>
@@ -2339,15 +2442,15 @@ Routes["/paper"] = (mount) => {
         </div>
       </div>
       <div class="grid grid-4">
-        ${UI.metric("Balance", acct.current_balance != null ? "$" + UI.fmt(acct.current_balance, 2) : "—").outerHTML}
-        ${UI.metric("Equity", acct.equity != null ? "$" + UI.fmt(acct.equity, 2) : "—").outerHTML}
-        ${UI.metric("Realized PnL", acct.realized_pnl_usd != null ? UI.fmt(acct.realized_pnl_usd, 2) : "—").outerHTML}
-        ${UI.metric("Unrealized PnL", acct.unrealized_pnl_usd != null ? UI.fmt(acct.unrealized_pnl_usd, 2) : "—").outerHTML}
+        <div class="metric"><div class="metric-label">BALANCE</div><div class="metric-value" id="paper-metric-balance">${acct.current_balance != null ? "$" + UI.fmt(acct.current_balance, 2) : "—"}</div></div>
+        <div class="metric"><div class="metric-label">EQUITY</div><div class="metric-value" id="paper-metric-equity">${acct.equity != null ? "$" + UI.fmt(acct.equity, 2) : "—"}</div></div>
+        <div class="metric"><div class="metric-label">REALIZED PNL</div><div class="metric-value" id="paper-metric-rpnl">${acct.realized_pnl_usd != null ? UI.fmt(acct.realized_pnl_usd, 2) : "—"}</div></div>
+        <div class="metric"><div class="metric-label">UNREALIZED PNL</div><div class="metric-value" id="paper-metric-upnl">${acct.unrealized_pnl_usd != null ? UI.fmt(acct.unrealized_pnl_usd, 2) : "—"}</div></div>
       </div>
       <div class="card">
         <div class="card-head">
           <span>Active & Historical Paper Trades</span>
-          <span class="muted" style="font-size:11px">5M Dedicated Real-Time Simulation (0.01 Lots)</span>
+          <span class="muted" style="font-size:11px">5M Dedicated Real-Time Simulation (0.01 Lots) · Auto-Syncs In-Place</span>
         </div>
         <div class="card-body flush"><div class="table-wrap"><table class="term">
           <thead>
@@ -2363,35 +2466,21 @@ Routes["/paper"] = (mount) => {
               <th>Status</th>
             </tr>
           </thead>
-          <tbody>${trades.length ? trades.map(t => {
-            const entry = t.entry_price || t.actual_entry || t.target_entry || 0;
-            const curPx = t.current_price || t.exit_price || entry;
-            const pts = Number(t.running_pts != null ? t.running_pts : 0);
-            const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0)));
-            const ptsSign = pts >= 0 ? "+" : "";
-            const pnlSign = pnl >= 0 ? "+$" : "-$";
-            const ptsCls = pts >= 0 ? "up" : "down";
-            const pnlCls = pnl >= 0 ? "up" : "down";
-            const stratBadge = `<span class="badge ${t.strategy === 'SMC WITH FIB' ? 'badge-primary' : 'badge-blue'}" style="font-size:11px">${t.strategy || 'STRATEGY'} <b style="color:#fff">${t.layer || ''}</b></span>`;
-            const sl = t.stop_loss ? `$${Number(t.stop_loss).toFixed(2)}` : '—';
-            const tp = t.take_profit_1 || t.take_profit ? `$${Number(t.take_profit_1 || t.take_profit).toFixed(2)}` : '—';
-
-            return `<tr>
-              <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
-              <td>${stratBadge}</td>
-              <td>${UI.dirBadge(t.direction)}</td>
-              <td class="num"><b>$${Number(entry).toFixed(2)}</b></td>
-              <td class="num"><b>$${Number(curPx).toFixed(2)}</b></td>
-              <td class="num ${ptsCls}"><b>${ptsSign}${pts.toFixed(2)} PTS</b></td>
-              <td class="num ${pnlCls}"><b>${pnlSign}${Math.abs(pnl).toFixed(2)}</b></td>
-              <td style="font-size:11px;color:var(--text-dim)">SL: ${sl}<br>TP: ${tp}</td>
-              <td>${UI.statusBadge(t.status || t.state || t.exit_reason || "OPEN")}</td>
-            </tr>`;
-          }).join("") : '<tr><td colspan="9" style="text-align:center;padding:32px 14px;color:var(--text-muted);font-size:13px">⏳ <b>No paper trades active yet.</b><br><span style="font-size:11px">A 0.01 lot paper trade is automatically opened with live PnL and running point tracking as soon as a 5M strategy entry (Fib L1/L2/L3 or SMC 0.680) is touched.</span></td></tr>'}</tbody>
+          <tbody id="paper-trades-tbody">${renderPaperTradeRows(trades)}</tbody>
         </table></div></div>
       </div>
     </div>`;
-  }, mount);
+  }, mount).then(() => {
+    if (_paperTimer) clearInterval(_paperTimer);
+    _paperTimer = setInterval(updatePaperInPlace, AutoRefresh.speed || 2000);
+  });
+
+  window.__viewCleanup = () => {
+    if (_paperTimer) {
+      clearInterval(_paperTimer);
+      _paperTimer = null;
+    }
+  };
 };
 
 /* ================= NOTIFICATIONS ================= */
@@ -2614,6 +2703,37 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     </div>`;
   }
 
+  let _stratTimer = null;
+  let isStratUpdating = false;
+
+  async function updateStratInPlace() {
+    if (AutoRefresh.speed === 0 || isStratUpdating) return;
+    isStratUpdating = true;
+    try {
+      const r = await fetch(endpoint);
+      if (!r.ok) return;
+      const data = await r.json();
+      const d = data.strat || data || {};
+      const tfData = d.timeframes?.[selectedTf] || {};
+      const price = d.live_price || AppState.price || 4428.0;
+
+      const tWrap = document.getElementById("strat-timeline-wrap");
+      if (tWrap) tWrap.innerHTML = renderTimeline(tfData.state);
+
+      const sWrap = document.getElementById("strat-signal-box-wrap");
+      if (sWrap) sWrap.innerHTML = renderActiveSignalBox(tfData, price, selectedTf);
+
+      const mWrap = document.getElementById("strat-points-metrics-wrap");
+      if (mWrap) mWrap.innerHTML = renderPointsMetrics(tfData);
+
+      const lWrap = document.getElementById("strat-levels-table-wrap");
+      if (lWrap) lWrap.innerHTML = renderLevelsTable(tfData.levels);
+    } catch (_) {}
+    finally {
+      isStratUpdating = false;
+    }
+  }
+
   renderWith(async () => {
     const r = await fetch(endpoint);
     if (!r.ok) throw new Error("Strategy endpoint failed: " + r.status);
@@ -2640,7 +2760,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
           <div class="muted" style="font-size:11px">${strategySub}</div>
         </div>
         <div class="toolbar" style="margin:0">
-          <span class="badge badge-green">LIVE FEED</span>
+          <span class="badge badge-green" style="display:flex;align-items:center;gap:4px"><span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>LIVE AUTO-REFRESH</span>
           <span class="badge" style="background:rgba(41,98,255,0.2);color:#2962ff;border:1px solid #2962ff;font-weight:700">⚡ 5M FOCUS MODE</span>
           <span class="badge badge-blue">SIGNAL ONLY</span>
           <span class="badge badge-red">REAL MONEY DISABLED</span>
@@ -2659,10 +2779,10 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       </div>
 
       <!-- STATE TIMELINE -->
-      ${renderTimeline(tfData.state)}
+      <div id="strat-timeline-wrap">${renderTimeline(tfData.state)}</div>
 
       <!-- BIG ACTIVE SIGNAL BOX -->
-      ${renderActiveSignalBox(tfData, price, selectedTf)}
+      <div id="strat-signal-box-wrap">${renderActiveSignalBox(tfData, price, selectedTf)}</div>
 
       <!-- LIVE FIB CHART -->
       <div class="card" style="margin-bottom:var(--sp-3)">
@@ -2674,10 +2794,10 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       </div>
 
       <!-- METRICS & FIBONACCI TABLE -->
-      ${renderPointsMetrics(tfData)}
+      <div id="strat-points-metrics-wrap">${renderPointsMetrics(tfData)}</div>
 
       <div class="grid grid-2">
-        ${renderLevelsTable(tfData.levels)}
+        <div id="strat-levels-table-wrap">${renderLevelsTable(tfData.levels)}</div>
         <div class="card">
           <div class="card-head"><span>STRUCTURE & SMC STATUS</span><span class="muted">${TF_LABELS[selectedTf]}</span></div>
           <div class="card-body">
@@ -2698,7 +2818,16 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   }, mount).then(() => {
     // After HTML is rendered and mounted into the DOM by renderWith, draw the chart.
     drawFibChart(`fib-chart-${strategyType}-${selectedTf}`, selectedTf, strategyType);
+    if (_stratTimer) clearInterval(_stratTimer);
+    _stratTimer = setInterval(updateStratInPlace, AutoRefresh.speed || 2500);
   });
+
+  window.__viewCleanup = () => {
+    if (_stratTimer) {
+      clearInterval(_stratTimer);
+      _stratTimer = null;
+    }
+  };
 }
 
 // ─── LIVE FIB CHART RENDERER ──────────────────────────────────────────────────
@@ -2912,6 +3041,6 @@ document.addEventListener("DOMContentLoaded", () => {
   pollTopbar();
   pollPrice();
   setInterval(pollTopbar, REFRESH_MS);
-  setInterval(pollPrice, 5000);
+  _pricePollTimer = setInterval(pollPrice, AutoRefresh.speed || 2000);
   // The Overview view self-updates incrementally via its own timer (see Routes["/overview"]).
 });
