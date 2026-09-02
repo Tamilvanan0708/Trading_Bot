@@ -305,6 +305,16 @@ class DualRetracementEngine:
                 setup.entry_touched = True
                 setup.entry_timestamp = candle.timestamp
                 setup.state = RetracementState.TRADE_ACTIVE
+                # Same-candle TP hit: TP was already beyond reach (price moved past TP before entry)
+                # Mark all filled layers as TP_HIT immediately if TP already breached on this candle.
+                tp_already_hit = setup.locked_tp is not None and candle.low <= setup.locked_tp
+                if tp_already_hit:
+                    for layer in setup.layers.values():
+                        if layer["state"] == "FILLED":
+                            layer["state"] = "TP_HIT"
+                    setup.state = RetracementState.COMPLETED
+                    setup.outcome = "TP_HIT"
+                    setup.completion_reason = "TP hit on same candle as entry fill."
 
         return events
 
