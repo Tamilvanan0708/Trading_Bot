@@ -74,14 +74,23 @@ class DualRetracementEngine:
     def _anchor_lookback_bars(self) -> int:
         """Timeframe-aware anchor lookback.
 
-        Low timeframes (1m/3m/5m) use a short 20-bar window so the Fibonacci
-        anchor isolates recent internal micro-structure swings instead of
-        anchoring to a Macro swing many hours old.  All other timeframes keep
-        the original 60-bar window.
+        We need enough bars to cover the full impulse leg so the engine
+        finds the CORRECT swing extreme that caused the BOS:
+
+          1m  → 30 bars  (30 min)
+          3m  → 40 bars  (2 h)
+          5m  → 50 bars  (4 h 10 min) — covers typical intraday sessions
+          15m → 60 bars  (15 h) — macro swing
+          30m → 60 bars
+          1h+ → 60 bars
         """
         tf = str(self.timeframe).lower()
-        if tf in ("1m", "3m", "5m"):
-            return 20
+        if tf == "1m":
+            return 30
+        if tf == "3m":
+            return 40
+        if tf == "5m":
+            return 50
         return 60
 
     def process_candle(self, candle: Candle) -> list[RetracementEvent]:
