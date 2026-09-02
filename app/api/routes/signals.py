@@ -48,7 +48,7 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
         smc_svc = get_smc_fib_multi_tf_service("XAUUSD")
         smc_states = await smc_svc.advance(db)
         for tf_name, st_card in smc_states.items():
-            if not st_card or not st_card.get("point_2"):
+            if tf_name != "5m" or not st_card or not st_card.get("point_2"):
                 continue
             dir_str = str(st_card.get("direction", "SHORT")).upper()
             p2 = st_card.get("point_2", {}).get("price")
@@ -96,7 +96,7 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
         retr_svc = get_retracement_multi_tf_service("XAUUSD")
         retr_states = await retr_svc.advance(db)
         for tf_name, setup in retr_states.items():
-            if not setup or not setup.point_2_price:
+            if tf_name != "5m" or not setup or not setup.point_2_price:
                 continue
             layers = getattr(setup, "layers", {}) or {}
             for l_key in ["L1", "L2", "L3"]:

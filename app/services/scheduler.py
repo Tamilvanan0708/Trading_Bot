@@ -419,7 +419,7 @@ class AnalysisScheduler:
                 fib_svc = get_retracement_multi_tf_service(symbol)
                 fib_states = await fib_svc.advance(session)
 
-                for tf_name in ["5m", "15m", "30m", "1h"]:
+                for tf_name in ["5m"]:
                     setup_obj = fib_states.get(tf_name)
                     if not setup_obj:
                         continue
@@ -487,7 +487,7 @@ class AnalysisScheduler:
                 smc_svc = get_smc_fib_multi_tf_service(symbol)
                 smc_states = await smc_svc.advance(session)
 
-                for tf_name in ["5m", "15m", "30m", "1h", "4h"]:
+                for tf_name in ["5m"]:
                     st_card = smc_states.get(tf_name) or {}
                     if not st_card.get("is_entry_touched"):
                         continue
