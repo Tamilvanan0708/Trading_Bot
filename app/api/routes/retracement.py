@@ -141,6 +141,24 @@ async def _load_real_candles(symbol: str = "XAUUSD"):
     return resample_candles(candles, TimeFrame.M15)
 
 
+
+@router.post("/reset")
+async def reset_all_engines():
+    """Force-clear ALL in-memory engine state for Fib Retracement and SMC Fib strategies.
+
+    Call this after a code deploy or when the engine is stuck in a stale TRADE_ACTIVE state.
+    The engines will re-seed themselves from live candles on the next GET request.
+    """
+    from app.retracement.multi_tf import get_retracement_multi_tf_service
+    from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
+
+    fib_svc = get_retracement_multi_tf_service("XAUUSD")
+    smc_svc = get_smc_fib_multi_tf_service("XAUUSD")
+    fib_svc.reset()
+    smc_svc.reset()
+    return {"status": "OK", "message": "All engine states cleared. Re-seeding on next request."}
+
+
 @router.post("/{symbol}/run")
 async def run_retracement(symbol: str = "XAUUSD", db: AsyncSession = Depends(get_db_session)):
     """Run the RETRACEMENT_BOS_V1 engine over real historical data and persist
