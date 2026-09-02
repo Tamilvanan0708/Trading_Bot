@@ -40,8 +40,8 @@ from app.retracement.dual_engine import DualRetracementEngine
 from app.retracement.models import RetracementSetup, RetracementState
 from app.retracement.repository import RetracementRepository
 
-# Timeframes monitored continuously: 5m → 15m → 30m → 1h (4H REMOVED per user request)
-DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h"]
+# Focus mode: 5M ONLY (all other timeframes disabled per user request)
+DEFAULT_TIMEFRAMES = ["5m"]
 TF_MAP: dict[str, TimeFrame] = {
     "5m": TimeFrame.M5,
     "15m": TimeFrame.M15,

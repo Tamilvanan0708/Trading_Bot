@@ -2649,10 +2649,9 @@ Routes["/health"] = (mount) => {
   }, mount);
 };
 
-/* ================= SHARED RICH STRATEGY UI BUILDER ================= */
-window.__selectedStrategyTf = window.__selectedStrategyTf || "15m";
+window.__selectedStrategyTf = "5m";
 window.setStrategyTf = function(tf) {
-  window.__selectedStrategyTf = tf;
+  window.__selectedStrategyTf = "5m";
   const hash = location.hash.replace(/^#\/?/, "");
   const [rawPath] = hash.split("?");
   const path = "/" + (rawPath || "overview");
@@ -2662,9 +2661,9 @@ window.setStrategyTf = function(tf) {
 };
 
 function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strategyType) {
-  const TFS = strategyType === "FIB_WITH_RETRACEMENT" ? ["5m", "15m", "30m", "1h"] : ["5m", "15m", "30m", "1h", "4h"];
-  const TF_LABELS = {"5m":"5M", "15m":"15M", "30m":"30M", "1h":"1H", "4h":"4H"};
-  const selectedTf = window.__selectedStrategyTf && TFS.includes(window.__selectedStrategyTf) ? window.__selectedStrategyTf : "15m";
+  const TFS = ["5m"];
+  const TF_LABELS = {"5m":"5M"};
+  const selectedTf = "5m";
 
   function renderTimeline(state) {
     const steps = [
@@ -2812,14 +2811,13 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const tfData = d.timeframes?.[selectedTf] || {};
     const activeCascadeTf = d.cascading_active_tf;
 
-    const tfButtons = TFS.map(tf => {
-      const isSel = tf === selectedTf;
-      const isCascade = tf === activeCascadeTf;
-      const hasTrade = d.timeframes?.[tf]?.is_trade_active;
-      const cls = isSel ? "btn btn-primary" : "btn btn-secondary";
-      const dot = hasTrade ? ' <span class="dot dot-green" style="margin-left:4px"></span>' : isCascade ? ' <span class="dot dot-amber" style="margin-left:4px"></span>' : '';
-      return `<button class="${cls}" onclick="window.setStrategyTf('${tf}')" style="padding:6px 14px;font-size:12px;cursor:pointer">${TF_LABELS[tf]}${dot}</button>`;
-    }).join(" ");
+    const tfButtons = `
+      <button class="btn btn-primary" style="padding:6px 14px;font-size:12px;background:#2962ff;border-color:#2962ff;color:#fff;font-weight:700;cursor:default">5M (ACTIVE)</button>
+      <button class="btn btn-secondary" disabled style="padding:6px 12px;font-size:12px;opacity:0.35;cursor:not-allowed" title="5M Focus Mode: 15M Disabled">15M (Disabled)</button>
+      <button class="btn btn-secondary" disabled style="padding:6px 12px;font-size:12px;opacity:0.35;cursor:not-allowed" title="5M Focus Mode: 30M Disabled">30M (Disabled)</button>
+      <button class="btn btn-secondary" disabled style="padding:6px 12px;font-size:12px;opacity:0.35;cursor:not-allowed" title="5M Focus Mode: 1H Disabled">1H (Disabled)</button>
+      ${strategyType !== "FIB_WITH_RETRACEMENT" ? '<button class="btn btn-secondary" disabled style="padding:6px 12px;font-size:12px;opacity:0.35;cursor:not-allowed" title="5M Focus Mode: 4H Disabled">4H (Disabled)</button>' : ''}
+    `;
 
     return `<div class="stack">
       <div class="row-between">
@@ -2829,7 +2827,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         </div>
         <div class="toolbar" style="margin:0">
           <span class="badge badge-green">LIVE FEED</span>
-          ${activeCascadeTf ? `<span class="badge badge-amber">CASCADING ACTIVE: ${TF_LABELS[activeCascadeTf]}</span>` : '<span class="badge badge-muted">SCANNING 5 TFS</span>'}
+          <span class="badge" style="background:rgba(41,98,255,0.2);color:#2962ff;border:1px solid #2962ff;font-weight:700">⚡ 5M FOCUS MODE</span>
           <span class="badge badge-blue">SIGNAL ONLY</span>
           <span class="badge badge-red">REAL MONEY DISABLED</span>
         </div>
@@ -2842,7 +2840,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
             <span style="font-size:12px;font-weight:700;color:var(--text-dim)">SELECT TIMEFRAME:</span>
             <div style="display:flex;gap:6px">${tfButtons}</div>
           </div>
-          <div style="font-size:12px;color:var(--text-dim)">Viewing: <b style="color:var(--accent)">${TF_LABELS[selectedTf]}</b></div>
+          <div style="font-size:12px;color:var(--text-dim)">Engine Focus: <b style="color:#2962ff">5M Dedicated (Others Disabled)</b></div>
         </div>
       </div>
 
