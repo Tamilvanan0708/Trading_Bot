@@ -675,7 +675,7 @@ Routes["/live"] = (mount) => {
       try {
         new window.TradingView.widget({
           autosize: true,
-          symbol: "OANDA:XAUUSD",
+          symbol: "BINANCE:XAUUSDT.P",
           interval: interval,
           timezone: "Etc/UTC",
           theme: "dark",
@@ -704,7 +704,7 @@ Routes["/live"] = (mount) => {
 
     // Direct iframe fallback
     box.innerHTML = `
-      <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=OANDA%3AXAUUSD&interval=${interval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=131722&theme=dark&style=1&timezone=Etc%2FUTC&locale=en" 
+      <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=BINANCE%3AXAUUSDT.P&interval=${interval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=131722&theme=dark&style=1&timezone=Etc%2FUTC&locale=en" 
         style="width:100%;height:100%;min-height:640px;border:none;" 
         allowfullscreen>
       </iframe>
@@ -719,12 +719,12 @@ Routes["/live"] = (mount) => {
   mount.innerHTML = `
     <div class="stack">
       <div class="row-between">
-        <div class="section-title">Live Market — XAU/USD</div>
+        <div class="section-title">Live Market — XAU/USD (Binance Futures)</div>
         <div class="tf-toolbar" id="tv-tf-toolbar">${TFS.map(btnHtml).join("")}</div>
       </div>
       <div class="feed-banner live" id="live-feed-banner">
         <span>TRADINGVIEW OFFICIAL REAL-TIME CHART</span>
-        <span class="update-clock">OANDA:XAUUSD · LIVE STREAMING</span>
+        <span class="update-clock">BINANCE:XAUUSDT.P · LIVE STREAMING</span>
       </div>
       <div class="card" style="padding:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:#131722;">
         <div class="card-head" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center">
