@@ -217,3 +217,14 @@ class AIValidator:
             raw_response="HEURISTIC_VALIDATOR",
             provider="HEURISTIC",
         )
+
+
+_global_ai_validator: AIValidator | None = None
+
+
+def get_ai_validator() -> AIValidator:
+    """Return the global singleton instance of AIValidator."""
+    global _global_ai_validator
+    if _global_ai_validator is None:
+        _global_ai_validator = AIValidator()
+    return _global_ai_validator
