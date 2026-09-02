@@ -1007,11 +1007,17 @@ Routes["/signals"] = (mount, query) => {
         ${rows.map(s => {
           const isSMC = String(s.strategy || "").toUpperCase().includes("SMC");
           const ver = String(s.strategy_version || "");
-          let layerBadge = '<span class="badge" style="background:#2962ff;color:#fff;font-weight:700">L1</span>';
-          if (ver.includes("L2") || (s.reasons || []).some(r => String(r).includes("L2"))) {
-            layerBadge = '<span class="badge" style="background:#ff6d00;color:#fff;font-weight:700">L2</span>';
-          } else if (ver.includes("L3") || (s.reasons || []).some(r => String(r).includes("L3"))) {
-            layerBadge = '<span class="badge" style="background:#a855f7;color:#fff;font-weight:700">L3</span>';
+          let layerBadge = "";
+          if (isSMC) {
+            layerBadge = '<span class="badge badge-dim" style="font-size:10px;border:1px solid rgba(255,255,255,0.15)">Single (0.68)</span>';
+          } else {
+            if (ver.includes("L2") || (s.reasons || []).some(r => String(r).includes("L2"))) {
+              layerBadge = '<span class="badge" style="background:#ff6d00;color:#fff;font-weight:700">L2 (0.50)</span>';
+            } else if (ver.includes("L3") || (s.reasons || []).some(r => String(r).includes("L3"))) {
+              layerBadge = '<span class="badge" style="background:#a855f7;color:#fff;font-weight:700">L3 (0.38)</span>';
+            } else {
+              layerBadge = '<span class="badge" style="background:#2962ff;color:#fff;font-weight:700">L1 (0.61)</span>';
+            }
           }
 
           const stratBadge = isSMC

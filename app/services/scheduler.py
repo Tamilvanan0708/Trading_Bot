@@ -482,70 +482,63 @@ class AnalysisScheduler:
                                 )
                     break
 
-                # 2. SMC WITH FIB (Golden Pocket 0.68 / 0.79 / 0.92 SL) — 2-Tranche
+                # 2. SMC WITH FIB (Golden Pocket 0.680 Single Entry, 0.920 SL, 0.000 TP) — Single Position (0.01 lots)
                 from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
                 smc_svc = get_smc_fib_multi_tf_service(symbol)
                 smc_states = await smc_svc.advance(session)
 
                 for tf_name in ["5m", "15m", "30m", "1h", "4h"]:
                     st_card = smc_states.get(tf_name) or {}
-                    layers = st_card.get("layers", {}) or {}
-                    if not layers:
+                    if not st_card.get("is_entry_touched"):
                         continue
-                    dir_str = str(st_card.get("direction", "LONG")).upper()
+                    entry_px = st_card.get("entry", {}).get("price")
+                    sl_px = st_card.get("sl", {}).get("price")
+                    tp_px = st_card.get("tp", {}).get("locked") or st_card.get("tp", {}).get("dynamic")
+                    p2 = st_card.get("point_2", {}).get("price")
+                    if not entry_px or not sl_px or not tp_px:
+                        continue
+                    dir_str = str(st_card.get("direction", "SHORT")).upper()
 
-                    # Open one paper trade per FILLED tranche layer (0.01 lots each).
-                    for layer_key, layer in sorted(layers.items()):
-                        if layer.get("state") not in ("FILLED", "TP_HIT", "ESCAPE_CLOSED"):
-                            continue
-                        entry_px = layer.get("entry_price")
-                        sl_px = layer.get("sl")
-                        tp_px = layer.get("tp")
-                        if not entry_px or not sl_px or not tp_px:
-                            logger.warning("[SMC-FIB] Layer %s on %s missing levels; skipping.", layer_key, tf_name)
-                            continue
+                    sig_id = f"SMC_FIB_{tf_name.upper()}_{int(p2 or 0)}"
+                    existing_sig = await repo.get_signal_by_id(sig_id)
+                    if existing_sig is not None:
+                        continue
 
-                        sig_id = f"SMC_FIB_{tf_name.upper()}_{layer_key}_{int(latest_candle.timestamp.timestamp())}"
-                        existing_sig = await repo.get_signal_by_id(sig_id)
-                        if existing_sig is not None:
-                            continue
+                    from app.core.constants import MarketBias, SignalQuality, StrategyType
+                    from app.signals.models import SignalPayload
 
-                        from app.core.constants import MarketBias, SignalQuality, StrategyType
-                        from app.signals.models import SignalPayload
+                    custom_sig = SignalPayload(
+                        signal_id=sig_id,
+                        instrument=symbol,
+                        direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
+                        strategy=StrategyType.SMC,
+                        timeframe=tf_name,
+                        timestamp=latest_candle.timestamp,
+                        entry=entry_px,
+                        stop_loss=sl_px,
+                        take_profit_1=tp_px,
+                        take_profit_2=tp_px,
+                        take_profit_3=tp_px,
+                        risk_reward=round(abs(tp_px - entry_px) / max(0.1, abs(entry_px - sl_px)), 2),
+                        confidence_score=0.95,
+                        signal_quality=SignalQuality.VERY_STRONG,
+                        market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
+                        strategy_version="SMC_WITH_FIB_V1",
+                        reasons=[
+                            f"SMC 0.680 Golden Pocket Single Entry on {tf_name.upper()} ({dir_str}), 0.01 lots"
+                        ],
+                    )
+                    await repo.save_signal(custom_sig.model_dump(mode="json"))
 
-                        custom_sig = SignalPayload(
-                            signal_id=sig_id,
-                            instrument=symbol,
-                            direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
-                            strategy=StrategyType.SMC,
-                            timeframe=tf_name,
-                            timestamp=latest_candle.timestamp,
-                            entry=entry_px,
-                            stop_loss=sl_px,
-                            take_profit_1=tp_px,
-                            take_profit_2=tp_px,
-                            take_profit_3=tp_px,
-                            risk_reward=round(abs(tp_px - entry_px) / max(0.1, abs(entry_px - sl_px)), 2),
-                            confidence_score=0.92,
-                            signal_quality=SignalQuality.VERY_STRONG,
-                            market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
-                            strategy_version="SMC_WITH_FIB_V1",
-                            reasons=[
-                                f"SMC {layer_key} @ {layer.get('entry_ratio')} Golden Pocket "
-                                f"on {tf_name.upper()} ({dir_str}), 0.01 lots"
-                            ],
+                    if self.settings.PAPER_TRADING_ENABLED:
+                        opened_pos = await self.pipeline.paper_service.open_position_from_signal(
+                            custom_sig, repo=repo, fixed_lot_size=0.01
                         )
-                        await repo.save_signal(custom_sig.model_dump(mode="json"))
-
-                        if self.settings.PAPER_TRADING_ENABLED:
-                            opened_pos = await self.pipeline.paper_service.open_position_from_signal(
-                                custom_sig, repo=repo, fixed_lot_size=0.01
+                        if opened_pos:
+                            logger.info(
+                                "[SMC-FIB] Opened single paper trade %s %s on %s @ %.2f 0.01 lots (id=%s)",
+                                dir_str, symbol, tf_name, entry_px, opened_pos.position_id,
                             )
-                            if opened_pos:
-                                logger.info(
-                                    "[SMC-FIB] Opened paper trade %s %s %s on %s @ %.2f 0.01 lots (id=%s)",
-                                    dir_str, symbol, layer_key, tf_name, entry_px, opened_pos.position_id,
-                                )
                     break
             except Exception as strat_sched_exc:  # noqa: BLE001
                 logger.warning("[STRATEGY-SCHED] auto paper trade integration exception: %s", strat_sched_exc)
