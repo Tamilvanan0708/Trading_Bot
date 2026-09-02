@@ -1000,24 +1000,45 @@ Routes["/signals"] = (mount, query) => {
     }
     const table = `<div class="table-wrap"><table class="term">
       <thead><tr>
-        <th>Time</th><th>Symbol</th><th>Direction</th><th>Conf</th><th>Entry</th><th>SL</th><th>TP</th>
-        <th>R:R</th><th>Version</th><th>Regime</th><th>Session</th><th>Outcome</th>
+        <th>Time</th><th>Symbol</th><th>Strategy</th><th>Layer</th><th>Lots</th><th>Direction</th><th>Entry</th><th>SL</th><th>TP</th>
+        <th>R:R</th><th>Status</th>
       </tr></thead>
       <tbody>
-        ${rows.map(s => `<tr class="clickable" data-id="${s.id}">
-          <td>${UI.fmtTs(s.created_at)}</td>
-          <td>${UI.esc(s.symbol)}</td>
-          <td>${UI.dirBadge(s.direction)}</td>
-          <td class="num">${UI.fmt(s.confidence_score, 0)}</td>
-          <td class="num">${UI.fmt(s.entry_price)}</td>
-          <td class="num down">${UI.fmt(s.stop_loss)}</td>
-          <td class="num up">${UI.fmt(s.take_profit_1)}</td>
-          <td class="num">1:${UI.fmt(s.risk_reward, 1)}</td>
-          <td class="num" style="font-size:10px;color:var(--text-muted)">${UI.esc(String(s.strategy_version || "").split(":").pop())}</td>
-          <td>${UI.esc(s.regime || "—")}</td>
-          <td>${UI.esc(s.session || "—")}</td>
-          <td>${s.outcome ? UI.statusBadge(s.outcome) : '<span class="badge badge-dim">OPEN</span>'}</td>
-        </tr>`).join("")}
+        ${rows.map(s => {
+          const isSMC = String(s.strategy || "").toUpperCase().includes("SMC");
+          const ver = String(s.strategy_version || "");
+          let layerBadge = '<span class="badge" style="background:#2962ff;color:#fff;font-weight:700">L1</span>';
+          if (ver.includes("L2") || (s.reasons || []).some(r => String(r).includes("L2"))) {
+            layerBadge = '<span class="badge" style="background:#ff6d00;color:#fff;font-weight:700">L2</span>';
+          } else if (ver.includes("L3") || (s.reasons || []).some(r => String(r).includes("L3"))) {
+            layerBadge = '<span class="badge" style="background:#a855f7;color:#fff;font-weight:700">L3</span>';
+          }
+
+          const stratBadge = isSMC
+            ? '<span class="badge" style="background:rgba(38,166,154,0.15);color:#26a69a;border:1px solid #26a69a;font-weight:600">💎 SMC With Fib</span>'
+            : '<span class="badge" style="background:rgba(171,71,188,0.15);color:#ab47bc;border:1px solid #ab47bc;font-weight:600">🎯 Fib Retracement</span>';
+
+          const outcomeStatus = String(s.outcome || "PENDING").toUpperCase();
+          let statusBadge = '<span class="badge badge-dim">PENDING</span>';
+          if (outcomeStatus === "FILLED") statusBadge = '<span class="badge badge-primary" style="background:#00e676;color:#000;font-weight:700">FILLED</span>';
+          else if (outcomeStatus === "TP_HIT") statusBadge = '<span class="badge badge-success">TP HIT</span>';
+          else if (outcomeStatus === "SL_HIT") statusBadge = '<span class="badge badge-danger">SL HIT</span>';
+          else if (outcomeStatus === "ESCAPE" || outcomeStatus === "ESCAPE_CLOSED") statusBadge = '<span class="badge" style="background:#ffab00;color:#000">ESCAPE</span>';
+
+          return `<tr class="clickable" data-id="${s.id}">
+            <td>${UI.fmtTs(s.created_at)}</td>
+            <td><strong>${UI.esc(s.symbol)}</strong> <span style="font-size:10px;color:var(--text-muted)">${UI.esc(s.timeframe || "5M")}</span></td>
+            <td>${stratBadge}</td>
+            <td>${layerBadge}</td>
+            <td class="num font-mono" style="font-weight:600">0.01</td>
+            <td>${UI.dirBadge(s.direction)}</td>
+            <td class="num font-mono" style="font-weight:700">${UI.fmt(s.entry_price)}</td>
+            <td class="num down font-mono">${UI.fmt(s.stop_loss)}</td>
+            <td class="num up font-mono">${UI.fmt(s.take_profit_1)}</td>
+            <td class="num">1:${UI.fmt(s.risk_reward, 1)}</td>
+            <td>${statusBadge}</td>
+          </tr>`;
+        }).join("")}
       </tbody>
     </table></div>`;
     // wire click -> drawer

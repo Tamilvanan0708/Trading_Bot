@@ -95,8 +95,9 @@ class AnalysisPipeline:
         if snapshot.m15 and self.paper_service.get_active_positions():
             await self.paper_service.on_candle(snapshot.m15[-1], repo=repo)
 
-        # 7. Persistence
-        if db_session:
+        # 7. Persistence: Legacy pipeline signals are disabled in favor of dedicated Layered Strategies (SMC With Fib & Fib With Retracement)
+        # Only persist if explicitly enabled via settings.ENABLE_LEGACY_SIGNALS (default False)
+        if db_session and getattr(self.settings, "ENABLE_LEGACY_SIGNALS", False):
             sig_dict = {
                 "id": signal.signal_id,
                 "symbol": signal.instrument,
