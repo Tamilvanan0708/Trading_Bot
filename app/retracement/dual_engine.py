@@ -244,6 +244,57 @@ class DualRetracementEngine:
             setup.invalidation_reason = f"Setup expired after {self._max_expiry_candles} candles without entry touch."
             return events
 
+        # Continuation BOS detection: while waiting for entry (no layers filled yet),
+        # if price makes a fresh BOS in the trend direction, update the dealing range
+        # to the active impulse leg so we track the latest Lower High / Higher Low.
+        if not setup.layers:
+            swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
+            confirmed_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._candles) - 1]
+            confirmed_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._candles) - 1]
+            lookback_bars = self._anchor_lookback_bars()
+
+            if setup.direction == "SHORT" and confirmed_highs and confirmed_lows:
+                last_sl = confirmed_lows[-1]
+                if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
+                    if setup.point_1_timestamp and last_sl.timestamp > setup.point_1_timestamp:
+                        highs_before_bos = [
+                            s for s in confirmed_highs
+                            if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
+                        ]
+                        anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+                        setup.point_1_price = last_sl.price
+                        setup.point_1_timestamp = last_sl.timestamp
+                        setup.bos_price = last_sl.price
+                        setup.bos_timestamp = last_sl.timestamp
+                        setup.point_2_price = anchor_high.price
+                        setup.point_2_timestamp = anchor_high.timestamp
+                        setup.current_high_price = candle.low
+                        setup.current_high_timestamp = candle.timestamp
+                        setup.dynamic_tp = candle.low
+                        self._apply_bearish_fib(setup, anchor_high.price, candle.low)
+                        self._candles_since_bos = 0
+
+            elif setup.direction == "LONG" and confirmed_highs and confirmed_lows:
+                last_sh = confirmed_highs[-1]
+                if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
+                    if setup.point_1_timestamp and last_sh.timestamp > setup.point_1_timestamp:
+                        lows_before_bos = [
+                            s for s in confirmed_lows
+                            if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
+                        ]
+                        anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+                        setup.point_1_price = last_sh.price
+                        setup.point_1_timestamp = last_sh.timestamp
+                        setup.bos_price = last_sh.price
+                        setup.bos_timestamp = last_sh.timestamp
+                        setup.point_2_price = anchor_low.price
+                        setup.point_2_timestamp = anchor_low.timestamp
+                        setup.current_high_price = candle.high
+                        setup.current_high_timestamp = candle.timestamp
+                        setup.dynamic_tp = candle.high
+                        self._apply_bullish_fib(setup, anchor_low.price, candle.high)
+                        self._candles_since_bos = 0
+
         if setup.direction == "LONG":
             # 1. Update dynamic target if new high forms (before any layer fills)
             if not setup.layers and candle.high > (setup.current_high_price or 0.0):

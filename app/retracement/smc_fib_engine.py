@@ -289,6 +289,53 @@ class SMCFibEngine:
             self.invalidation_reason = f"Setup expired after 200 candles without entry touch."
             return
 
+        # Continuation BOS detection: while waiting for entry (no layers filled yet),
+        # if price makes a fresh BOS in the trend direction, update the dealing range
+        # to the active impulse leg so we track the latest Lower High / Higher Low.
+        if not self.layers:
+            swings = detect_swings(self._history, left_bars=self.left_bars, right_bars=self.right_bars)
+            confirmed_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._history) - 1]
+            confirmed_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._history) - 1]
+            lookback_bars = self._anchor_lookback_bars()
+
+            if self.direction == SignalDirection.SHORT and confirmed_highs and confirmed_lows:
+                last_low = confirmed_lows[-1]
+                if candle.close < last_low.price and last_low.index < len(self._history) - 1:
+                    if self.point_1_ts and last_low.timestamp > self.point_1_ts:
+                        highs_before_bos = [
+                            s for s in confirmed_highs
+                            if s.index <= last_low.index and (last_low.index - s.index) <= lookback_bars
+                        ]
+                        anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+                        self._initiate_setup(
+                            direction=SignalDirection.SHORT,
+                            p1_price=last_low.price,
+                            p1_ts=last_low.timestamp,
+                            p2_price=anchor_high.price,
+                            p2_ts=anchor_high.timestamp,
+                            current_candle=candle,
+                        )
+                        return
+
+            elif self.direction == SignalDirection.LONG and confirmed_highs and confirmed_lows:
+                last_high = confirmed_highs[-1]
+                if candle.close > last_high.price and last_high.index < len(self._history) - 1:
+                    if self.point_1_ts and last_high.timestamp > self.point_1_ts:
+                        lows_before_bos = [
+                            s for s in confirmed_lows
+                            if s.index <= last_high.index and (last_high.index - s.index) <= lookback_bars
+                        ]
+                        anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+                        self._initiate_setup(
+                            direction=SignalDirection.LONG,
+                            p1_price=last_high.price,
+                            p1_ts=last_high.timestamp,
+                            p2_price=anchor_low.price,
+                            p2_ts=anchor_low.timestamp,
+                            current_candle=candle,
+                        )
+                        return
+
         # 1. Update dynamic target if new extremes are formed before entry
         if self.direction == SignalDirection.LONG:
             if candle.high > (self.target_tp_price or 0.0):

@@ -48,6 +48,13 @@ class _SMC_TFSlot:
         self.has_live_data: bool = False
         self.live_price: float | None = None
 
+    def reset(self) -> None:
+        self.engine._reset_setup()
+        self.engine._history = []
+        self.last_processed_ts = None
+        self.has_live_data = False
+        self.live_price = None
+
 
 class SMCFibMultiTFMonitor:
     """Cascading monitor for SMC With Fib across 5 timeframes."""
@@ -65,8 +72,9 @@ class SMCFibMultiTFMonitor:
     def reset(self) -> None:
         """Clear all in-memory engine state so engines re-seed from live data."""
         for slot in self.slots.values():
-            slot.engine._reset_setup()
-            slot.engine._history = []
+            slot.reset()
+        self.live_price = None
+        self.data_status = "NO_DATA"
 
     async def _snapshot(self) -> Any:
         try:
