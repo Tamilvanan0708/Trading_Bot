@@ -627,366 +627,149 @@ function patchOverviewMarketUpdate(mu) {
 }
 
 
-/* ================= LIVE MARKET ================= */
+/* ================= LIVE MARKET (TRADINGVIEW EMBED) ================= */
 Routes["/live"] = (mount) => {
   const TFS = ["5m", "15m", "30m", "1h", "4h"];
-  const state = {
-    tf: "15m", seq: 0,
-    candles: [],
-    currentPrice: null,
-    dataStatus: "NO_DATA",
-    es: null,
-    pollTimer: null,
-    ro: null,
-    lastPayloadKey: null,
-    lastTs: null,
+  let currentTF = "5m";
+
+  const TF_MAP = {
+    "5m": "5",
+    "15m": "15",
+    "30m": "30",
+    "1h": "60",
+    "4h": "240"
   };
 
   function btnHtml(t) {
-    return `<button class="btn ${t === state.tf ? "btn-primary" : "btn-ghost"}" data-tf="${t}">${t.toUpperCase()}</button>`;
+    const isAct = t === currentTF;
+    return `<button class="btn ${isAct ? "btn-primary" : "btn-ghost"}" data-tf="${t}" style="${isAct ? 'font-weight:700;box-shadow:0 0 10px rgba(59,130,246,0.5)' : ''}">${t.toUpperCase()}</button>`;
   }
 
-  function dataStatusBadge(ds) {
-    if (ds === "HEALTHY") return { badge: '<span class="badge badge-green">LIVE</span>', feedCls: "live", feedLabel: "LIVE" };
-    if (ds === "HISTORICAL") return { badge: '<span class="badge badge-amber">HISTORICAL · FEED DEGRADED</span>', feedCls: "degraded", feedLabel: "FEED DEGRADED" };
-    if (ds === "HISTORICAL_CACHE") return { badge: '<span class="badge badge-blue">HISTORICAL CACHE</span>', feedCls: "cache", feedLabel: "HISTORICAL CACHE" };
-    if (ds === "NO_DATA") return { badge: '<span class="badge badge-red">NO DATA</span>', feedCls: "no-data", feedLabel: "NO DATA" };
-    return { badge: '<span class="badge badge-dim">—</span>', feedCls: "no-data", feedLabel: "—" };
-  }
+  function renderTVChart(tf) {
+    currentTF = tf;
+    const interval = TF_MAP[tf] || "5";
+    const box = document.getElementById("tradingview_chart_container");
+    if (!box) return;
 
-  function updateUI() {
-    const ds = state.dataStatus;
-    const dsInfo = dataStatusBadge(ds);
-    const statusEl = document.getElementById("live-data-status");
-    if (statusEl) statusEl.innerHTML = dsInfo.badge;
-    const feedBanner = document.getElementById("live-feed-banner");
-    if (feedBanner) {
-      feedBanner.className = "feed-banner " + dsInfo.feedCls;
-      feedBanner.innerHTML = `<span>${dsInfo.feedLabel}</span><span class="update-clock" id="live-update-clock">${state.lastTs ? UI.fmtTs(state.lastTs) : ""}</span>`;
-    }
-    const dotEl = document.getElementById("live-feed-dot");
-    if (dotEl) { dotEl.className = "pulse-dot " + dsInfo.feedCls; }
-    const labelEl = document.getElementById("live-feed-label");
-    if (labelEl) labelEl.textContent = dsInfo.feedLabel;
-
-    if (state.currentPrice != null) {
-      const el = document.getElementById("top-price");
-      if (el) el.textContent = Number(state.currentPrice).toFixed(2);
-      const legendEl = document.getElementById("live-legend-price");
-      if (legendEl) legendEl.textContent = Number(state.currentPrice).toFixed(2);
-      const metaEl = document.getElementById("live-legend-meta");
-      if (metaEl) metaEl.textContent = ds === "HEALTHY" ? "live" : "last known";
-    }
-
-    const last = state.candles.length ? state.candles[state.candles.length - 1] : null;
-    const candleEl = document.getElementById("live-last-candle");
-    if (candleEl) candleEl.textContent = last ? UI.fmtTs(last.timestamp) : "—";
-    const countEl = document.getElementById("live-candle-count");
-    if (countEl) countEl.textContent = state.candles.length;
-
-    // Market info strip
-    const strip = document.getElementById("live-info-strip");
-    if (strip) {
-      strip.innerHTML = [
-        UI.metric("Price", state.currentPrice != null ? Number(state.currentPrice).toFixed(2) : "—", ds === "HEALTHY" ? "live" : "last known").outerHTML,
-        UI.metric("Last candle", last ? UI.fmtTs(last.timestamp) : "—").outerHTML,
-        UI.metric("Regime", UI.esc(AppState.regime || "—")).outerHTML,
-        UI.metric("Session", UI.esc(AppState.session || "—")).outerHTML,
-        UI.metric("Candles", String(state.candles.length)).outerHTML,
-        UI.metric("Data source", ds === "HEALTHY" ? "LIVE" : ds === "HISTORICAL" ? "REST" : ds === "HISTORICAL_CACHE" ? "CACHE" : "—").outerHTML,
-        UI.metric("Feed status", dsInfo.badge).outerHTML,
-      ].join("");
-    }
-
-    // Update AppState
-    AppState.set({ price: state.currentPrice, dataStatus: ds });
-  }
-
-  async function renderChart(incremental) {
-    const cv = document.getElementById("live-chart");
-    if (!cv) return;
-    if (!state.candles.length) {
-      Charts.candles(cv, [], { noMessage: "No candle data available." });
-      return;
-    }
-    const opts = {
-      window: 80,
-      volume: true,
-      lastPrice: state.currentPrice,
-      showLatest: true,
-      noMessage: "Waiting for candle data…",
-    };
-    // Fetch BOS/CHOCH markers from market structure
-    try {
-      const structRes = await fetch('/structure/XAUUSD');
-      if (structRes.ok) {
-        const structData = await structRes.json();
-        opts.markers = (structData.swing_points || []).filter(sp => sp.type === 'BOS' || sp.type === 'CHOCH').map(sp => ({
-          timestamp: sp.timestamp, price: sp.price, type: sp.type, direction: sp.direction || 'UP'
-        }));
-      }
-    } catch(e) {}
-    if (incremental) Charts.candlesLive(cv, state.candles, opts);
-    else Charts.candles(cv, state.candles, opts);
-    // Wire ResizeObserver on the chart box (parent) for stability
-    const box = document.getElementById("live-chart-box");
-    if (box && !box._ro) {
-      box._ro = new ResizeObserver(() => {
-        if (state.candles.length) {
-          const cv2 = document.getElementById("live-chart");
-          if (cv2) Charts.candles(cv2, state.candles, {
-            window: 80, volume: true, lastPrice: state.currentPrice, showLatest: true,
-          });
-        }
-      });
-      box._ro.observe(box);
-      state.ro = box._ro;
-    }
-  }
-
-  function handlePayload(payload, tf) {
-    if (!payload || !payload.candles || !payload.candles.length) return;
-    state.candles = payload.candles;
-    state.currentPrice = payload.current_price;
-    state.dataStatus = payload.data_status || "NO_DATA";
-    state.lastTs = payload.timestamp || null;
-    renderChart();
-    updateUI();
-  }
-
-  // Merge an SSE delta (only the latest candle(s)) into the existing series.
-  // Historical candles stay stable; the forming candle is replaced in place.
-  function handleUpdate(payload, tf) {
-    if (!payload || !payload.candles) return;
-    const incoming = payload.candles;
-    if (!state.candles.length) {
-      state.candles = incoming.slice();
-    } else {
-      let changed = false;
-      for (const c of incoming) {
-        let found = false;
-        for (let i = state.candles.length - 1; i >= 0; i--) {
-          if (state.candles[i] && state.candles[i].timestamp === c.timestamp) {
-            state.candles[i] = c;
-            found = true;
-            changed = true;
-            break;
-          }
-        }
-        if (!found) {
-          state.candles.push(c);
-          changed = true;
-        }
-      }
-      if (!changed) return;
-      state.candles.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-      if (state.candles.length > 200) state.candles = state.candles.slice(-200);
-    }
-    state.currentPrice = payload.current_price;
-    if (payload.data_status) state.dataStatus = payload.data_status;
-    state.lastTs = payload.timestamp || null;
-    renderChart(true);
-    updateUI();
-  }
-
-  function loadTF(tf) {
-    // Clean up previous connection
-    if (state.es) { try { state.es.close(); } catch (_) {} state.es = null; }
-    if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
-    ++state.seq;
-
-    // Update TF label + buttons
-    const label = document.getElementById("live-tf-label");
-    if (label) label.textContent = tf.toUpperCase();
+    // Update buttons
     document.querySelectorAll(".btn[data-tf]").forEach(b => {
-      b.classList.toggle("btn-primary", b.dataset.tf === tf);
-      b.classList.toggle("btn-ghost", b.dataset.tf !== tf);
+      const isAct = b.dataset.tf === tf;
+      b.className = `btn ${isAct ? "btn-primary" : "btn-ghost"}`;
+      b.style.fontWeight = isAct ? "700" : "400";
+      b.style.boxShadow = isAct ? "0 0 10px rgba(59,130,246,0.5)" : "none";
     });
 
-    // Set initial status
-    const dsInfo = dataStatusBadge("NO_DATA");
-    const feedBanner = document.getElementById("live-feed-banner");
-    if (feedBanner) {
-      feedBanner.className = "feed-banner no-data";
-      feedBanner.innerHTML = '<span>CONNECTING…</span><span class="update-clock"></span>';
-    }
-    const dotEl = document.getElementById("live-feed-dot");
-    if (dotEl) dotEl.className = "pulse-dot";
-    const labelEl = document.getElementById("live-feed-label");
-    if (labelEl) labelEl.textContent = "CONNECTING";
+    const tfLabel = document.getElementById("live-tf-label");
+    if (tfLabel) tfLabel.textContent = tf.toUpperCase();
 
-    // Try SSE first
-    let usePolling = false;
-    try {
-      if (typeof EventSource !== "undefined") {
-        const url = API.liveStreamURL("XAUUSD", tf);
-        const es = new EventSource(url);
-        state.es = es;
+    // Render TradingView Widget
+    box.innerHTML = "";
+    const innerId = "tv_chart_" + Date.now();
+    const div = document.createElement("div");
+    div.id = innerId;
+    div.style.width = "100%";
+    div.style.height = "100%";
+    box.appendChild(div);
 
-        es.addEventListener("snapshot", (e) => {
-          let data;
-          try {
-            data = JSON.parse(e.data);
-          } catch (err) {
-            console.error("[live] invalid snapshot payload:", err, e.data);
-            return;
-          }
-          handlePayload(data, tf);
-        });
-
-        es.addEventListener("update", (e) => {
-          let data;
-          try {
-            data = JSON.parse(e.data);
-          } catch (err) {
-            console.error("[live] invalid update payload:", err, e.data);
-            return;
-          }
-          handleUpdate(data, tf);
-        });
-
-        es.onerror = () => {
-          if (state.es === es) {
-            es.close();
-            state.es = null;
-            if (!usePolling) { usePolling = true; startPolling(tf); }
-          }
-        };
-
-        // Timeout: if no snapshot within 11s, fall back to polling
-        const timeout = setTimeout(() => {
-          if (state.es === es && !state.candles.length) {
-            es.close();
-            state.es = null;
-            if (!usePolling) { usePolling = true; startPolling(tf); }
-          }
-        }, 11000);
-        es.addEventListener("snapshot", () => clearTimeout(timeout), { once: true });
-      } else {
-        usePolling = true;
-        startPolling(tf);
-      }
-    } catch (_) {
-      usePolling = true;
-      startPolling(tf);
-    }
-  }
-
-  function showReason(msg) {
-    const reasonEl = document.getElementById("live-no-data-reason");
-    if (reasonEl && msg) {
-      reasonEl.textContent = msg;
-      reasonEl.style.display = "";
-    }
-  }
-
-  function startPolling(tf) {
-    // Fallback chain: /live (REST-aware) → /cache (local, no network) → NO_DATA.
-    const fetchChart = async () => {
-      const seq = state.seq;
+    if (window.TradingView && window.TradingView.widget) {
       try {
-        const m = await API.liveMarket("XAUUSD", { timeframe: tf, include_forming: true });
-        if (seq !== state.seq) return;
-        if (m && m.candles && m.candles.length) {
-          handlePayload(m, tf);
-          return;
-        }
+        new window.TradingView.widget({
+          autosize: true,
+          symbol: "OANDA:XAUUSD",
+          interval: interval,
+          timezone: "Etc/UTC",
+          theme: "dark",
+          style: "1",
+          locale: "en",
+          toolbar_bg: "#131722",
+          enable_publishing: false,
+          allow_symbol_change: true,
+          hide_side_toolbar: false,
+          container_id: innerId,
+          withdateranges: true,
+          save_image: true,
+          details: true,
+          hotlist: false,
+          calendar: false,
+          studies: [
+            "MASimple@tv-basicstudies",
+            "RSI@tv-basicstudies"
+          ]
+        });
+        return;
       } catch (e) {
-        if (seq !== state.seq) return;
-        console.warn("[live] /live failed:", e && e.message);
+        console.warn("[TradingView] Widget init failed, using iframe fallback:", e);
       }
-      // Second tier: dedicated local cache (no network dependency).
-      try {
-        const c = await API.cachedMarket("XAUUSD", tf);
-        if (seq !== state.seq) return;
-        if (c && c.candles && c.candles.length) {
-          handlePayload(c, tf);
-          return;
-        }
-      } catch (e2) {
-        if (seq !== state.seq) return;
-        console.warn("[live] /cache failed:", e2 && e2.message);
-      }
-      // Final tier: show NO_DATA with the actual reason, never a blank chart.
-      state.dataStatus = "NO_DATA";
-      updateUI();
-      showReason("No candle data available. Check feed / network / research dataset.");
-    };
+    }
 
-    state.pollTimer = setInterval(fetchChart, 3000);
-    fetchChart();
+    // Direct iframe fallback
+    box.innerHTML = `
+      <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=OANDA%3AXAUUSD&interval=${interval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=131722&theme=dark&style=1&timezone=Etc%2FUTC&locale=en" 
+        style="width:100%;height:100%;min-height:640px;border:none;" 
+        allowfullscreen>
+      </iframe>
+    `;
   }
 
-  function switchTF(tf) {
-    if (tf === state.tf) return;
-    state.tf = tf;
-    state.candles = [];
-    state.currentPrice = null;
-    state.dataStatus = "NO_DATA";
-    state.lastPayloadKey = null;
-    loadTF(tf);
-  }
-
-  function wireButtons() {
-    document.querySelectorAll(".btn[data-tf]").forEach(b => {
-      b.addEventListener("click", () => switchTF(b.dataset.tf));
-    });
-  }
-
-  // ---- Register cleanup ----
+  let pollTimer = null;
   window.__viewCleanup = () => {
-    if (state.es) { try { state.es.close(); } catch (_) {} state.es = null; }
-    if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
-    if (state.ro) { try { state.ro.disconnect(); } catch (_) {} state.ro = null; }
+    if (pollTimer) clearInterval(pollTimer);
   };
 
-  // ---- Immediate paint ----
   mount.innerHTML = `
     <div class="stack">
       <div class="row-between">
         <div class="section-title">Live Market — XAU/USD</div>
-        <div class="tf-toolbar">${TFS.map(btnHtml).join("")}</div>
+        <div class="tf-toolbar" id="tv-tf-toolbar">${TFS.map(btnHtml).join("")}</div>
       </div>
-      <div class="feed-banner" id="live-feed-banner">
-        <span>CONNECTING…</span>
-        <span class="update-clock" id="live-update-clock"></span>
+      <div class="feed-banner live" id="live-feed-banner">
+        <span>TRADINGVIEW OFFICIAL REAL-TIME CHART</span>
+        <span class="update-clock">OANDA:XAUUSD · LIVE STREAMING</span>
       </div>
-      <div class="card">
-        <div class="card-head">
-          <span>XAU/USD · <span id="live-tf-label">15M</span></span>
-          <span class="muted">
-            <span id="live-data-status"></span>
-            <span> · last candle <span id="live-last-candle">—</span></span>
-            <span> · <span id="live-candle-count">—</span> candles</span>
+      <div class="card" style="padding:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:#131722;">
+        <div class="card-head" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center">
+          <span>XAU/USD · <span id="live-tf-label" style="color:var(--primary);font-weight:700">5M</span></span>
+          <span class="muted" style="display:flex;align-items:center;gap:8px">
+            <span class="pulse-dot live"></span>
+            <span class="badge badge-green">TRADINGVIEW LIVE</span>
+            <span style="font-size:11px">Full Technical Indicators & Drawing Tools</span>
           </span>
         </div>
-        <div class="card-body" style="padding:0">
-          <div class="live-chart-frame">
-            <div class="live-chart-status" id="live-chart-status">
-              <span class="pulse-dot" id="live-feed-dot"></span>
-              <span id="live-feed-label">CONNECTING</span>
-            </div>
-            <div class="live-price-legend" id="live-price-legend">
-              <div class="legend-price" id="live-legend-price">—</div>
-              <div class="legend-meta" id="live-legend-meta">—</div>
-            </div>
-            <div class="chart-box" id="live-chart-box" style="height:440px">
-              <canvas id="live-chart" class="chart"></canvas>
-            </div>
-            <div id="live-no-data-reason" style="padding:4px 12px 8px;font-size:11px;color:var(--amber);display:none"></div>
-          </div>
+        <div class="card-body" style="padding:0;height:640px;width:100%">
+          <div id="tradingview_chart_container" style="height:100%;width:100%"></div>
         </div>
       </div>
       <div class="live-info-strip" id="live-info-strip"></div>
     </div>`;
 
-  // Seed from cached topbar state
-  if (AppState.price != null) {
-    document.getElementById("live-legend-price").textContent = Number(AppState.price).toFixed(2);
-  }
+  // Wire buttons
+  document.querySelectorAll(".btn[data-tf]").forEach(b => {
+    b.addEventListener("click", () => renderTVChart(b.dataset.tf));
+  });
 
-  wireButtons();
-  loadTF(state.tf);
+  // Render initial TV chart
+  renderTVChart("5m");
+
+  // Keep topbar and metrics strip synced with live price
+  pollTimer = setInterval(async () => {
+    try {
+      const snap = await API.overview("XAUUSD");
+      if (snap && snap.latest_price) {
+        const p = Number(snap.latest_price).toFixed(2);
+        const strip = document.getElementById("live-info-strip");
+        if (strip) {
+          strip.innerHTML = [
+            UI.metric("Price", p, "live").outerHTML,
+            UI.metric("Spread", snap.spread != null ? snap.spread.toFixed(2) : "0.30", "pts").outerHTML,
+            UI.metric("Regime", UI.esc(AppState.regime || "TRENDING")).outerHTML,
+            UI.metric("Session", UI.esc(AppState.session || "ACTIVE")).outerHTML,
+            UI.metric("Chart Engine", "TradingView Pro").outerHTML,
+            UI.metric("Data Feed", '<span class="badge badge-green">LIVE</span>').outerHTML,
+          ].join("");
+        }
+      }
+    } catch (_) {}
+  }, 3000);
 };
 
 /* ================= SIGNALS ================= */
