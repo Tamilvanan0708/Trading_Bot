@@ -62,6 +62,12 @@ class SMCFibMultiTFMonitor:
         self.data_status: str = "NO_DATA"
         self._lock = asyncio.Lock()
 
+    def reset(self) -> None:
+        """Clear all in-memory engine state so engines re-seed from live data."""
+        for slot in self.slots.values():
+            slot.engine._reset_setup()
+            slot.engine._history = []
+
     async def _snapshot(self) -> Any:
         try:
             service = get_live_service()
