@@ -143,8 +143,6 @@ async def get_performance(db: AsyncSession = Depends(get_db_session)):
 @router.get("/performance/account")
 async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
     """Detailed account statement with balance, equity, drawdown, and trade statistics."""
-    await sync_strategy_paper_trades(db)
-
     repo = Repository(db)
     active = await repo.list_active_paper_trades()
     closed = await repo.list_closed_paper_trades(limit=500)
