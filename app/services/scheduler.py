@@ -398,14 +398,9 @@ class AnalysisScheduler:
             elif not decision.allowed:
                 logger.info("Admission rejected: %s", decision.rejected_reason)
 
-            # 6. Telegram dispatch for tradable signals (with full metadata),
-            #    subject to the daily signal cap (research risk metric).
-            if signal_payload.direction != SignalDirection.NO_TRADE:
-                if self._daily_signal_cap_reached():
-                    logger.info("MAX_SIGNALS_PER_DAY reached — signal %s stored but alert suppressed.",
-                                signal_payload.signal_id)
-                else:
-                    await self._send_signal_alert_with_metadata(result, signal_payload, ai_validation, regime, session=session)
+            # 6. Legacy Telegram dispatch disabled — alerts are strictly reserved for TAKEN 5M TRADES only
+            # if signal_payload.direction != SignalDirection.NO_TRADE:
+            #     await self._send_signal_alert_with_metadata(result, signal_payload, ai_validation, regime, session=session)
 
             # ------------------------------------------------------------------
             # 5a. CUSTOM USER STRATEGIES INTEGRATION (Fib With Retracement & SMC With Fib)

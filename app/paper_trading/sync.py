@@ -4,6 +4,7 @@ Automatic Synchronization of Strategy Setups to Paper Trades.
 Whenever an entry is touched in Fib With Retracement or SMC With Fib,
 this service guarantees that a 0.01 lot paper trade is opened and managed
 with live running PnL and point tracking.
+Also dispatches Telegram alerts strictly for TAKEN TRADES and TP/SL CLOSES.
 """
 
 from datetime import datetime, timezone
@@ -15,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import logger
 from app.data.live.service import get_live_service
 from app.database.models import PaperTradeModel
+from app.database.repository import Repository
+from app.notifications.telegram_service import TelegramService
 from app.retracement.multi_tf import get_retracement_multi_tf_service
 from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
 
@@ -26,6 +29,8 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
         live_price = await ls.get_latest_price("XAUUSD")
     except Exception:  # noqa: BLE001
         live_price = None
+
+    tg = TelegramService()
 
     # 1. Fib With Retracement 5M: Check each tranche layer
     try:
@@ -67,6 +72,26 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                         db.add(new_trade)
                         await db.commit()
                         logger.info("[PAPER-AUTO] Opened trade %s (%s %s) @ %.2f", sig_id, f5.direction, l_key, entry_px)
+
+                        # Telegram: Dispatch Trade Opened Alert
+                        try:
+                            dir_badge = "BUY / LONG ▲" if f5.direction == "LONG" else "SELL / SHORT ▼"
+                            msg = (
+                                f"🚀 *TRADE OPENED (0.01 Lots)*\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"📊 *Strategy:* Fib With Retracement ({l_key})\n"
+                                f"🪙 *Symbol:* XAU/USD (5M)\n"
+                                f"📈 *Direction:* {dir_badge}\n"
+                                f"💵 *Entry Price:* ${entry_px:.2f}\n"
+                                f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
+                                f"🎯 *Take Profit:* ${tp_px:.2f}\n"
+                                f"🧠 *AI Validation:* APPROVED\n"
+                                f"━━━━━━━━━━━━━━━━━━━━"
+                            )
+                            await tg.send_raw_alert(msg)
+                        except Exception as tg_err:  # noqa: BLE001
+                            logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
+
     except Exception as exc:  # noqa: BLE001
         logger.warning("[PAPER-SYNC] Fib sync error: %s", exc)
 
@@ -110,6 +135,26 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                 db.add(new_trade)
                 await db.commit()
                 logger.info("[PAPER-AUTO] Opened trade %s (SMC %s) @ %.2f", sig_id, dir_str, entry_px)
+
+                # Telegram: Dispatch Trade Opened Alert
+                try:
+                    dir_badge = "BUY / LONG ▲" if dir_str == "LONG" else "SELL / SHORT ▼"
+                    msg = (
+                        f"🚀 *TRADE OPENED (0.01 Lots)*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📊 *Strategy:* SMC With Fib (0.680 Golden Pocket)\n"
+                        f"🪙 *Symbol:* XAU/USD (5M)\n"
+                        f"📈 *Direction:* {dir_badge}\n"
+                        f"💵 *Entry Price:* ${entry_px:.2f}\n"
+                        f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
+                        f"🎯 *Take Profit:* ${tp_px:.2f}\n"
+                        f"🧠 *AI Validation:* APPROVED\n"
+                        f"━━━━━━━━━━━━━━━━━━━━"
+                    )
+                    await tg.send_raw_alert(msg)
+                except Exception as tg_err:  # noqa: BLE001
+                    logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
+
     except Exception as exc:  # noqa: BLE001
         logger.warning("[PAPER-SYNC] SMC sync error: %s", exc)
 
@@ -124,6 +169,9 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
             if entry <= 0:
                 continue
 
+            closed = False
+            pts = 0.0
+
             if t.direction == "LONG":
                 if t.take_profit_1 and live_price >= t.take_profit_1:
                     t.state = "CLOSED"
@@ -133,6 +181,7 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                     pts = round(t.take_profit_1 - entry, 2)
                     t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
                     t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
+                    closed = True
                     logger.info("[PAPER-AUTO] Closed LONG trade %s at TP: %.2f (+$%.2f)", t.id, t.exit_price, t.realized_pnl)
                 elif t.stop_loss and live_price <= t.stop_loss:
                     t.state = "CLOSED"
@@ -142,6 +191,7 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                     pts = round(t.stop_loss - entry, 2)
                     t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
                     t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
+                    closed = True
                     logger.info("[PAPER-AUTO] Closed LONG trade %s at SL: %.2f ($%.2f)", t.id, t.exit_price, t.realized_pnl)
             elif t.direction == "SHORT":
                 if t.take_profit_1 and live_price <= t.take_profit_1:
@@ -152,6 +202,7 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                     pts = round(entry - t.take_profit_1, 2)
                     t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
                     t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
+                    closed = True
                     logger.info("[PAPER-AUTO] Closed SHORT trade %s at TP: %.2f (+$%.2f)", t.id, t.exit_price, t.realized_pnl)
                 elif t.stop_loss and live_price >= t.stop_loss:
                     t.state = "CLOSED"
@@ -161,6 +212,35 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                     pts = round(entry - t.stop_loss, 2)
                     t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
                     t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
+                    closed = True
                     logger.info("[PAPER-AUTO] Closed SHORT trade %s at SL: %.2f ($%.2f)", t.id, t.exit_price, t.realized_pnl)
+
+            # Telegram: Dispatch Trade Closed Alert (TP or SL)
+            if closed:
+                try:
+                    strat_name = "Fib With Retracement" if "FIB_RETR" in (t.signal_id or "") else "SMC With Fib"
+                    if t.exit_reason == "TP_HIT":
+                        msg = (
+                            f"🎯 *TAKE PROFIT HIT!*\n"
+                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                            f"📊 *Strategy:* {strat_name}\n"
+                            f"🪙 *Symbol:* XAU/USD (5M)\n"
+                            f"💵 *Exit Price:* ${t.exit_price:.2f}\n"
+                            f"💰 *Result:* +{pts:.2f} PTS (+${t.realized_pnl:.2f} USD)\n"
+                            f"━━━━━━━━━━━━━━━━━━━━"
+                        )
+                    else:
+                        msg = (
+                            f"🛑 *STOP LOSS HIT*\n"
+                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                            f"📊 *Strategy:* {strat_name}\n"
+                            f"🪙 *Symbol:* XAU/USD (5M)\n"
+                            f"💵 *Exit Price:* ${t.exit_price:.2f}\n"
+                            f"📉 *Result:* -{abs(pts):.2f} PTS (-${abs(t.realized_pnl):.2f} USD)\n"
+                            f"━━━━━━━━━━━━━━━━━━━━"
+                        )
+                    await tg.send_raw_alert(msg)
+                except Exception as tg_err:  # noqa: BLE001
+                    logger.warning("[PAPER-TG] Failed to send close alert: %s", tg_err)
 
         await db.commit()
