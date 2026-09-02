@@ -469,6 +469,19 @@ class AnalysisScheduler:
                                 f"on {tf_name.upper()} ({dir_str}), 0.01 lots"
                             ],
                         )
+                        # AI VALIDATION GATE
+                        try:
+                            ai_val = await self.pipeline.ai_validator.validate_signal(custom_sig)
+                            custom_sig.reasons.append(
+                                f"AI Verdict: {ai_val.status.value} (conf={ai_val.confidence:.0f}%) — {ai_val.explanation}"
+                            )
+                            if ai_val.status.value == "REJECT":
+                                logger.warning("[AI-GATE] Fib Retracement %s REJECTED by AI: %s", sig_id, ai_val.explanation)
+                                await repo.save_signal(custom_sig.model_dump(mode="json"))
+                                continue
+                        except Exception as ai_exc:  # noqa: BLE001
+                            logger.warning("[AI-GATE] Validation call error: %s", ai_exc)
+
                         await repo.save_signal(custom_sig.model_dump(mode="json"))
 
                         if self.settings.PAPER_TRADING_ENABLED:
@@ -528,6 +541,20 @@ class AnalysisScheduler:
                             f"SMC 0.680 Golden Pocket Single Entry on {tf_name.upper()} ({dir_str}), 0.01 lots"
                         ],
                     )
+
+                    # AI VALIDATION GATE
+                    try:
+                        ai_val = await self.pipeline.ai_validator.validate_signal(custom_sig)
+                        custom_sig.reasons.append(
+                            f"AI Verdict: {ai_val.status.value} (conf={ai_val.confidence:.0f}%) — {ai_val.explanation}"
+                        )
+                        if ai_val.status.value == "REJECT":
+                            logger.warning("[AI-GATE] SMC With Fib %s REJECTED by AI: %s", sig_id, ai_val.explanation)
+                            await repo.save_signal(custom_sig.model_dump(mode="json"))
+                            break
+                    except Exception as ai_exc:  # noqa: BLE001
+                        logger.warning("[AI-GATE] Validation call error: %s", ai_exc)
+
                     await repo.save_signal(custom_sig.model_dump(mode="json"))
 
                     if self.settings.PAPER_TRADING_ENABLED:

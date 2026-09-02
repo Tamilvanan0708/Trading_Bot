@@ -136,14 +136,11 @@ class DualRetracementEngine:
         # recent internal micro-structure, higher timeframes keep macro swings.
         lookback_bars = self._anchor_lookback_bars()
 
-        # 1. Check Bullish BOS (Close > last confirmed swing high)
+        # 1. Check Bullish BOS (Body Close > last confirmed swing high)
         if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-            # Bullish anchor = LOWEST swing low in the preceding sequence
-            lows_before_bos = [
-                s for s in confirmed_lows
-                if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
-            ]
-            anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_sl
+            # Immediate Local Parent Swing Anchor: The swing low directly preceding this breakout (Image 2 style)
+            lows_before_bos = [s for s in confirmed_lows if s.index <= last_sh.index]
+            anchor_low = lows_before_bos[-1] if lows_before_bos else last_sl
             p2_low = anchor_low.price
             p2_ts = anchor_low.timestamp
 
@@ -168,14 +165,11 @@ class DualRetracementEngine:
             self._candles_since_bos = 0
             return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
 
-        # 2. Check Bearish BOS (Close < last confirmed swing low)
+        # 2. Check Bearish BOS (Body Close < last confirmed swing low)
         elif candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-            # Bearish anchor = HIGHEST swing high in the preceding sequence
-            highs_before_bos = [
-                s for s in confirmed_highs
-                if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
-            ]
-            anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_sh
+            # Immediate Local Parent Swing Anchor: The swing high directly preceding this breakout (Image 2 style)
+            highs_before_bos = [s for s in confirmed_highs if s.index <= last_sl.index]
+            anchor_high = highs_before_bos[-1] if highs_before_bos else last_sh
             p2_high = anchor_high.price
             p2_ts = anchor_high.timestamp
 
@@ -257,11 +251,8 @@ class DualRetracementEngine:
                 last_sl = confirmed_lows[-1]
                 if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
                     if setup.point_1_timestamp and last_sl.timestamp > setup.point_1_timestamp:
-                        highs_before_bos = [
-                            s for s in confirmed_highs
-                            if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
-                        ]
-                        anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+                        highs_before_bos = [s for s in confirmed_highs if s.index <= last_sl.index]
+                        anchor_high = highs_before_bos[-1] if highs_before_bos else confirmed_highs[-1]
                         setup.point_1_price = last_sl.price
                         setup.point_1_timestamp = last_sl.timestamp
                         setup.bos_price = last_sl.price
@@ -278,11 +269,8 @@ class DualRetracementEngine:
                 last_sh = confirmed_highs[-1]
                 if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
                     if setup.point_1_timestamp and last_sh.timestamp > setup.point_1_timestamp:
-                        lows_before_bos = [
-                            s for s in confirmed_lows
-                            if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
-                        ]
-                        anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+                        lows_before_bos = [s for s in confirmed_lows if s.index <= last_sh.index]
+                        anchor_low = lows_before_bos[-1] if lows_before_bos else confirmed_lows[-1]
                         setup.point_1_price = last_sh.price
                         setup.point_1_timestamp = last_sh.timestamp
                         setup.bos_price = last_sh.price
@@ -523,12 +511,24 @@ class DualRetracementEngine:
                     continue
                 if candle.high >= layer["tp"]:
                     layer["state"] = "TP_HIT"
+                    # Breakeven Shield: When L2 or L3 hits TP at 0.618, lock L1 Stop Loss to Breakeven (0.618)
+                    if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
+                        if setup.fib_0_618 is not None:
+                            setup.layers["L1"]["sl"] = setup.fib_0_618
+                            setup.sl_price = setup.fib_0_618
+                            logger.info("[BREAKEVEN SHIELD] Locked L1 Stop Loss to Breakeven (0.618: %s)", setup.fib_0_618)
         else:
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
                 if candle.low <= layer["tp"]:
                     layer["state"] = "TP_HIT"
+                    # Breakeven Shield: When L2 or L3 hits TP at 0.618, lock L1 Stop Loss to Breakeven (0.618)
+                    if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
+                        if setup.fib_0_618 is not None:
+                            setup.layers["L1"]["sl"] = setup.fib_0_618
+                            setup.sl_price = setup.fib_0_618
+                            logger.info("[BREAKEVEN SHIELD] Locked L1 Stop Loss to Breakeven (0.618: %s)", setup.fib_0_618)
 
         # Setup completes only when EVERY filled layer has resolved (TP/SL/escape).
         open_layers = [l for l in setup.layers.values() if l["state"] == "FILLED"]
