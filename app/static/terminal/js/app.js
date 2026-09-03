@@ -550,15 +550,31 @@ async function loadOverview() {
       `;
     }
 
+    // Helper to safely extract price from level object or number
+    function extractLevelPrice(lv, key) {
+      if (!lv) return null;
+      const item = lv[key];
+      if (item == null) return null;
+      const p = (typeof item === "object" && item.price != null) ? item.price : item;
+      const num = Number(p);
+      return (!isNaN(num) && num > 0) ? num : null;
+    }
+
     // 3. 5M Fib With Retracement Card
     const f5 = (fibData.timeframes && fibData.timeframes["5m"]) || {};
     const fLevels = f5.levels || {};
+    const fAnchor = extractLevelPrice(fLevels, "0.000") ?? extractLevelPrice(fLevels, "0.0") ?? (f5.point_2 ? Number(f5.point_2.price) : null);
+    const fTarget = extractLevelPrice(fLevels, "1.000") ?? extractLevelPrice(fLevels, "1.0") ?? (f5.tp ? Number(f5.tp.dynamic || f5.tp.locked || f5.tp.price) : null);
+    const fEntry = extractLevelPrice(fLevels, "0.618") ?? (f5.entry ? Number(f5.entry.price) : null);
+    const fSl = extractLevelPrice(fLevels, "0.236") ?? (f5.sl ? Number(f5.sl.price) : null);
+    const fBos = f5.structure && f5.structure.break_price ? Number(f5.structure.break_price) : (f5.point_1 ? Number(f5.point_1.price) : null);
+
     if (document.getElementById("ov-fib-dir")) document.getElementById("ov-fib-dir").textContent = (f5.direction || "LONG") + (f5.direction === "SHORT" ? " ▼" : " ▲");
-    if (document.getElementById("ov-fib-anchor")) document.getElementById("ov-fib-anchor").textContent = fLevels["0.0"] ? `$${Number(fLevels["0.0"]).toFixed(2)}` : (f5.point_2 ? `$${Number(f5.point_2.price).toFixed(2)}` : "—");
-    if (document.getElementById("ov-fib-bos")) document.getElementById("ov-fib-bos").textContent = f5.structure && f5.structure.break_price ? `$${Number(f5.structure.break_price).toFixed(2)}` : (f5.point_1 ? `$${Number(f5.point_1.price).toFixed(2)}` : "—");
-    if (document.getElementById("ov-fib-target")) document.getElementById("ov-fib-target").textContent = fLevels["1.0"] ? `$${Number(fLevels["1.0"]).toFixed(2)}` : (f5.tp ? `$${Number(f5.tp.dynamic || f5.tp.locked).toFixed(2)}` : "—");
-    if (document.getElementById("ov-fib-entry")) document.getElementById("ov-fib-entry").textContent = fLevels["0.618"] ? `$${Number(fLevels["0.618"]).toFixed(2)}` : (f5.entry ? `$${Number(f5.entry.price).toFixed(2)}` : "—");
-    if (document.getElementById("ov-fib-sl")) document.getElementById("ov-fib-sl").textContent = fLevels["0.236"] ? `$${Number(fLevels["0.236"]).toFixed(2)}` : (f5.sl ? `$${Number(f5.sl.price).toFixed(2)}` : "—");
+    if (document.getElementById("ov-fib-anchor")) document.getElementById("ov-fib-anchor").textContent = fAnchor != null ? `$${fAnchor.toFixed(2)}` : "—";
+    if (document.getElementById("ov-fib-bos")) document.getElementById("ov-fib-bos").textContent = fBos != null ? `$${fBos.toFixed(2)}` : "—";
+    if (document.getElementById("ov-fib-target")) document.getElementById("ov-fib-target").textContent = fTarget != null ? `$${fTarget.toFixed(2)}` : "—";
+    if (document.getElementById("ov-fib-entry")) document.getElementById("ov-fib-entry").textContent = fEntry != null ? `$${fEntry.toFixed(2)}` : "—";
+    if (document.getElementById("ov-fib-sl")) document.getElementById("ov-fib-sl").textContent = fSl != null ? `$${fSl.toFixed(2)}` : "—";
     if (document.getElementById("ov-fib-state-badge") && f5.state) {
       document.getElementById("ov-fib-state-badge").innerHTML = `<span class="badge ${f5.is_entry_touched ? 'badge-green' : 'badge-blue'}">${f5.state}</span>`;
     }
@@ -566,8 +582,10 @@ async function loadOverview() {
     // 4. 5M SMC With Fib Card
     const s5 = (smcData.timeframes && smcData.timeframes["5m"]) || {};
     const sLevels = s5.levels || {};
-    if (document.getElementById("ov-smc-entry")) document.getElementById("ov-smc-entry").textContent = sLevels["0.680"] ? `$${Number(sLevels["0.680"]).toFixed(2)}` : (s5.entry ? `$${Number(s5.entry.price).toFixed(2)}` : "—");
-    if (document.getElementById("ov-smc-sl")) document.getElementById("ov-smc-sl").textContent = sLevels["0.920"] ? `$${Number(sLevels["0.920"]).toFixed(2)}` : (s5.sl ? `$${Number(s5.sl.price).toFixed(2)}` : "—");
+    const sEntry = extractLevelPrice(sLevels, "0.680") ?? (s5.entry ? Number(s5.entry.price) : null);
+    const sSl = extractLevelPrice(sLevels, "0.920") ?? (s5.sl ? Number(s5.sl.price) : null);
+    if (document.getElementById("ov-smc-entry")) document.getElementById("ov-smc-entry").textContent = sEntry != null ? `$${sEntry.toFixed(2)}` : "—";
+    if (document.getElementById("ov-smc-sl")) document.getElementById("ov-smc-sl").textContent = sSl != null ? `$${sSl.toFixed(2)}` : "—";
     if (document.getElementById("ov-smc-obs") && s5.smc) document.getElementById("ov-smc-obs").textContent = `${s5.smc.active_obs_count || 0} Active`;
     if (document.getElementById("ov-smc-fvgs") && s5.smc) document.getElementById("ov-smc-fvgs").textContent = `${s5.smc.active_fvgs_count || 0} Active`;
 

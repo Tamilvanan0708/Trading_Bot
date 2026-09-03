@@ -15,7 +15,7 @@ router = APIRouter(prefix="/signals", tags=["Trading Signals"])
 @router.get("")
 async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_session)):
     """Lists trading signals exclusively from our dedicated Layered Strategies:
-    - SMC With Fib (L1 @ 0.680, L2 @ 0.790)
+    - SMC With Fib (Single @ 0.680)
     - Fib With Retracement (L1 @ 0.618, L2 @ 0.500, L3 @ 0.382)
 
     Legacy multi-confluence and old method signals are purged and excluded.
@@ -38,7 +38,7 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
             await db.execute(delete(SignalModel).where(SignalModel.id.in_(legacy_ids)))
             await db.commit()
     except Exception:  # noqa: BLE001
-        pass
+        await db.rollback()
 
     # Auto-sync active strategies into signals table
     try:
@@ -90,6 +90,7 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
                     await db.commit()
                 elif existing and existing.outcome != sig_state:
                     await repo.update_signal_outcome(sig_id, {"outcome": sig_state})
+                    await db.commit()
 
         # 2. Fib With Retracement: LAYER ENTRY (L1 @ 0.618, L2 @ 0.500, L3 @ 0.382)
         from app.retracement.multi_tf import get_retracement_multi_tf_service
@@ -139,48 +140,69 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
                     await db.commit()
                 elif existing and existing.outcome != l_state:
                     await repo.update_signal_outcome(sig_id, {"outcome": l_state})
+                    await db.commit()
     except Exception:  # noqa: BLE001
-        pass
+        await db.rollback()
 
-    repo = Repository(db)
-    raw_signals = await repo.list_recent_signals(limit=limit * 5)
-    signals = [
-        s for s in raw_signals
-        if s.strategy in ("SMC_WITH_FIB", "FIB_WITH_RETRACEMENT", "RETRACEMENT")
-    ][:limit]
+    try:
+        repo = Repository(db)
+        raw_signals = await repo.list_recent_signals(limit=limit * 5)
+        signals = [
+            s for s in raw_signals
+            if s.strategy in ("SMC_WITH_FIB", "FIB_WITH_RETRACEMENT", "RETRACEMENT")
+        ][:limit]
 
-    return [
-        {
-            "id": s.id,
-            "created_at": (s.created_at.isoformat() + "Z") if s.created_at and not str(s.created_at).endswith("Z") else s.created_at.isoformat() if s.created_at else None,
-            "symbol": s.symbol,
-            "direction": s.direction,
-            "strategy": s.strategy,
-            "strategy_version": s.strategy_version,
-            "entry_price": s.entry_price,
-            "stop_loss": s.stop_loss,
-            "take_profit_1": s.take_profit_1,
-            "take_profit_2": s.take_profit_2,
-            "take_profit_3": s.take_profit_3,
-            "risk_reward": s.risk_reward,
-            "confidence_score": s.confidence_score,
-            "signal_quality": s.signal_quality,
-            "market_bias": s.market_bias,
-            "regime": s.regime,
-            "session": s.session,
-            "outcome": s.outcome,
-            "final_r": s.final_r,
-            "max_favorable_excursion_r": s.max_favorable_excursion_r,
-            "max_adverse_excursion_r": s.max_adverse_excursion_r,
-            "reasons": s.reasons,
-            "ai_validation": {
-                "status": s.ai_validation.status if s.ai_validation else None,
-                "confidence": s.ai_validation.confidence if s.ai_validation else None,
-                "explanation": s.ai_validation.explanation if s.ai_validation else None,
-            } if s.ai_validation else None,
-        }
-        for s in signals
-    ]
+        output = []
+        for s in signals:
+            ai_data = None
+            try:
+                if s.ai_validation is not None:
+                    ai_data = {
+                        "status": getattr(s.ai_validation, "status", None),
+                        "confidence": getattr(s.ai_validation, "confidence", None),
+                        "explanation": getattr(s.ai_validation, "explanation", None),
+                    }
+            except Exception:
+                ai_data = None
+
+            created_iso = None
+            if s.created_at:
+                try:
+                    created_iso = s.created_at.isoformat()
+                    if not created_iso.endswith("Z") and "+" not in created_iso:
+                        created_iso += "Z"
+                except Exception:
+                    created_iso = str(s.created_at)
+
+            output.append({
+                "id": s.id,
+                "created_at": created_iso,
+                "symbol": s.symbol,
+                "direction": s.direction,
+                "strategy": s.strategy,
+                "strategy_version": s.strategy_version,
+                "entry_price": s.entry_price,
+                "stop_loss": s.stop_loss,
+                "take_profit_1": s.take_profit_1,
+                "take_profit_2": s.take_profit_2,
+                "take_profit_3": s.take_profit_3,
+                "risk_reward": s.risk_reward,
+                "confidence_score": s.confidence_score,
+                "signal_quality": s.signal_quality,
+                "market_bias": s.market_bias,
+                "regime": s.regime,
+                "session": s.session,
+                "outcome": s.outcome,
+                "final_r": s.final_r,
+                "max_favorable_excursion_r": s.max_favorable_excursion_r,
+                "max_adverse_excursion_r": s.max_adverse_excursion_r,
+                "reasons": s.reasons if isinstance(s.reasons, list) else [],
+                "ai_validation": ai_data,
+            })
+        return output
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[SIGNALS-API] Failed to retrieve signals: %s", exc)
+        return []
 
 
 @router.get("/{signal_id}")
