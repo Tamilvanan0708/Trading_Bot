@@ -33,15 +33,10 @@ def calculate_atr(candles: list[Candle], period: int = 14) -> list[float]:
         lc = abs(lows[i] - closes[i - 1])
         tr[i] = max(hl, hc, lc)
 
-    # Wilder's Smoothing for ATR
-    atr = pd.Series(tr).ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean().tolist()
-    # Fill early NaNs with a simple expanding mean (avoids the sharp
-    # discontinuity that raw TR values would produce).
-    filled_atr = []
-    for i, val in enumerate(atr):
-        if not np.isnan(val):
-            filled_atr.append(val)
-        else:
-            fill = sum(tr[:i + 1]) / (i + 1)
-            filled_atr.append(fill)
-    return [round(float(v), 3) for v in filled_atr]
+    # Wilder's Smoothing for ATR — seed with SMA of first period TRs
+    atr = [0.0] * len(tr)
+    if len(tr) >= period:
+        atr[period - 1] = sum(tr[:period]) / period
+        for i in range(period, len(tr)):
+            atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+    return [round(float(v), 3) for v in atr]

@@ -29,16 +29,15 @@ def detect_order_blocks(
         break_idx = brk.index
 
         if brk.break_type in [StructureType.BOS_BULLISH, StructureType.CHOCH_BULLISH]:
-            # Look backwards from break_idx for the lowest down candle in the prior 10 bars
+            # Look backwards from break_idx for the most recent down candle in the prior 10 bars
             search_start = max(0, break_idx - 10)
             candidate_idx = None
-            lowest_val = float("inf")
 
             for j in range(break_idx - 1, search_start - 1, -1):
                 c = candles[j]
-                if c.is_bearish and c.low < lowest_val:
-                    lowest_val = c.low
+                if c.is_bearish:
                     candidate_idx = j
+                    break
 
             if candidate_idx is not None:
                 ob_candle = candles[candidate_idx]
@@ -50,7 +49,7 @@ def detect_order_blocks(
                 mitigated_at = None
                 is_breaker = False
 
-                for k in range(break_idx, n):
+                for k in range(break_idx + 1, n):
                     if candles[k].low < bottom:
                         is_breaker = True  # Violated through the bottom
                     if candles[k].low <= top and not mitigated:
@@ -73,16 +72,15 @@ def detect_order_blocks(
                 )
 
         elif brk.break_type in [StructureType.BOS_BEARISH, StructureType.CHOCH_BEARISH]:
-            # Look backwards for the highest up candle in prior 10 bars
+            # Look backwards for the most recent up candle in prior 10 bars
             search_start = max(0, break_idx - 10)
             candidate_idx = None
-            highest_val = float("-inf")
 
             for j in range(break_idx - 1, search_start - 1, -1):
                 c = candles[j]
-                if c.is_bullish and c.high > highest_val:
-                    highest_val = c.high
+                if c.is_bullish:
                     candidate_idx = j
+                    break
 
             if candidate_idx is not None:
                 ob_candle = candles[candidate_idx]
@@ -93,7 +91,7 @@ def detect_order_blocks(
                 mitigated_at = None
                 is_breaker = False
 
-                for k in range(break_idx, n):
+                for k in range(break_idx + 1, n):
                     if candles[k].high > top:
                         is_breaker = True
                     if candles[k].high >= bottom and not mitigated:

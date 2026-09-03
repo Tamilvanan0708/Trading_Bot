@@ -120,7 +120,7 @@ def run_walk_forward(
         test_candles = _slice(candles, te_s, te_e)
 
         if len(train_candles) < warmup_bars + 10:
-            break
+            continue
 
         engine = (engine_factory or BacktestEngine)()
         kw = dict(initial_balance=initial_balance, risk_percent=risk_percent,

@@ -94,6 +94,15 @@ def detect_liquidity_pools(
             )
         )
 
+    # Merge pools within tolerance into one cluster per level
+    merged = []
+    for pool in pools:
+        if not merged or abs(pool.price_level - merged[-1].price_level) > tolerance:
+            merged.append(pool)
+        else:
+            merged[-1] = pool  # keep the most recent (last)
+    pools = merged[-10:]
+
     # 4. Check for Liquidity Sweeps
     swept_pools: list[LiquidityPool] = []
     for pool in pools:

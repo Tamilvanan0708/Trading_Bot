@@ -88,9 +88,9 @@ class FibonacciEngine:
 
         # Check alignment with trend_bias if provided
         if trend_bias == MarketBias.BULLISH and not is_bullish_impulse:
-            pass  # Counter-trend impulse
+            return None  # Counter-trend Fibonacci is not valid
         elif trend_bias == MarketBias.BEARISH and is_bullish_impulse:
-            pass
+            return None
 
         levels = self.calculate_levels(last_low.price, last_high.price, is_bullish_impulse)
 

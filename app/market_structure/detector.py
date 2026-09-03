@@ -108,8 +108,16 @@ class MarketStructureDetector:
         recent_high_stypes = [n.structure_type for n in structure_nodes if n.swing_type == "HIGH"]
         recent_low_stypes = [n.structure_type for n in structure_nodes if n.swing_type == "LOW"]
 
-        last_high_stype = recent_high_stypes[-1] if recent_high_stypes else None
-        last_low_stype = recent_low_stypes[-1] if recent_low_stypes else None
+        # Use chronological swing order for trend classification
+        all_swings = sorted(structure_nodes, key=lambda s: s.index)[-4:]
+        if len(all_swings) >= 4:
+            recent_high = [n for n in all_swings if n.swing_type == "HIGH"]
+            recent_low = [n for n in all_swings if n.swing_type == "LOW"]
+            last_high_stype = recent_high[-1].structure_type if recent_high else (recent_high_stypes[-1] if recent_high_stypes else None)
+            last_low_stype = recent_low[-1].structure_type if recent_low else (recent_low_stypes[-1] if recent_low_stypes else None)
+        else:
+            last_high_stype = recent_high_stypes[-1] if recent_high_stypes else None
+            last_low_stype = recent_low_stypes[-1] if recent_low_stypes else None
 
         if last_high_stype == StructureType.HIGHER_HIGH and last_low_stype == StructureType.HIGHER_LOW:
             trend = MarketBias.BULLISH

@@ -157,7 +157,7 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
 
     gross_win = sum(t.realized_pnl or 0.0 for t in wins)
     gross_loss = abs(sum(t.realized_pnl or 0.0 for t in losses))
-    profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else (float("inf") if gross_win > 0 else 0.0)
+    profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else (999.99 if gross_win > 0 else 0.0)
 
     # Compute unrealized P&L from active positions using live price
     unrealized_pnl = 0.0

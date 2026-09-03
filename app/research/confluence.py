@@ -9,7 +9,7 @@ from collections import defaultdict
 
 from app.backtesting.models import SimulatedTrade
 
-BUCKETS = [(0, 49), (50, 59), (60, 69), (70, 74), (75, 79), (80, 89), (90, 100)]
+BUCKETS = [(0, 49), (50, 59), (60, 69), (70, 79), (80, 89), (90, 100), (100, float("inf"))]
 
 
 def _bucket(score: float) -> str:

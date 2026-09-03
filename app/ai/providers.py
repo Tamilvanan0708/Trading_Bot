@@ -421,12 +421,17 @@ class OpenAICompatibleProvider(BaseAIProvider):
                                   raw_response=f"HTTP {res.status_code}")
 
         try:
-            res.raise_for_status()
+            try:
+                res.raise_for_status()
+            except httpx.HTTPStatusError:
+                raise
             data = res.json()
             content = data["choices"][0]["message"]["content"]
             parsed = _parse_llm_json(content)
+            if not isinstance(parsed, dict):
+                raise ValueError("LLM response is not a JSON object")
             return _llm_validation_result(parsed, self.name, model, content, request_id)
-        except (KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
+        except (httpx.HTTPStatusError, KeyError, IndexError, json.JSONDecodeError, ValueError, AttributeError) as exc:
             logger.warning("%s returned malformed response: %s", self.name, exc)
             return ProviderResult(status="UNAVAILABLE", reason="Invalid/malformed response.",
                                   reason_code="INVALID_RESPONSE", provider=self.name,
@@ -538,12 +543,17 @@ class GeminiProvider(BaseAIProvider):
                                   raw_response=f"HTTP {res.status_code}")
 
         try:
-            res.raise_for_status()
+            try:
+                res.raise_for_status()
+            except httpx.HTTPStatusError:
+                raise
             data = res.json()
             content = data["candidates"][0]["content"]["parts"][0]["text"]
             parsed = _parse_llm_json(content)
+            if not isinstance(parsed, dict):
+                raise ValueError("LLM response is not a JSON object")
             return _llm_validation_result(parsed, self.name, model, content, request_id)
-        except (KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
+        except (httpx.HTTPStatusError, KeyError, IndexError, json.JSONDecodeError, ValueError, AttributeError) as exc:
             return ProviderResult(status="UNAVAILABLE", reason="Invalid/malformed response.",
                                   reason_code="INVALID_RESPONSE", provider=self.name,
                                   model=model, request_id=request_id,
@@ -593,6 +603,8 @@ class OllamaProvider(BaseAIProvider):
             if not content:
                 raise ValueError("Empty response")
             parsed = _parse_llm_json(content)
+            if not isinstance(parsed, dict):
+                raise ValueError("LLM response is not a JSON object")
             return _llm_validation_result(parsed, self.name, model, content, request_id)
         except (json.JSONDecodeError, ValueError, KeyError) as exc:
             return ProviderResult(status="UNAVAILABLE", reason="Ollama returned invalid response.",

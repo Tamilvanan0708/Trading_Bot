@@ -66,7 +66,7 @@ class MarketRegimeDetector:
         if atr_recent:
             last_atr = atr_recent[-1]
             sorted_atr = sorted(atr_recent)
-            count_le = sum(1 for v in sorted_atr if v <= last_atr)
+            count_le = sum(1 for v in sorted_atr[:-1] if v < last_atr)
             vol = (count_le / max(1, len(sorted_atr))) * 100.0
 
         # EMA slope over the last 20 bars

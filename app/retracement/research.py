@@ -377,7 +377,7 @@ def daily_opportunity_analysis(trades: list[dict]) -> dict:
     gte1 = sum(1 for v in days.values() if len(v) >= 1)
     gte2 = sum(1 for v in days.values() if len(v) >= 2)
     avg_setups_day = sum(len(v) for v in days.values()) / total_days
-    avg_completed_day = total_days / max(1, len(days))
+    avg_completed_day = sum(len(v) for v in days.values()) / max(1, len(days))
     best_day = max(day_points)
     worst_day = min(day_points)
     pos_days = sum(1 for p in day_points if p > 0)

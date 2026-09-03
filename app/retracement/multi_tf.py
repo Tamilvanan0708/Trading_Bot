@@ -238,8 +238,19 @@ class RetracementMultiTFMonitor:
                     if tf == winner_tf:
                         results[tf] = raw_results[tf]
                     else:
-                        # Reset the non-winner slot engine so it holds NO active trade or pending setup
-                        self.slots[tf].engine.reset()
+                        slot = self.slots[tf]
+                        had_completed = slot.last_completed is not None
+                        # Reset the non-winner slot engine (full slot reset) so it
+                        # holds NO active trade or pending setup.
+                        slot.reset()
+                        # Finalize the losing timeframe's DB row: any persisted
+                        # active setup here is superseded by the winner.
+                        if had_completed:
+                            repo = RetracementRepository(db)
+                            persisted = await repo.load_latest_active(
+                                self.symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
+                            if persisted is not None:
+                                await self._finalize_stale(repo, tf, persisted)
                         results[tf] = None
             else:
                 # No active trade running yet -> Keep scanning setups on all timeframes

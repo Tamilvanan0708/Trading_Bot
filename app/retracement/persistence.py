@@ -83,6 +83,7 @@ class RetracementSetupModel(Base):
 
     # JSON column-free: event history stored separately
     def to_domain(self) -> RetracementSetup:
+        import json
         return RetracementSetup(
             setup_id=self.setup_id,
             strategy=self.strategy,
@@ -124,6 +125,8 @@ class RetracementSetupModel(Base):
             max_r=self.max_r,
             mae_r=self.mae_r,
             mfe_r=self.mfe_r,
+            layers=json.loads(self.layers_json) if self.layers_json else {},
+            escape_armed=self.escape_armed == "1" if self.escape_armed else False,
         )
 
 

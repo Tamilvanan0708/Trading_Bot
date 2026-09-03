@@ -152,7 +152,7 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
     return [
         {
             "id": s.id,
-            "created_at": s.created_at.isoformat() + "Z" if (s.created_at and not str(s.created_at).endswith("Z")) else s.created_at,
+            "created_at": (s.created_at.isoformat() + "Z") if s.created_at and not str(s.created_at).endswith("Z") else s.created_at.isoformat() if s.created_at else None,
             "symbol": s.symbol,
             "direction": s.direction,
             "strategy": s.strategy,

@@ -114,10 +114,11 @@ class DualRetracementEngine:
 
         # Auto-archive: if setup is now completed/invalidated, clear it and immediately try to detect a new BOS
         if self.setup is not None and self.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
-            self._archived_setups.append(self.setup)
-            self.setup = None
-            # Try to detect a new BOS immediately on the same candle
-            events.extend(self._detect_bos(candle))
+            # Do NOT auto-archive or clear self.setup here — the caller
+            # (live.py / multi_tf.py) needs to observe the completed state
+            # so it can finalize the DB row.  The caller will call
+            # archive_completed() after reading the state.
+            pass
 
         self._events.extend(events)
         return events
@@ -139,9 +140,15 @@ class DualRetracementEngine:
         lookback_bars = self._anchor_lookback_bars()
 
         # 1. Check Bullish BOS (Body Close > last confirmed swing high)
+        if len(self._candles) >= 2 and self._candles[-2].close > last_sh.price:
+            return []  # BOS was already confirmed on a prior candle
         if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-            # Anchor Low: The confirmed swing low from which this breakout leg launched (Image 1 match)
-            anchor_low = confirmed_lows[-1]
+            # Anchor Low: lowest confirmed swing low within lookback of the BOS swing
+            lows_before_bos = [
+                s for s in confirmed_lows
+                if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
+            ]
+            anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
             p2_low = anchor_low.price
             p2_ts = anchor_low.timestamp
 
@@ -167,9 +174,15 @@ class DualRetracementEngine:
             return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
 
         # 2. Check Bearish BOS (Body Close < last confirmed swing low)
-        elif candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-            # Anchor High: The confirmed swing high from which this breakout leg launched (Image 1 match)
-            anchor_high = confirmed_highs[-1]
+        if len(self._candles) >= 2 and self._candles[-2].close < last_sl.price:
+            return []
+        if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
+            # Anchor High: highest confirmed swing high within lookback of the BOS swing
+            highs_before_bos = [
+                s for s in confirmed_highs
+                if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
+            ]
+            anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
             p2_high = anchor_high.price
             p2_ts = anchor_high.timestamp
 
@@ -270,7 +283,11 @@ class DualRetracementEngine:
             if setup.layers:
                 setup.entry_touched = True
                 setup.entry_timestamp = candle.timestamp
-                setup.state = RetracementState.TRADE_ACTIVE
+                # Keep state as TP_DYNAMIC so deeper layers can fill on the next candle.
+                # state will transition to TRADE_ACTIVE only after all 3 layers fill
+                # or the candle has no new fills.
+                if len(setup.layers) >= 3 or not new_fills:
+                    setup.state = RetracementState.TRADE_ACTIVE
         else:
             # 1. Update dynamic target if new low forms (before any layer fills)
             if not setup.layers and candle.low < (setup.current_high_price or float("inf")):
@@ -300,17 +317,20 @@ class DualRetracementEngine:
             if setup.layers:
                 setup.entry_touched = True
                 setup.entry_timestamp = candle.timestamp
-                setup.state = RetracementState.TRADE_ACTIVE
-                # Same-candle TP hit: TP was already beyond reach (price moved past TP before entry)
-                # Mark all filled layers as TP_HIT immediately if TP already breached on this candle.
-                tp_already_hit = setup.locked_tp is not None and candle.low <= setup.locked_tp
-                if tp_already_hit:
-                    for layer in setup.layers.values():
-                        if layer["state"] == "FILLED":
-                            layer["state"] = "TP_HIT"
-                    setup.state = RetracementState.COMPLETED
-                    setup.outcome = "TP_HIT"
-                    setup.completion_reason = "TP hit on same candle as entry fill."
+                # Keep state as TP_DYNAMIC so deeper layers can fill on the next candle.
+                # state will transition to TRADE_ACTIVE only after all 3 layers fill
+                # or the candle has no new fills.
+                if len(setup.layers) >= 3 or not new_fills:
+                    setup.state = RetracementState.TRADE_ACTIVE
+                # Same-candle TP check: if a layer was just filled and the same candle
+                # also reaches the layer's TP, mark it TP_HIT immediately.
+                for layer in setup.layers.values():
+                    if layer["state"] != "FILLED":
+                        continue
+                    if setup.direction == "LONG" and candle.high >= layer["tp"]:
+                        layer["state"] = "TP_HIT"
+                    elif setup.direction == "SHORT" and candle.low <= layer["tp"]:
+                        layer["state"] = "TP_HIT"
 
         return events
 
@@ -330,9 +350,10 @@ class DualRetracementEngine:
             if entry_level is None:
                 continue
             if candle.low <= entry_level:
-                tp = setup.layers.get("L1", {}).get("locked_tp") or (
-                    setup.fib_1_000 if tp_ratio >= 1.0 else setup.fib_0_618
-                )
+                if layer == "L1":
+                    tp = setup.fib_1_000
+                else:
+                    tp = setup.fib_0_618
                 layer_info = {
                     "layer": layer,
                     "entry_ratio": ratio,
@@ -363,9 +384,10 @@ class DualRetracementEngine:
             if entry_level is None:
                 continue
             if candle.high >= entry_level:
-                tp = setup.layers.get("L1", {}).get("locked_tp") or (
-                    setup.fib_1_000 if tp_ratio >= 1.0 else setup.fib_0_618
-                )
+                if layer == "L1":
+                    tp = setup.fib_1_000
+                else:
+                    tp = setup.fib_0_618
                 layer_info = {
                     "layer": layer,
                     "entry_ratio": ratio,
@@ -391,6 +413,7 @@ class DualRetracementEngine:
             l1 = setup.layers["L1"]
             if not l1.get("locked_tp"):
                 l1["locked_tp"] = l1["tp"]
+                setup.tp_before_freeze = setup.dynamic_tp
                 setup.locked_tp = l1["tp"]
                 setup.tp_locked = True
 

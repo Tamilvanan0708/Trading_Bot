@@ -51,7 +51,13 @@ async def fetch_real_history_tf(
 
     all_candles: list[Candle] = []
     cursor = start
+    max_iterations = 500
+    iteration = 0
     while cursor < end:
+        iteration += 1
+        if iteration > max_iterations:
+            logger.warning("fetch_real_history_tf: hit max iterations (%s) — stopping", max_iterations)
+            break
         batch = await provider.get_ohlcv(
             "XAUUSD", timeframe, limit=limit,
             start_time=cursor, end_time=end,

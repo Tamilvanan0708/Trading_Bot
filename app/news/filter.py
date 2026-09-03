@@ -78,7 +78,10 @@ class NewsFilter:
                 continue
             if ev.impact != "HIGH":
                 continue
-            start = ev.start_time.astimezone(timezone.utc)
+            start = ev.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            start = start.astimezone(timezone.utc)
             if start - timedelta(minutes=before) <= now <= start + timedelta(minutes=after):
                 return True
         return False

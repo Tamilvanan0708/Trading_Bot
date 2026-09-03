@@ -4,6 +4,7 @@ RETRACEMENT_BOS_V1 — Repository for persisting setups and event history.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -59,6 +60,8 @@ def _setup_to_dict(setup: RetracementSetup) -> dict[str, Any]:
         "max_r": setup.max_r,
         "mae_r": setup.mae_r,
         "mfe_r": setup.mfe_r,
+        "layers_json": json.dumps(setup.layers, default=str) if setup.layers else None,
+        "escape_armed": "1" if setup.escape_armed else "0",
     }
 
 

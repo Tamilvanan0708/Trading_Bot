@@ -280,8 +280,22 @@ class BacktestEngine:
             trade.exit_price = candles_15m[-1].close
             trade.exit_time = candles_15m[-1].timestamp
             trade.exit_reason = "END_OF_BACKTEST"
+            if trade.direction == SignalDirection.LONG:
+                trade.pnl_usd = round(trade.lot_size * (trade.exit_price - trade.entry_price) * 100.0 - 0.5, 2)
+                trade.pnl_r = round((trade.exit_price - trade.entry_price) / max(0.1, trade.entry_price - trade.stop_loss), 2)
+            else:
+                trade.pnl_usd = round(trade.lot_size * (trade.entry_price - trade.exit_price) * 100.0 - 0.5, 2)
+                trade.pnl_r = round((trade.entry_price - trade.exit_price) / max(0.1, trade.stop_loss - trade.entry_price), 2)
             trade.state = TradeState.CLOSED
             closed_trades.append(trade)
+
+        # Track intra-trade drawdown from equity curve (balance + floating P&L)
+        equity = initial_balance
+        peak_equity = initial_balance
+        for trade in closed_trades:
+            equity += trade.pnl_usd or 0.0
+            peak_equity = max(peak_equity, equity)
+            max_drawdown_usd = max(max_drawdown_usd, peak_equity - equity)
 
         # --- 4. Calculate Performance Metrics ---
         summary = self._calculate_metrics(initial_balance, balance, peak_balance, max_drawdown_usd, closed_trades)

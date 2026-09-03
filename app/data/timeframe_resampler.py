@@ -71,8 +71,7 @@ def _bucket_key(ts: datetime, minutes: int) -> datetime:
     """Floor a timestamp to the UTC-day-aligned interval boundary (pandas-equivalent)."""
     # Convert to UTC so wall-clock fields align with the UTC boundary the
     # pandas reference uses for timezone-aware indexes.
-    if ts.tzinfo is not None:
-        ts = ts.astimezone(timezone.utc)
+    ts = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts.astimezone(timezone.utc)
     if minutes == 1440:
         return ts.replace(hour=0, minute=0, second=0, microsecond=0)
     if minutes % 60 == 0:

@@ -60,6 +60,7 @@ class SignalOutcomeTracker:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or get_settings()
         self._tracked: dict[str, _TrackedSignal] = {}
+        self._history: list[Candle] = []
 
     @staticmethod
     def _aware(dt: datetime | None) -> datetime | None:
@@ -123,6 +124,20 @@ class SignalOutcomeTracker:
             restored += 1
         if restored:
             logger.info("SignalOutcomeTracker restored %s open signals.", restored)
+        # Catch up on candles that were published between each signal's
+        # created_at and now so restored signals don't miss outcomes.
+        if self.open_count and self._history:
+            now = datetime.now(timezone.utc)
+            for sig in list(self._tracked.values()):
+                if sig.last_ts and sig.last_ts < now:
+                    new_candles = [c for c in self._history if c.timestamp > sig.last_ts]
+                    if new_candles:
+                        sig.last_ts = new_candles[-1].timestamp
+                        result = self._evaluate(sig, new_candles)
+                        if repo is not None and (result["finalized"] or result["mfe_r"] is not None):
+                            await self._persist(repo, sig, result)
+                        if result["finalized"]:
+                            self._tracked.pop(sig.signal_id, None)
         return restored
 
     @property
@@ -168,6 +183,8 @@ class SignalOutcomeTracker:
                 finalized += 1
             else:
                 sig.last_ts = relevant[-1].timestamp
+
+        self._history = new_candles
 
         return finalized
 
@@ -253,10 +270,21 @@ class SignalOutcomeTracker:
         }
 
     async def _persist(self, repo: Repository, sig: _TrackedSignal, result: dict) -> None:
+        mae_r = result["mae_r"]
+        mfe_r = result["mfe_r"]
+        max_r = result["max_r"]
+        # Accumulate MAE/MFE as running maxima
+        existing = None
+        if hasattr(repo, "get_signal_by_id"):
+            existing = await repo.get_signal_by_id(sig.signal_id)
+        if existing:
+            mae_r = round(max(mae_r, getattr(existing, "max_adverse_excursion_r", 0.0) or 0.0), 3)
+            mfe_r = round(max(mfe_r, getattr(existing, "max_favorable_excursion_r", 0.0) or 0.0), 3)
+            max_r = round(max(max_r, getattr(existing, "max_r_achieved", 0.0) or 0.0), 3)
         updates: dict = {
-            "max_favorable_excursion_r": result["mfe_r"],
-            "max_adverse_excursion_r": result["mae_r"],
-            "max_r_achieved": result["max_r"],
+            "max_favorable_excursion_r": mfe_r,
+            "max_adverse_excursion_r": mae_r,
+            "max_r_achieved": max_r,
             "outcome_updated_at": datetime.now(timezone.utc),
         }
         if result["finalized"]:

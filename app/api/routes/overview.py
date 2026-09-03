@@ -187,7 +187,7 @@ async def _resolve_market(
             change_pct = round((change / prev_close) * 100, 2)
 
     # Spread
-    spread = round(ask - bid, 2) if bid is not None and ask is not None else None
+    spread = round(abs(ask - bid), 2) if bid is not None and ask is not None else None
 
     return {
         "price": current_price,

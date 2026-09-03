@@ -177,6 +177,11 @@ class BinanceHistoryProvider(MarketDataProvider):
         h1 = await self.get_ohlcv(symbol, TimeFrame.H1, limit=150)
         h4 = await self.get_ohlcv(symbol, TimeFrame.H4, limit=100)
 
+        if as_of_time is not None:
+            m30 = [c for c in m30 if c.timestamp <= as_of_time]
+            h1 = [c for c in h1 if c.timestamp <= as_of_time]
+            h4 = [c for c in h4 if c.timestamp <= as_of_time]
+
         return MultiTimeframeSnapshot(
             symbol=symbol,
             timestamp=m15[-1].timestamp,

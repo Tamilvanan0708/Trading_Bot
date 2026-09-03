@@ -49,7 +49,7 @@ def build_validation_report(
             "profit_factor": oos_metrics.get("profit_factor", 0.0),
             "expectancy_r": oos_metrics.get("expectancy_r", 0.0),
             "max_drawdown_pct": oos_metrics.get("max_drawdown_pct", 0.0),
-            "net_return_pct": oos_metrics.get("net_profit_usd", 0.0),
+            "net_return_pct": round((oos_metrics.get("net_profit_usd", 0.0) / max(1.0, oos_metrics.get("initial_balance", 10000.0))) * 100.0, 2),
             "oos_metrics": oos_metrics,
         },
         "walk_forward": {

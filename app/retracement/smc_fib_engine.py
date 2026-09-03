@@ -276,9 +276,9 @@ class SMCFibEngine:
 
     def _track_and_check_entry(self, candle: Candle) -> None:
         self.candles_since_point_2 += 1
-        if self.candles_since_point_2 > 200:
+        if self.candles_since_point_2 > self.max_expiry_candles:
             self.state = RetracementState.INVALIDATED
-            self.invalidation_reason = f"Setup expired after 200 candles without entry touch."
+            self.invalidation_reason = f"Setup expired after {self.max_expiry_candles} candles without entry touch."
             return
 
         # Continuation BOS detection: while waiting for entry (single trade not touched yet),
@@ -376,8 +376,8 @@ class SMCFibEngine:
                 self.state = RetracementState.COMPLETED
                 self.outcome = "SL_HIT"
                 self.completion_reason = f"CHoCH Reversal: Price broke above swing high at {last_high.price}."
-                self._reset_setup()
-                self._detect_setup(candle)
+                # Do NOT call _reset_setup here — the caller needs to observe the
+                # completed state.  Reset + re-detect will happen on the next candle.
                 return
         elif self.direction == SignalDirection.LONG and confirmed_lows:
             last_low = confirmed_lows[-1]
@@ -385,32 +385,36 @@ class SMCFibEngine:
                 self.state = RetracementState.COMPLETED
                 self.outcome = "SL_HIT"
                 self.completion_reason = f"CHoCH Reversal: Price broke below swing low at {last_low.price}."
-                self._reset_setup()
-                self._detect_setup(candle)
+                # Do NOT call _reset_setup here — the caller needs to observe the
+                # completed state.  Reset + re-detect will happen on the next candle.
                 return
 
         if self.direction == SignalDirection.LONG:
-            # Check TP Hit at 0.000 Target
-            if self.locked_tp is not None and candle.high >= self.locked_tp:
-                self.state = RetracementState.COMPLETED
-                self.outcome = "TP_HIT"
-                self.completion_reason = f"Take Profit hit at {self.locked_tp}."
-            # Check SL Hit at 0.920 Stop Loss
-            elif self.sl_price is not None and candle.low <= self.sl_price:
+            # Check SL Hit at 0.920 Stop Loss first (matching research evaluator)
+            if self.sl_price is not None and candle.low <= self.sl_price:
                 self.state = RetracementState.COMPLETED
                 self.outcome = "SL_HIT"
                 self.completion_reason = f"Stop Loss hit at {self.sl_price}."
+                return
+            # Check TP Hit at 0.000 Target
+            elif self.locked_tp is not None and candle.high >= self.locked_tp:
+                self.state = RetracementState.COMPLETED
+                self.outcome = "TP_HIT"
+                self.completion_reason = f"Take Profit hit at {self.locked_tp}."
+                return
         else:
-            # Check TP Hit at 0.000 Target
-            if self.locked_tp is not None and candle.low <= self.locked_tp:
-                self.state = RetracementState.COMPLETED
-                self.outcome = "TP_HIT"
-                self.completion_reason = f"Take Profit hit at {self.locked_tp}."
-            # Check SL Hit at 0.920 Stop Loss
-            elif self.sl_price is not None and candle.high >= self.sl_price:
+            # Check SL Hit at 0.920 Stop Loss first (matching research evaluator)
+            if self.sl_price is not None and candle.high >= self.sl_price:
                 self.state = RetracementState.COMPLETED
                 self.outcome = "SL_HIT"
                 self.completion_reason = f"Stop Loss hit at {self.sl_price}."
+                return
+            # Check TP Hit at 0.000 Target
+            elif self.locked_tp is not None and candle.low <= self.locked_tp:
+                self.state = RetracementState.COMPLETED
+                self.outcome = "TP_HIT"
+                self.completion_reason = f"Take Profit hit at {self.locked_tp}."
+                return
 
     def to_dict(self, live_price: float | None = None) -> dict[str, Any]:
         """Serialize state for API and frontend display."""

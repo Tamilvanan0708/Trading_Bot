@@ -109,6 +109,8 @@ class CandidateObservationService:
             return {"candidate": cand.version, "status": "PERSIST_FAILED", "error": str(exc)}
 
         # Stamp regime + session + register for outcome tracking
+        regime = "UNKNOWN"
+        session_name = "UNKNOWN"
         try:
             regime_detector = MarketRegimeDetector(atr_period=self.settings.ATR_PERIOD)
             regime = regime_detector.analyze(snapshot.m15).regime.value

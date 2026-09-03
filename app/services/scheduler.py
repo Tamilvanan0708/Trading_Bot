@@ -407,8 +407,17 @@ class AnalysisScheduler:
             #     Cascades 5m -> 15m -> 30m -> 1h (and 4h for SMC).
             #     Each filled tranche layer is opened as its own paper trade at a
             #     strict 0.01 lots (3-Tranche Fib / 2-Tranche SMC).
+            #     Wrapped in a savepoint so a failure here does not poison the
+            #     main pipeline session.
             # ------------------------------------------------------------------
+            trade_blocked_reason = None
+            if self.settings.OBSERVATION_MODE:
+                trade_blocked_reason = "OBSERVATION MODE enabled — hypothetical only, no paper trades."
+            elif self.settings.BLOCK_PAPER_TRADING_ON_FAILED_STRATEGY and self._strategy_failed():
+                trade_blocked_reason = "SAFETY: strategy classified FAILED — automatic paper trading blocked."
+
             try:
+                await session.begin_nested()
                 # 1. FIB WITH RETRACEMENT (Dual-Direction Bullish & Bearish 5m -> 15m -> 30m -> 1h)
                 from app.retracement.multi_tf import get_retracement_multi_tf_service
                 fib_svc = get_retracement_multi_tf_service(symbol)
@@ -446,7 +455,7 @@ class AnalysisScheduler:
                             signal_id=sig_id,
                             instrument=symbol,
                             direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
-                            strategy=StrategyType.RETRACEMENT,
+                            strategy=StrategyType.FIBONACCI,
                             timeframe=tf_name,
                             timestamp=latest_candle.timestamp,
                             entry=entry_px,
@@ -472,14 +481,14 @@ class AnalysisScheduler:
                             )
                             if ai_val.status.value == "REJECT":
                                 logger.warning("[AI-GATE] Fib Retracement %s REJECTED by AI: %s", sig_id, ai_val.explanation)
-                                await repo.save_signal(custom_sig.model_dump(mode="json"))
+                                await repo.save_signal(self._signal_to_model_dict(custom_sig))
                                 continue
                         except Exception as ai_exc:  # noqa: BLE001
                             logger.warning("[AI-GATE] Validation call error: %s", ai_exc)
 
-                        await repo.save_signal(custom_sig.model_dump(mode="json"))
+                        await repo.save_signal(self._signal_to_model_dict(custom_sig))
 
-                        if self.settings.PAPER_TRADING_ENABLED:
+                        if self.settings.PAPER_TRADING_ENABLED and trade_blocked_reason is None:
                             opened_pos = await self.pipeline.paper_service.open_position_from_signal(
                                 custom_sig, repo=repo, fixed_lot_size=0.01
                             )
@@ -490,77 +499,84 @@ class AnalysisScheduler:
                                 )
                     break
 
-                # 2. SMC WITH FIB (Golden Pocket 0.680 Single Entry, 0.920 SL, 0.000 TP) — Single Position (0.01 lots)
+                # 2. SMC WITH FIB (Golden Pocket 0.680 / 0.790, 0.920 SL, 0.000/0.500 TP)
+                #    2-Tranche scaling: one paper trade per filled layer (0.01 lots).
                 from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
                 smc_svc = get_smc_fib_multi_tf_service(symbol)
                 smc_states = await smc_svc.advance(session)
 
-                for tf_name in ["5m"]:
+                for tf_name in ["5m", "15m", "30m", "1h", "4h"]:
                     st_card = smc_states.get(tf_name) or {}
-                    if not st_card.get("is_entry_touched"):
-                        continue
-                    entry_px = st_card.get("entry", {}).get("price")
-                    sl_px = st_card.get("sl", {}).get("price")
-                    tp_px = st_card.get("tp", {}).get("locked") or st_card.get("tp", {}).get("dynamic")
-                    p2 = st_card.get("point_2", {}).get("price")
-                    if not entry_px or not sl_px or not tp_px:
+                    layers = st_card.get("layers", {}) or {}
+                    if not layers:
                         continue
                     dir_str = str(st_card.get("direction", "SHORT")).upper()
 
-                    sig_id = f"SMC_FIB_{tf_name.upper()}_{int(p2 or 0)}"
-                    existing_sig = await repo.get_signal_by_id(sig_id)
-                    if existing_sig is not None:
-                        continue
+                    for layer_key, layer in sorted(layers.items()):
+                        if layer.get("state") not in ("FILLED", "TP_HIT", "ESCAPE_CLOSED"):
+                            continue
+                        entry_px = layer.get("entry_price")
+                        sl_px = layer.get("sl")
+                        tp_px = layer.get("tp")
+                        if not entry_px or not sl_px or not tp_px:
+                            logger.warning("[SMC-FIB] Layer %s on %s missing levels; skipping.", layer_key, tf_name)
+                            continue
 
-                    from app.core.constants import MarketBias, SignalQuality, StrategyType
-                    from app.signals.models import SignalPayload
+                        sig_id = f"SMC_FIB_{tf_name.upper()}_{layer_key}_{int(latest_candle.timestamp.timestamp())}"
+                        existing_sig = await repo.get_signal_by_id(sig_id)
+                        if existing_sig is not None:
+                            continue
 
-                    custom_sig = SignalPayload(
-                        signal_id=sig_id,
-                        instrument=symbol,
-                        direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
-                        strategy=StrategyType.SMC,
-                        timeframe=tf_name,
-                        timestamp=latest_candle.timestamp,
-                        entry=entry_px,
-                        stop_loss=sl_px,
-                        take_profit_1=tp_px,
-                        take_profit_2=tp_px,
-                        take_profit_3=tp_px,
-                        risk_reward=round(abs(tp_px - entry_px) / max(0.1, abs(entry_px - sl_px)), 2),
-                        confidence_score=0.95,
-                        signal_quality=SignalQuality.VERY_STRONG,
-                        market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
-                        strategy_version="SMC_WITH_FIB_V1",
-                        reasons=[
-                            f"SMC 0.680 Golden Pocket Single Entry on {tf_name.upper()} ({dir_str}), 0.01 lots"
-                        ],
-                    )
+                        from app.core.constants import MarketBias, SignalQuality, StrategyType
+                        from app.signals.models import SignalPayload
 
-                    # AI VALIDATION GATE
-                    try:
-                        ai_val = await self.pipeline.ai_validator.validate_signal(custom_sig)
-                        custom_sig.reasons.append(
-                            f"AI Verdict: {ai_val.status.value} (conf={ai_val.confidence:.0f}%) — {ai_val.explanation}"
+                        custom_sig = SignalPayload(
+                            signal_id=sig_id,
+                            instrument=symbol,
+                            direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
+                            strategy=StrategyType.SMC,
+                            timeframe=tf_name,
+                            timestamp=latest_candle.timestamp,
+                            entry=entry_px,
+                            stop_loss=sl_px,
+                            take_profit_1=tp_px,
+                            take_profit_2=tp_px,
+                            take_profit_3=tp_px,
+                            risk_reward=round(abs(tp_px - entry_px) / max(0.1, abs(entry_px - sl_px)), 2),
+                            confidence_score=0.92,
+                            signal_quality=SignalQuality.VERY_STRONG,
+                            market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
+                            strategy_version="SMC_WITH_FIB_V1",
+                            reasons=[
+                                f"SMC {layer_key} @ {layer.get('entry_ratio')} Golden Pocket "
+                                f"on {tf_name.upper()} ({dir_str}), 0.01 lots"
+                            ],
                         )
-                        if ai_val.status.value == "REJECT":
-                            logger.warning("[AI-GATE] SMC With Fib %s REJECTED by AI: %s", sig_id, ai_val.explanation)
-                            await repo.save_signal(custom_sig.model_dump(mode="json"))
-                            break
-                    except Exception as ai_exc:  # noqa: BLE001
-                        logger.warning("[AI-GATE] Validation call error: %s", ai_exc)
 
-                    await repo.save_signal(custom_sig.model_dump(mode="json"))
-
-                    if self.settings.PAPER_TRADING_ENABLED:
-                        opened_pos = await self.pipeline.paper_service.open_position_from_signal(
-                            custom_sig, repo=repo, fixed_lot_size=0.01
-                        )
-                        if opened_pos:
-                            logger.info(
-                                "[SMC-FIB] Opened single paper trade %s %s on %s @ %.2f 0.01 lots (id=%s)",
-                                dir_str, symbol, tf_name, entry_px, opened_pos.position_id,
+                        # AI VALIDATION GATE
+                        try:
+                            ai_val = await self.pipeline.ai_validator.validate_signal(custom_sig)
+                            custom_sig.reasons.append(
+                                f"AI Verdict: {ai_val.status.value} (conf={ai_val.confidence:.0f}%) — {ai_val.explanation}"
                             )
+                            if ai_val.status.value == "REJECT":
+                                logger.warning("[AI-GATE] SMC With Fib %s REJECTED by AI: %s", sig_id, ai_val.explanation)
+                                await repo.save_signal(self._signal_to_model_dict(custom_sig))
+                                continue
+                        except Exception as ai_exc:  # noqa: BLE001
+                            logger.warning("[AI-GATE] Validation call error: %s", ai_exc)
+
+                        await repo.save_signal(self._signal_to_model_dict(custom_sig))
+
+                        if self.settings.PAPER_TRADING_ENABLED and trade_blocked_reason is None:
+                            opened_pos = await self.pipeline.paper_service.open_position_from_signal(
+                                custom_sig, repo=repo, fixed_lot_size=0.01
+                            )
+                            if opened_pos:
+                                logger.info(
+                                    "[SMC-FIB] Opened paper trade %s %s %s on %s @ %.2f 0.01 lots (id=%s)",
+                                    dir_str, symbol, layer_key, tf_name, entry_px, opened_pos.position_id,
+                                )
                     break
             except Exception as strat_sched_exc:  # noqa: BLE001
                 logger.warning("[STRATEGY-SCHED] auto paper trade integration exception: %s", strat_sched_exc)
@@ -619,10 +635,61 @@ class AnalysisScheduler:
             logger.warning("Candidate Telegram alert failed: %s", exc)
 
     def _has_conflicting_position(self, signal) -> bool:
+        """True when an opposite-direction position is already open (hedge conflict).
+
+        Same-direction positions are allowed to scale (multi-tranche); only an
+        opposite open position conflicts with a new entry.
+        """
+        opposite = (
+            SignalDirection.SHORT
+            if signal.direction == SignalDirection.LONG
+            else SignalDirection.LONG
+        )
         for pos in self.pipeline.paper_service.get_active_positions():
-            if pos.direction == signal.direction:
+            if pos.direction == opposite:
                 return True
         return False
+
+    @staticmethod
+    def _signal_to_model_dict(signal) -> dict:
+        """Map a SignalPayload to the SignalModel column schema.
+
+        SignalPayload fields (``signal_id``, ``instrument``, ``entry``) differ
+        from the DB columns (``id``, ``symbol``, ``entry_price``).  Passing the
+        payload's ``model_dump()`` straight into ``Repository.save_signal``
+        causes an IntegrityError that poisons the whole DB session.
+        """
+        from app.core.constants import MarketBias, SignalQuality, StrategyType
+
+        def _enum_value(v):
+            if isinstance(v, (MarketBias, SignalQuality, StrategyType, SignalDirection)):
+                return v.value
+            return v
+
+        detected = getattr(signal, "detected_structures", {}) or {}
+        return {
+            "id": signal.signal_id,
+            "symbol": signal.instrument,
+            "strategy": _enum_value(signal.strategy),
+            "strategy_version": signal.strategy_version,
+            "direction": _enum_value(signal.direction),
+            "timeframe": signal.timeframe,
+            "entry_price": signal.entry,
+            "stop_loss": signal.stop_loss,
+            "take_profit_1": signal.take_profit_1,
+            "take_profit_2": signal.take_profit_2,
+            "take_profit_3": signal.take_profit_3,
+            "risk_reward": signal.risk_reward,
+            "confidence_score": signal.confidence_score,
+            "signal_quality": _enum_value(signal.signal_quality),
+            "market_bias": _enum_value(signal.market_bias),
+            "reasons": signal.reasons,
+            "invalidation_conditions": signal.invalidation_conditions,
+            "metadata_payload": {
+                **detected,
+                "explanation": getattr(signal, "explanation", None),
+            },
+        }
 
     def _daily_signal_cap_reached(self) -> bool:
         """True when MAX_SIGNALS_PER_DAY (>0) signals have already been alerted today."""

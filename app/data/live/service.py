@@ -573,7 +573,10 @@ class LiveMarketDataService:
         async with self._lock:
             for tf in _TICK_TFS:
                 minutes = _TF_DURATION_MINUTES[tf]
-                bucket = _bucket_start(tick.timestamp, minutes)
+                ts = tick.timestamp
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                bucket = _bucket_start(ts, minutes)
                 forming = self._forming_by_tf.get(tf)
                 if forming is None:
                     self._live_price = price
@@ -618,6 +621,8 @@ class LiveMarketDataService:
         """Store a finalized candle into its per-timeframe closed series."""
         if tf == TimeFrame.M15:
             self._closed_15m.append(forming)
+            if len(self._closed_15m) > 2000:
+                self._closed_15m = self._closed_15m[-1000:]
         elif tf == TimeFrame.M5:
             self._closed_5m.append(forming)
             if len(self._closed_5m) > 400:

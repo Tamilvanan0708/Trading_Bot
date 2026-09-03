@@ -11,7 +11,13 @@ from collections import defaultdict
 
 from app.backtesting.models import SimulatedTrade
 
-CLOSING_REASONS = {"TP1_HIT", "TP2_HIT", "TP3_HIT", "STOP_LOSS_HIT", "END_OF_BACKTEST"}
+CLOSING_REASONS = {
+    "TP_HIT": "TP_HIT",
+    "SL_HIT": "SL_HIT",
+    "STOP_LOSS_HIT": "STOP_LOSS_HIT",
+    "TP3_HIT": "TP3_HIT",
+    "END_OF_BACKTEST": "END_OF_BACKTEST",
+}
 
 
 def _closed(trades: list[SimulatedTrade]) -> list[SimulatedTrade]:

@@ -51,9 +51,9 @@ def detect_swings(
 
         # Check right
         for r in range(1, right_bars + 1):
-            if candles[i + r].high > curr.high:
+            if candles[i + r].high >= curr.high:
                 is_swing_high = False
-            if candles[i + r].low < curr.low:
+            if candles[i + r].low <= curr.low:
                 is_swing_low = False
 
         if is_swing_high:

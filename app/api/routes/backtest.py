@@ -2,6 +2,8 @@
 Backtesting API Routes.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +30,7 @@ async def run_backtest(req: BacktestRequest, db: AsyncSession = Depends(get_db_s
     """Executes a full event-driven backtest over historical dataset and stores result."""
     candles = await _provider.get_ohlcv(req.symbol, TimeFrame.M15, limit=req.limit_bars)
     engine = BacktestEngine()
-    result = engine.run(candles, initial_balance=req.initial_balance, risk_percent=req.risk_percent)
+    result = await asyncio.to_thread(engine.run, candles, initial_balance=req.initial_balance, risk_percent=req.risk_percent)
 
     repo = Repository(db)
     run_dict = {

@@ -111,6 +111,9 @@ class ConfluenceEngine:
             htf_pts = w_htf * 0.5
             htf_detail += " (Ranging - partial score)"
 
+        if direction == SignalDirection.NO_TRADE:
+            htf_pts = 0.0
+
         # 2. Market Structure (Max 20)
         w_ms = self.settings.WEIGHT_MARKET_STRUCTURE
         ms_passed = False
@@ -126,6 +129,10 @@ class ConfluenceEngine:
             reasons.append(f"{mtf.structure.value.upper()} Market Structure aligned Bearish (+20)")
         elif h1_struct.trend == MarketBias.RANGING:
             ms_pts = w_ms * 0.4
+
+        if direction == SignalDirection.NO_TRADE:
+            htf_pts = 0.0
+            ms_pts = 0.0
 
         # 3. SMC Confirmation (Max 20)
         w_smc = self.settings.WEIGHT_SMC_CONFIRMATION
@@ -173,9 +180,13 @@ class ConfluenceEngine:
         liq_detail = "No recent sweeps detected"
         if len(m30_smc.recent_sweeps) > 0:
             sweep = m30_smc.recent_sweeps[-1]
-            if (direction == SignalDirection.LONG and "SELL_SIDE" in sweep.pool_type.value) or \
-               (direction == SignalDirection.SHORT and "BUY_SIDE" in sweep.pool_type.value) or \
-               ("EQUAL" in sweep.pool_type.value):
+            pool_value = sweep.pool_type.value
+            if direction == SignalDirection.LONG and ("SELL_SIDE" in pool_value or "EQUAL_LOWS" in pool_value):
+                liq_pts = w_liq
+                liq_passed = True
+                liq_detail = f"Liquidity swept at {sweep.price_level}"
+                reasons.append(f"Institutional liquidity sweep confirmed ({sweep.pool_type.value}) (+10)")
+            elif direction == SignalDirection.SHORT and ("BUY_SIDE" in pool_value or "EQUAL_HIGHS" in pool_value):
                 liq_pts = w_liq
                 liq_passed = True
                 liq_detail = f"Liquidity swept at {sweep.price_level}"
@@ -226,9 +237,8 @@ class ConfluenceEngine:
         quality = self.categorize_quality(total_score)
 
         # Hard guardrail: If quality is WEAK or NO_TRADE, direction must be NO_TRADE
-        if quality in [SignalQuality.WEAK, SignalQuality.NO_TRADE] or len(conflicts) > 0:
-            if len(conflicts) > 0:
-                direction = SignalDirection.NO_TRADE
+        if quality in (SignalQuality.WEAK, SignalQuality.NO_TRADE) or len(conflicts) > 0:
+            direction = SignalDirection.NO_TRADE
 
         breakdown = ConfluenceBreakdown(
             htf_bias=ConfluenceItem(category=f"{mtf.htf.value.upper()} Macro Bias", points_awarded=htf_pts, max_points=w_htf, passed=htf_passed, details=htf_detail),
