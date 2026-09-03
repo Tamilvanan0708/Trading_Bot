@@ -669,13 +669,10 @@ Routes["/live"] = (mount) => {
           container_id: innerId,
           withdateranges: true,
           save_image: true,
-          details: true,
+          details: false,
           hotlist: false,
           calendar: false,
-          studies: [
-            "MASimple@tv-basicstudies",
-            "RSI@tv-basicstudies"
-          ]
+          studies: []
         });
         return;
       } catch (e) {
@@ -2739,18 +2736,24 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <!-- BIG ACTIVE SIGNAL BOX -->
       <div id="strat-signal-box-wrap">${renderActiveSignalBox(tfData, price, selectedTf)}</div>
 
-      <!-- OFFICIAL TRADINGVIEW REAL-TIME CHART (SAME AS LIVE MARKET) -->
+      <!-- STRATEGY REAL-TIME CHART -->
       <div class="card" style="padding:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:#131722;margin-bottom:var(--sp-3)">
-        <div class="card-head" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center">
-          <span>📈 OFFICIAL REAL-TIME CHART · <span style="color:var(--primary);font-weight:700">BINANCE:XAUUSDT.P (${TF_LABELS[selectedTf]})</span></span>
+        <div class="card-head" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span>📈 REAL-TIME STRATEGY CHART · <span style="color:var(--primary);font-weight:700">BINANCE:XAUUSDT.P (${TF_LABELS[selectedTf]})</span></span>
+            <div class="btn-group" style="display:inline-flex;gap:4px">
+              <button id="chart-btn-vis" class="btn btn-xs btn-primary">🎯 STRATEGY OVERLAY (BOS & LEVELS)</button>
+              <button id="chart-btn-tv" class="btn btn-xs btn-outline">TRADINGVIEW (CLEAN)</button>
+            </div>
+          </div>
           <span class="muted" style="display:flex;align-items:center;gap:8px">
             <span class="pulse-dot live"></span>
-            <span class="badge badge-green">TRADINGVIEW LIVE STREAM</span>
-            <span style="font-size:11px">Real-Time Ticks & Full Technical Indicators</span>
+            <span id="chart-strategy-status-badge" class="badge badge-green">LIVE STRATEGY OVERLAYS</span>
           </span>
         </div>
-        <div class="card-body" style="padding:0;height:580px;width:100%">
-          <div id="strat-tv-chart-box" style="height:100%;width:100%"></div>
+        <div class="card-body" style="padding:0;height:580px;width:100%;position:relative">
+          <div id="strat-overlay-chart-box" style="height:100%;width:100%"></div>
+          <div id="strat-tv-chart-box" style="height:100%;width:100%;display:none"></div>
         </div>
       </div>
 
@@ -2777,10 +2780,41 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       </div>
     </div>`;
   }, mount).then(() => {
-    // Render official TradingView real-time streaming chart (same as Live Market)
-    renderStrategyTVChart("strat-tv-chart-box", "5");
+    let currentChartMode = "vis";
+    const btnVis = document.getElementById("chart-btn-vis");
+    const btnTv = document.getElementById("chart-btn-tv");
+    const boxVis = document.getElementById("strat-overlay-chart-box");
+    const boxTv = document.getElementById("strat-tv-chart-box");
+
+    if (btnVis && btnTv) {
+      btnVis.addEventListener("click", () => {
+        currentChartMode = "vis";
+        btnVis.className = "btn btn-xs btn-primary";
+        btnTv.className = "btn btn-xs btn-outline";
+        if (boxVis) boxVis.style.display = "block";
+        if (boxTv) boxTv.style.display = "none";
+        drawFibChart("strat-overlay-chart-box", selectedTf, strategyType);
+      });
+      btnTv.addEventListener("click", () => {
+        currentChartMode = "tv";
+        btnTv.className = "btn btn-xs btn-primary";
+        btnVis.className = "btn btn-xs btn-outline";
+        if (boxVis) boxVis.style.display = "none";
+        if (boxTv) boxTv.style.display = "block";
+        renderStrategyTVChart("strat-tv-chart-box", "5");
+      });
+    }
+
+    // Default to Strategy Overlay (BOS & Levels)
+    drawFibChart("strat-overlay-chart-box", selectedTf, strategyType);
+
     if (_stratTimer) clearInterval(_stratTimer);
-    _stratTimer = setInterval(updateStratInPlace, AutoRefresh.speed || 2000);
+    _stratTimer = setInterval(() => {
+      updateStratInPlace();
+      if (currentChartMode === "vis") {
+        drawFibChart("strat-overlay-chart-box", selectedTf, strategyType);
+      }
+    }, AutoRefresh.speed || 2000);
   });
 
   window.__viewCleanup = () => {
@@ -2791,7 +2825,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   };
 }
 
-// ─── LIVE FIB CHART RENDERER ──────────────────────────────────────────────────
+// ─── LIVE STRATEGY FIB & BOS CHART RENDERER ──────────────────────────────────────────────────
 
 const _chartInstances = {};
 
@@ -2803,130 +2837,244 @@ async function drawFibChart(containerId, tf, strategyKey) {
     return;
   }
 
-  // Destroy existing chart if re-rendering
-  if (_chartInstances[containerId]) {
-    try { _chartInstances[containerId].remove(); } catch(e) {}
-    delete _chartInstances[containerId];
-  }
-  container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-size:12px">Loading chart…</div>';
-
   let data;
   try {
     const r = await fetch(`/retracement/chart/XAUUSD/${tf}?limit=150`);
     data = await r.json();
   } catch(e) {
-    container.innerHTML = '<div style="padding:20px;color:var(--text-dim);font-size:12px">Chart data unavailable</div>';
+    if (!_chartInstances[containerId]) {
+      container.innerHTML = '<div style="padding:20px;color:var(--text-dim);font-size:12px">Chart data loading…</div>';
+    }
     return;
   }
 
   const candles = data.candles || [];
   if (!candles.length) {
-    container.innerHTML = '<div style="padding:20px;color:var(--text-dim);font-size:12px">No candle data yet — waiting for feed…</div>';
+    if (!_chartInstances[containerId]) {
+      container.innerHTML = '<div style="padding:20px;color:var(--text-dim);font-size:12px">No candle data yet — waiting for feed…</div>';
+    }
     return;
   }
 
-  container.innerHTML = "";
+  let inst = _chartInstances[containerId];
 
-  try {
+  if (!inst) {
+    container.innerHTML = "";
     const chart = LightweightCharts.createChart(container, {
-      width: container.clientWidth,
-      height: 380,
-      layout: { background: { type: 'solid', color: "#12141c" }, textColor: "#c8cde6" },
-      grid: { vertLines: { color: "#1e2130" }, horzLines: { color: "#1e2130" } },
+      width: container.clientWidth || 800,
+      height: 580,
+      layout: { background: { type: 'solid', color: "#131722" }, textColor: "#c8cde6" },
+      grid: { vertLines: { color: "#1e2230" }, horzLines: { color: "#1e2230" } },
       crosshair: { mode: LightweightCharts.CrosshairMode ? LightweightCharts.CrosshairMode.Normal : 0 },
-      rightPriceScale: { borderColor: "#2a2d3e" },
-      timeScale: { borderColor: "#2a2d3e", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: "#2a2e3d" },
+      timeScale: { borderColor: "#2a2e3d", timeVisible: true, secondsVisible: false },
     });
-    _chartInstances[containerId] = chart;
 
-    // Candlestick series
     const candleSeries = chart.addCandlestickSeries({
       upColor: "#26a69a", downColor: "#ef5350",
       borderUpColor: "#26a69a", borderDownColor: "#ef5350",
       wickUpColor: "#26a69a", wickDownColor: "#ef5350",
     });
-    candleSeries.setData(candles);
 
-    // Draw Fibonacci levels for the active strategy
-    const isSmc = strategyKey === "SMC_WITH_FIB";
-    const levs = isSmc ? data.fib_levels?.smc_fib : data.fib_levels?.fib_retracement;
-    const lp = data.live_price;
-
-    if (levs && Object.keys(levs).length > 0) {
-      const dir = levs.direction;
-      const isShort = dir === "SHORT" || dir === "BEARISH";
-      const firstTs = candles[0]?.time;
-      const lastTs = candles[candles.length - 1]?.time;
-
-      // Level definitions for SMC With Fib (SHORT)
-      const smcLevels = [
-        { price: levs.anchor, label: "1.000 ANCHOR", color: "#ef5350", dash: false },
-        { price: levs.sl, label: "0.920 SL", color: "#ef5350", dash: true },
-        { price: levs.pocket, label: "0.790 GOLDEN POCKET", color: "#ff9800", dash: true },
-        { price: levs.entry, label: "0.680 ENTRY", color: "#ffffff", dash: false },
-        { price: levs.equilibrium, label: "0.500 EQ", color: "#5c9bd6", dash: true },
-        { price: levs.tp, label: "0.000 TP", color: "#26a69a", dash: false },
-      ];
-      // Level definitions for Fib With Retracement (SHORT)
-      const retrLevels = [
-        { price: levs.anchor, label: "0.000 ANCHOR", color: "#ef5350", dash: false },
-        { price: levs.sl, label: "0.236 SL", color: "#ef5350", dash: true },
-        { price: levs.entry, label: "0.618 ENTRY", color: "#ffffff", dash: false },
-        { price: levs.tp, label: "1.000 TP", color: "#26a69a", dash: false },
-      ];
-
-      const levelDefs = isSmc ? smcLevels : retrLevels;
-
-      levelDefs.forEach(lev => {
-        if (!lev.price) return;
-        chart.addLineSeries({
-          color: lev.color,
-          lineWidth: lev.dash ? 1 : 2,
-          lineStyle: lev.dash ? LightweightCharts.LineStyle.Dashed : LightweightCharts.LineStyle.Solid,
-          priceLineVisible: true,
-          lastValueVisible: true,
-          title: lev.label,
-          crosshairMarkerVisible: false,
-        }).setData([{ time: firstTs, value: lev.price }, { time: lastTs, value: lev.price }]);
-      });
-
-      // SL zone fill (red tint between anchor and entry)
-      if (levs.sl && levs.anchor && isSmc) {
-        const slZone = chart.addLineSeries({ color: "rgba(239,83,80,0.08)", lineWidth: 0, title: "" });
-        slZone.setData([{ time: firstTs, value: levs.sl }, { time: lastTs, value: levs.sl }]);
-      }
-
-      // TP zone fill (green tint between entry and TP)
-      if (levs.tp && levs.entry && isSmc) {
-        const tpZone = chart.addLineSeries({ color: "rgba(38,166,154,0.08)", lineWidth: 0, title: "" });
-        tpZone.setData([{ time: firstTs, value: levs.tp }, { time: lastTs, value: levs.tp }]);
-      }
-    }
-
-    // Live price line
-    if (lp) {
-      candleSeries.createPriceLine({
-        price: lp,
-        color: "#f0b90b",
-        lineWidth: 1,
-        lineStyle: LightweightCharts.LineStyle.Dotted,
-        axisLabelVisible: true,
-        title: `LIVE $${Number(lp).toFixed(2)}`,
-      });
-    }
-
-    chart.timeScale().fitContent();
+    inst = { chart, candleSeries, priceLines: [] };
+    _chartInstances[containerId] = inst;
 
     // Responsive resize
     const ro = new ResizeObserver(entries => {
       for (const e of entries) {
-        chart.resize(e.contentRect.width, 380);
+        if (inst && inst.chart && e.contentRect.width > 0) {
+          inst.chart.resize(e.contentRect.width, 580);
+        }
       }
     });
     ro.observe(container);
-  } catch (err) {
-    container.innerHTML = `<div style="padding:20px;color:#ef5350;font-size:12px;font-family:monospace;white-space:pre-wrap">Chart Error: ${err.message}\n${err.stack}</div>`;
   }
+
+  inst.candleSeries.setData(candles);
+
+  // Clear previous strategy price lines
+  if (inst.priceLines && inst.priceLines.length) {
+    inst.priceLines.forEach(pl => {
+      try { inst.candleSeries.removePriceLine(pl); } catch(_) {}
+    });
+  }
+  inst.priceLines = [];
+
+  const isSmc = strategyKey === "SMC_WITH_FIB";
+  const levs = isSmc ? data.fib_levels?.smc_fib : data.fib_levels?.fib_retracement;
+  const lp = data.live_price;
+  const badgeEl = document.getElementById("chart-strategy-status-badge");
+
+  if (levs && Object.keys(levs).length > 0) {
+    const isShort = (levs.direction || "").toUpperCase() === "SHORT";
+    const dirIcon = isShort ? "▼ SHORT" : "▲ LONG";
+
+    // 1. BOS (Break of Structure) line
+    if (levs.bos) {
+      inst.priceLines.push(inst.candleSeries.createPriceLine({
+        price: Number(levs.bos),
+        color: "#00e5ff",
+        lineWidth: 2,
+        lineStyle: LightweightCharts.LineStyle.Solid,
+        axisLabelVisible: true,
+        title: `⚡️ BOS ${dirIcon}: $${Number(levs.bos).toFixed(2)}`,
+      }));
+    }
+
+    // 2. Anchor Swing point
+    if (levs.anchor) {
+      inst.priceLines.push(inst.candleSeries.createPriceLine({
+        price: Number(levs.anchor),
+        color: "#b388ff",
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `⚓️ ANCHOR: $${Number(levs.anchor).toFixed(2)}`,
+      }));
+    }
+
+    // 3. Strategy specific levels
+    if (isSmc) {
+      // SMC Single Golden Pocket @ 0.680
+      const touched = levs.entry_touched;
+      if (levs.entry) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.entry),
+          color: touched ? "#00e676" : "#ffb74d",
+          lineWidth: 2,
+          lineStyle: touched ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: touched ? `✅ 0.680 ENTRY [FILLED]: $${Number(levs.entry).toFixed(2)}` : `🎯 0.680 ENTRY [WAITING]: $${Number(levs.entry).toFixed(2)}`,
+        }));
+      }
+      if (levs.equilibrium) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.equilibrium),
+          color: "#42a5f5",
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: `⚖️ 0.500 EQ: $${Number(levs.equilibrium).toFixed(2)}`,
+        }));
+      }
+      if (levs.sl) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.sl),
+          color: "#ef5350",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `🛑 STOP LOSS: $${Number(levs.sl).toFixed(2)}`,
+        }));
+      }
+      if (levs.tp) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.tp),
+          color: "#00e676",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `🏆 TAKE PROFIT: $${Number(levs.tp).toFixed(2)}`,
+        }));
+      }
+
+      if (badgeEl) {
+        if (touched) {
+          badgeEl.className = "badge badge-green";
+          badgeEl.textContent = "● TRADE ACTIVE (0.680 FILLED)";
+        } else if (levs.entry) {
+          badgeEl.className = "badge badge-amber";
+          badgeEl.textContent = "⏳ WAITING FOR 0.680 RETRACEMENT";
+        } else {
+          badgeEl.className = "badge badge-blue";
+          badgeEl.textContent = "SCANNING FOR BOS BREAK";
+        }
+      }
+    } else {
+      // Fib With Retracement: 3 Tranche Layers L1, L2, L3
+      if (levs.l1_entry) {
+        const l1Filled = levs.l1_state === "FILLED" || levs.l1_state === "TP_HIT";
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.l1_entry),
+          color: l1Filled ? "#00e676" : "#ffd54f",
+          lineWidth: 2,
+          lineStyle: l1Filled ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: l1Filled ? `✅ L1 (0.618) [FILLED]: $${Number(levs.l1_entry).toFixed(2)}` : `🎯 L1 (0.618) [WAITING]: $${Number(levs.l1_entry).toFixed(2)}`,
+        }));
+      }
+      if (levs.l2_entry) {
+        const l2Filled = levs.l2_state === "FILLED" || levs.l2_state === "TP_HIT";
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.l2_entry),
+          color: l2Filled ? "#00e676" : "#42a5f5",
+          lineWidth: 1,
+          lineStyle: l2Filled ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: l2Filled ? `✅ L2 (0.500) [FILLED]: $${Number(levs.l2_entry).toFixed(2)}` : `🎯 L2 (0.500) [PENDING]: $${Number(levs.l2_entry).toFixed(2)}`,
+        }));
+      }
+      if (levs.l3_entry) {
+        const l3Filled = levs.l3_state === "FILLED" || levs.l3_state === "TP_HIT";
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.l3_entry),
+          color: l3Filled ? "#00e676" : "#26c6da",
+          lineWidth: 1,
+          lineStyle: l3Filled ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: l3Filled ? `✅ L3 (0.382) [FILLED]: $${Number(levs.l3_entry).toFixed(2)}` : `🎯 L3 (0.382) [PENDING]: $${Number(levs.l3_entry).toFixed(2)}`,
+        }));
+      }
+      if (levs.sl) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.sl),
+          color: "#ef5350",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `🛑 STOP LOSS: $${Number(levs.sl).toFixed(2)}`,
+        }));
+      }
+      if (levs.tp) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.tp),
+          color: "#00e676",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `🏆 TAKE PROFIT: $${Number(levs.tp).toFixed(2)}`,
+        }));
+      }
+
+      if (badgeEl) {
+        const anyFilled = levs.entry_touched || levs.l1_state === "FILLED";
+        if (anyFilled) {
+          badgeEl.className = "badge badge-green";
+          badgeEl.textContent = "● TRADE ACTIVE (L1 FILLED)";
+        } else if (levs.l1_entry) {
+          badgeEl.className = "badge badge-amber";
+          badgeEl.textContent = "⏳ WAITING FOR RETRACEMENT (L1/L2/L3)";
+        } else {
+          badgeEl.className = "badge badge-blue";
+          badgeEl.textContent = "SCANNING FOR BOS BREAK";
+        }
+      }
+    }
+  }
+
+  // 4. Live Binance Tick Price Line
+  if (lp) {
+    inst.priceLines.push(inst.candleSeries.createPriceLine({
+      price: Number(lp),
+      color: "#f0b90b",
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dotted,
+      axisLabelVisible: true,
+      title: `⚡️ LIVE $${Number(lp).toFixed(2)}`,
+    }));
+  }
+
+  inst.chart.timeScale().fitContent();
 }
 
 function renderStrategyTVChart(containerId, interval = "5") {
@@ -2957,13 +3105,10 @@ function renderStrategyTVChart(containerId, interval = "5") {
         container_id: innerId,
         withdateranges: true,
         save_image: true,
-        details: true,
+        details: false,
         hotlist: false,
         calendar: false,
-        studies: [
-          "MASimple@tv-basicstudies",
-          "RSI@tv-basicstudies"
-        ]
+        studies: []
       });
       return;
     } catch (e) {
@@ -2973,7 +3118,7 @@ function renderStrategyTVChart(containerId, interval = "5") {
 
   // Direct iframe fallback
   box.innerHTML = `
-    <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=BINANCE%3AXAUUSDT.P&interval=${interval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=131722&theme=dark&style=1&timezone=Etc%2FUTC&locale=en" 
+    <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=BINANCE%3AXAUUSDT.P&interval=${interval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=131722&theme=dark&style=1&timezone=Etc%2FUTC&locale=en&hideideas=1" 
       style="width:100%;height:100%;min-height:580px;border:none;" 
       allowfullscreen>
     </iframe>

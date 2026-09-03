@@ -707,13 +707,14 @@ async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
                 fib_levels["smc_fib"] = {
                     "direction": eng.direction.value if eng.direction else None,
                     "state": eng.state.value if eng.state else "NO_SETUP",
-                    "anchor": eng.point_2_price,          # 1.000
+                    "anchor": eng.point_2_price,          # 1.000 Point 2
+                    "bos": eng.point_1_price,             # Point 1 (BOS)
                     "sl": eng.sl_price,                    # 0.920
                     "pocket": eng.pocket_price,            # 0.790
                     "entry": eng.entry_price,              # 0.680
                     "equilibrium": eng.equilibrium_50,     # 0.500
                     "tp": eng.locked_tp or eng.target_tp_price,  # 0.000
-                    "entry_touched": eng.entry_touched,
+                    "entry_touched": getattr(eng, "entry_touched", False),
                 }
     except Exception as exc:
         logger.debug("SMC Fib levels for chart failed: %s", exc)
@@ -722,17 +723,29 @@ async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
     try:
         retr_svc = get_retracement_multi_tf_service(symbol)
         retr_slot = retr_svc.slots.get(tf)
-        if retr_slot and retr_slot.engine and retr_slot.engine.setup:
-            setup = retr_slot.engine.setup
-            fib_levels["fib_retracement"] = {
-                "direction": setup.direction,
-                "state": setup.state.value if setup.state else "NO_SETUP",
-                "anchor": setup.point_2_price,              # 0.000 anchor
-                "tp": setup.dynamic_tp or setup.entry_price,  # 1.000 TP
-                "entry": setup.entry_price,                 # 0.618 Entry
-                "sl": setup.sl_price,                       # 0.236 SL
-                "entry_touched": getattr(setup, "entry_touched", False),
-            }
+        if retr_slot and retr_slot.engine:
+            setup = retr_slot.engine.setup or getattr(retr_slot, "last_completed", None)
+            if setup:
+                layers = getattr(setup, "layers", {}) or {}
+                l1 = layers.get("L1", {})
+                l2 = layers.get("L2", {})
+                l3 = layers.get("L3", {})
+                fib_levels["fib_retracement"] = {
+                    "direction": setup.direction,
+                    "state": setup.state.value if hasattr(setup.state, "value") else str(setup.state or "NO_SETUP"),
+                    "anchor": setup.point_2_price,              # Point 2 anchor
+                    "bos": setup.point_1_price or getattr(setup, "bos_price", None), # BOS Point 1
+                    "l1_entry": setup.fib_0_618 or setup.entry_price,
+                    "l2_entry": setup.fib_0_500,
+                    "l3_entry": setup.fib_0_382,
+                    "entry": setup.fib_0_618 or setup.entry_price,
+                    "sl": setup.sl_price,                       # SL
+                    "tp": setup.dynamic_tp or setup.fib_1_000,   # TP
+                    "l1_state": l1.get("state", "PENDING"),
+                    "l2_state": l2.get("state", "PENDING"),
+                    "l3_state": l3.get("state", "PENDING"),
+                    "entry_touched": getattr(setup, "entry_touched", False) or l1.get("state") in ("FILLED", "TP_HIT"),
+                }
     except Exception as exc:
         logger.debug("Fib Retracement levels for chart failed: %s", exc)
 
