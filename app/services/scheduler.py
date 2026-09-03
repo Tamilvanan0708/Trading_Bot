@@ -150,6 +150,15 @@ class AnalysisScheduler:
                 await self.status.set_next_analysis(next_market_open(now))
                 return
 
+        # 24/7 Real-Time Background Sync: Evaluate open positions for instant TP/SL alerts
+        try:
+            from app.database.connection import async_session_factory
+            from app.paper_trading.sync import sync_strategy_paper_trades
+            async with async_session_factory() as sync_session:
+                await sync_strategy_paper_trades(sync_session)
+        except Exception as sync_err:  # noqa: BLE001
+            logger.debug("[SCHEDULER] Periodic paper trade sync error: %s", sync_err)
+
         # Observation mode: update hypothetical outcomes with the current live price.
         if self.settings.OBSERVATION_MODE:
             try:
@@ -846,25 +855,19 @@ class AnalysisScheduler:
             logger.error("Degradation alert dedup check failed: %s", exc)
             return
 
-        msg = (
-            "⚠️ DATA QUALITY DEGRADED\n"
-            f"Reason: {dq.degradation_reason}\n"
-            f"Live price: {dq.live_price}\n"
-            "Automatic paper trading is BLOCKED."
+        logger.warning(
+            "[SAFETY] Data quality degraded: %s (live price: %s)",
+            dq.degradation_reason,
+            dq.live_price,
         )
-        await self.pipeline.telegram_service.send_raw_alert(msg)
 
     async def _alert_recovered(self, dq) -> None:
-        """Send a Telegram recovery alert after a degraded episode ends."""
-        if not self.settings.TELEGRAM_ENABLED:
-            return
-        msg = (
-            "✅ DATA QUALITY RECOVERED\n"
-            f"Candles: {dq.candle_count} | Gaps: {dq.gap_count} | Duplicates: {dq.duplicate_count}\n"
-            "The system has self-healed and normal signal processing resumes."
-        )
-        await self.pipeline.telegram_service.send_typed_alert(
-            "data_quality_recovered", msg, cooldown_seconds=3600
+        """Log data quality recovery internally without spamming Telegram."""
+        logger.info(
+            "[SAFETY] Data quality recovered: %d candles, %d gaps, %d dups",
+            dq.candle_count,
+            dq.gap_count,
+            dq.duplicate_count,
         )
 
     async def _alert_paper_blocked(self, reason: str) -> None:
