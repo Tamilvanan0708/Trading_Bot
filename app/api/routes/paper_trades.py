@@ -50,7 +50,7 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
         "target_entry": t.target_entry,
         "actual_entry": t.actual_entry,
         "entry_price": entry,
-        "current_price": cur_price,
+        "current_price": float(t.exit_price) if (t.state == "CLOSED" and t.exit_price) else cur_price,
         "running_pts": running_pts,
         "unrealized_pnl": unrealized_pnl,
         "realized_pnl": t.realized_pnl,

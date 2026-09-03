@@ -2293,7 +2293,8 @@ function renderPaperTradeRows(trades) {
   }
   return trades.map(t => {
     const entry = t.entry_price || t.actual_entry || t.target_entry || 0;
-    const curPx = t.current_price || t.exit_price || entry;
+    const isClosed = t.status === "CLOSED" || t.state === "CLOSED";
+    const curPx = isClosed ? (t.exit_price || t.current_price || entry) : (t.current_price || t.exit_price || entry);
     const pts = Number(t.running_pts != null ? t.running_pts : 0);
     const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0)));
     const ptsSign = pts >= 0 ? "+" : "";
