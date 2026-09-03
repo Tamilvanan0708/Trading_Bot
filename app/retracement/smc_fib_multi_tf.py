@@ -92,8 +92,9 @@ class SMCFibMultiTFMonitor:
     async def _bootstrap_from_history(self) -> dict[str, list]:
         """Load historical Binance candles via Binance REST directly."""
         try:
+            from app.config.settings import get_settings
             from app.data.live.binance_history import BinanceHistoryProvider
-            provider = BinanceHistoryProvider(self.settings)
+            provider = BinanceHistoryProvider(get_settings())
             result = {}
             for tf in self.timeframes:
                 candles = await provider.get_ohlcv(self.symbol, TF_MAP[tf], limit=200)
@@ -101,7 +102,7 @@ class SMCFibMultiTFMonitor:
                     result[tf] = candles
             return result
         except Exception as exc:  # noqa: BLE001
-            logger.debug("[SMC-FIB-MULTI] historical bootstrap failed: %s", exc)
+            logger.error("[SMC-FIB-MULTI] historical bootstrap failed: %s", exc)
             return {}
 
     async def advance(self, db) -> dict[str, Any]:

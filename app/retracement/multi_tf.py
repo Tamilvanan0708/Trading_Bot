@@ -131,8 +131,9 @@ class RetracementMultiTFMonitor:
     async def _bootstrap_from_history(self) -> dict[str, list]:
         """Load real historical candles via Binance REST provider when feed lacks enough candles."""
         try:
+            from app.config.settings import get_settings
             from app.data.live.binance_history import BinanceHistoryProvider
-            provider = BinanceHistoryProvider(self.settings)
+            provider = BinanceHistoryProvider(get_settings())
             result = {}
             for tf in self.timeframes:
                 candles = await provider.get_ohlcv(self.symbol, TF_MAP[tf], limit=200)
@@ -140,7 +141,7 @@ class RetracementMultiTFMonitor:
                     result[tf] = candles
             return result
         except Exception as exc:  # noqa: BLE001
-            logger.debug("[RETR-MULTI] historical bootstrap failed: %s", exc)
+            logger.error("[RETR-MULTI] historical bootstrap failed: %s", exc)
             return {}
 
 

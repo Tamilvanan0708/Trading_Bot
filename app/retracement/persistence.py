@@ -137,7 +137,7 @@ class RetracementEventModel(Base):
     setup_id = Column(String(36), nullable=False, index=True)
     event_id = Column(String(36), nullable=False, unique=True, index=True)
     event_type = Column(String(30), nullable=False)
-    timestamp = Column(DateTime, default=get_utc_now, nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
     price = Column(Float, nullable=True)
     state_before = Column(String(30), nullable=True)
     state_after = Column(String(30), nullable=True)
