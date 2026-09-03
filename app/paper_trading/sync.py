@@ -358,7 +358,18 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                 # Telegram: Dispatch Trade Closed Alert (TP or SL)
                 if closed:
                     try:
-                        strat_name = "Fib Retracement" if "FIB_RETR" in (t.signal_id or "") else "SMC With Fib"
+                        strat_base = "Fib Retracement" if "FIB_RETR" in (t.signal_id or "") else "SMC With Fib"
+                        layer_tag = ""
+                        for tag in ("L1", "L2", "L3"):
+                            if f"_{tag}_" in (t.signal_id or "") or (t.signal_id or "").endswith(f"_{tag}"):
+                                layer_tag = f" ({tag})"
+                                break
+                        if not layer_tag and t.state_logs and isinstance(t.state_logs, list):
+                            for log_entry in t.state_logs:
+                                if isinstance(log_entry, dict) and log_entry.get("layer"):
+                                    layer_tag = f" ({log_entry['layer']})"
+                                    break
+                        strat_name = f"{strat_base}{layer_tag}"
                         if t.exit_reason == "TP_HIT":
                             msg = (
                                 f"🎯 *TAKE PROFIT HIT!*\n"
