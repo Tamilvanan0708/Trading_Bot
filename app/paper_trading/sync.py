@@ -25,12 +25,20 @@ from app.signals.models import SignalPayload
 # Global async mutex lock and in-flight guard to strictly prevent double-executions
 _sync_lock = asyncio.Lock()
 _in_flight_signals: set[str] = set()
+_last_paper_sync_ts: float = 0.0
 
 
-async def sync_strategy_paper_trades(db: AsyncSession) -> None:
+async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> None:
     """Scan in-memory 5M strategy engine states, run AI validation, and open/update paper trades.
-    Thread-safe and guarded by _sync_lock.
+    Thread-safe and guarded by _sync_lock with 10s debounce.
     """
+    global _last_paper_sync_ts
+    import time
+    now = time.time()
+    if not force and (now - _last_paper_sync_ts < 10.0):
+        return
+    _last_paper_sync_ts = now
+
     async with _sync_lock:
         # 0. Clean up any existing duplicate OPEN trades (e.g. from previous race conditions)
         try:
@@ -121,6 +129,7 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                                             f"Stop loss protected at 0.236 ${sl_px:.2f}",
                                         ],
                                     )
+                                    ai_res = await validator.validate(val_sig)
                                     ai_short = f"{ai_res.status.value} ({ai_res.confidence:.0f}% Conf)"
                                     ai_verdict = f"{ai_res.status.value} (conf={ai_res.confidence:.0f}%) — {ai_res.explanation}"
                                     if ai_res.status.value == "REJECT":
@@ -239,6 +248,7 @@ async def sync_strategy_paper_trades(db: AsyncSession) -> None:
                                     f"Take profit targeted at ${tp_px:.2f}",
                                 ],
                             )
+                            ai_res = await validator.validate(val_sig)
                             ai_short = f"{ai_res.status.value} ({ai_res.confidence:.0f}% Conf)"
                             ai_verdict = f"{ai_res.status.value} (conf={ai_res.confidence:.0f}%) — {ai_res.explanation}"
                             if ai_res.status.value == "REJECT":

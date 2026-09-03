@@ -130,6 +130,11 @@ class RetracementMultiTFMonitor:
 
     async def _bootstrap_from_history(self) -> dict[str, list]:
         """Load real historical candles via Binance REST provider when feed lacks enough candles."""
+        import time
+        now = time.time()
+        if getattr(self, "_cached_hist_candles", None) and (now - getattr(self, "_last_bootstrap_ts", 0) < 120.0):
+            return self._cached_hist_candles
+
         try:
             from app.config.settings import get_settings
             from app.data.live.binance_history import BinanceHistoryProvider
@@ -139,10 +144,13 @@ class RetracementMultiTFMonitor:
                 candles = await provider.get_ohlcv(self.symbol, TF_MAP[tf], limit=200)
                 if candles:
                     result[tf] = candles
+            if result:
+                self._cached_hist_candles = result
+                self._last_bootstrap_ts = now
             return result
         except Exception as exc:  # noqa: BLE001
             logger.error("[RETR-MULTI] historical bootstrap failed: %s", exc)
-            return {}
+            return getattr(self, "_cached_hist_candles", {})
 
 
     # ------------------------------------------------------------------
@@ -162,17 +170,13 @@ class RetracementMultiTFMonitor:
             # Check if any engine has already been seeded
             engines_seeded = any(slot.last_processed_ts is not None for slot in self.slots.values())
 
-            # Bootstrap from real Binance historical candles when:
-            # 1. Engines have never been seeded (first startup), OR
-            # 2. Either snap is None (feed offline) OR ANY active timeframe returns < 50 candles
-            active_counts = [len(list(snap.get_series(TF_MAP[tf]))) for tf in self.timeframes if snap is not None] if snap else []
-            needs_bootstrap = not engines_seeded or not active_counts or any(cnt < 50 for cnt in active_counts)
+            # Bootstrap from real Binance historical candles ONLY when engines have never been seeded
+            needs_bootstrap = not engines_seeded
 
             hist_candles: dict[str, list] = {}
             if needs_bootstrap:
                 logger.info(
-                    "[RETR-MULTI] Timeframe candles insufficient (counts=%s) — bootstrapping from Binance REST directly.",
-                    active_counts,
+                    "[RETR-MULTI] Seeding engines from Binance REST history bootstrap.",
                 )
                 hist_candles = await self._bootstrap_from_history()
 
