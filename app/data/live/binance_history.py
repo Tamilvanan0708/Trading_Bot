@@ -21,9 +21,8 @@ from app.data.ingestion import validate_candles
 from app.data.models import Candle, MultiTimeframeSnapshot
 from app.data.provider import MarketDataProvider
 
-BINANCE_REST_BASE_URL = "https://fapi.binance.info"
+BINANCE_REST_BASE_URL = "https://fapi.binance.com"
 BINANCE_REST_BASE_URLS = [
-    "https://fapi.binance.info",
     "https://fapi.binance.com",
     "https://fapi1.binance.com",
     "https://fapi2.binance.com",
