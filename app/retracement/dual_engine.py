@@ -55,8 +55,8 @@ class DualRetracementEngine:
     def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int | None = None, right_bars: int | None = None):
         self.symbol = symbol
         self.timeframe = timeframe
-        # 4-bar fractal swings filter out inside wiggles and capture true institutional swings (Image 1 exact match)
-        default_bars = 4 if timeframe.lower() in ("5m", "1m", "3m") else 3
+        # 2-bar fractal swings for low timeframes (5m/3m/1m) capture sharp local micro-structure
+        default_bars = 2 if timeframe.lower() in ("5m", "1m", "3m") else 3
         self.left_bars = left_bars if left_bars is not None else default_bars
         self.right_bars = right_bars if right_bars is not None else default_bars
         self.setup: RetracementSetup | None = None
@@ -76,23 +76,23 @@ class DualRetracementEngine:
     def _anchor_lookback_bars(self) -> int:
         """Timeframe-aware anchor lookback.
 
-        We need enough bars to cover the full impulse leg so the engine
-        finds the CORRECT swing extreme that caused the BOS:
+        We isolate recent internal micro-structure on low timeframes (1m/3m/5m)
+        to target 15-25 pt scalping moves, while higher timeframes keep macro swings:
 
-          1m  → 30 bars  (30 min)
-          3m  → 40 bars  (2 h)
-          5m  → 50 bars  (4 h 10 min) — covers typical intraday sessions
+          1m  → 15 bars  (15 min)
+          3m  → 20 bars  (1 h)
+          5m  → 25 bars  (2 h)
           15m → 60 bars  (15 h) — macro swing
           30m → 60 bars
           1h+ → 60 bars
         """
         tf = str(self.timeframe).lower()
         if tf == "1m":
-            return 30
+            return 15
         if tf == "3m":
-            return 40
+            return 20
         if tf == "5m":
-            return 50
+            return 25
         return 60
 
     def process_candle(self, candle: Candle) -> list[RetracementEvent]:
@@ -149,6 +149,12 @@ class DualRetracementEngine:
                 if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
             ]
             anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+            if str(self.timeframe).lower() in ("1m", "3m", "5m") and (last_sh.price - anchor_low.price) > 25.0:
+                recent_lows = [s for s in lows_before_bos if (last_sh.price - s.price) <= 30.0]
+                if recent_lows:
+                    anchor_low = recent_lows[-1]
+                elif lows_before_bos:
+                    anchor_low = lows_before_bos[-1]
             p2_low = anchor_low.price
             p2_ts = anchor_low.timestamp
 
@@ -183,6 +189,12 @@ class DualRetracementEngine:
                 if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
             ]
             anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+            if str(self.timeframe).lower() in ("1m", "3m", "5m") and (anchor_high.price - last_sl.price) > 25.0:
+                recent_highs = [s for s in highs_before_bos if (s.price - last_sl.price) <= 30.0]
+                if recent_highs:
+                    anchor_high = recent_highs[-1]
+                elif highs_before_bos:
+                    anchor_high = highs_before_bos[-1]
             p2_high = anchor_high.price
             p2_ts = anchor_high.timestamp
 
@@ -237,6 +249,111 @@ class DualRetracementEngine:
         setup.sl_price = setup.fib_0_236
         setup.dynamic_tp = setup.fib_1_000
 
+    def _detect_fresh_bos_if_available(self, candle: Candle, direction: str) -> list[RetracementEvent]:
+        """Detect if a newer, sharper micro-BOS formed while waiting for entry.
+
+        This prevents holding onto stale, oversized 40-120 point swings when fresh
+        15-25 point micro-swings (stair-step breakouts) are active in the market.
+        """
+        setup = self.setup
+        if setup is None or setup.layers:
+            return []
+
+        swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
+        confirmed_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._candles) - 1]
+        confirmed_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._candles) - 1]
+
+        if not confirmed_highs or not confirmed_lows:
+            return []
+
+        lookback_bars = self._anchor_lookback_bars()
+
+        if direction == "LONG":
+            last_sh = confirmed_highs[-1]
+            if last_sh.timestamp > setup.bos_timestamp and last_sh.price > setup.bos_price:
+                if len(self._candles) >= 2 and self._candles[-2].close > last_sh.price:
+                    return []
+                if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
+                    lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
+                    if not lows_before:
+                        return []
+                    anchor_low = lows_before[-1]
+                    if (last_sh.price - anchor_low.price) < 5.0 and len(lows_before) > 1:
+                        anchor_low = lows_before[-2]
+
+                    new_setup = RetracementSetup(
+                        symbol=self.symbol,
+                        timeframe=self.timeframe,
+                        direction="LONG",
+                        state=RetracementState.TP_DYNAMIC,
+                        point_1_price=last_sh.price,
+                        point_1_timestamp=last_sh.timestamp,
+                        bos_price=last_sh.price,
+                        bos_timestamp=last_sh.timestamp,
+                        point_2_price=anchor_low.price,
+                        point_2_timestamp=anchor_low.timestamp,
+                        current_high_price=candle.high,
+                        current_high_timestamp=candle.timestamp,
+                        dynamic_tp=candle.high,
+                        validation_passed=True,
+                    )
+                    self._apply_bullish_fib(new_setup, anchor_low.price, candle.high)
+                    self.setup = new_setup
+                    self._candles_since_bos = 0
+                    return [RetracementEvent(
+                        setup_id=new_setup.setup_id,
+                        event_type=RetracementEventType.BOS_DETECTED,
+                        state_before=RetracementState.NO_SETUP,
+                        state_after=RetracementState.TP_DYNAMIC,
+                        timestamp=candle.timestamp,
+                        price=candle.close,
+                        metadata={"rollover": True, "reason": "Fresh micro BOS replacement"}
+                    )]
+
+        elif direction == "SHORT":
+            last_sl = confirmed_lows[-1]
+            if last_sl.timestamp > setup.bos_timestamp and last_sl.price < setup.bos_price:
+                if len(self._candles) >= 2 and self._candles[-2].close < last_sl.price:
+                    return []
+                if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
+                    highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
+                    if not highs_before:
+                        return []
+                    anchor_high = highs_before[-1]
+                    if (anchor_high.price - last_sl.price) < 5.0 and len(highs_before) > 1:
+                        anchor_high = highs_before[-2]
+
+                    new_setup = RetracementSetup(
+                        symbol=self.symbol,
+                        timeframe=self.timeframe,
+                        direction="SHORT",
+                        state=RetracementState.TP_DYNAMIC,
+                        point_1_price=last_sl.price,
+                        point_1_timestamp=last_sl.timestamp,
+                        bos_price=last_sl.price,
+                        bos_timestamp=last_sl.timestamp,
+                        point_2_price=anchor_high.price,
+                        point_2_timestamp=anchor_high.timestamp,
+                        current_high_price=candle.low,
+                        current_high_timestamp=candle.timestamp,
+                        dynamic_tp=candle.low,
+                        validation_passed=True,
+                    )
+                    self._apply_bearish_fib(new_setup, anchor_high.price, candle.low)
+                    self.setup = new_setup
+                    self._candles_since_bos = 0
+                    return [RetracementEvent(
+                        setup_id=new_setup.setup_id,
+                        event_type=RetracementEventType.BOS_DETECTED,
+                        state_before=RetracementState.NO_SETUP,
+                        state_after=RetracementState.TP_DYNAMIC,
+                        timestamp=candle.timestamp,
+                        price=candle.close,
+                        metadata={"rollover": True, "reason": "Fresh micro BOS replacement"}
+                    )]
+
+        return []
+
     def _track_and_check_entry(self, candle: Candle) -> list[RetracementEvent]:
         setup = self.setup
         if setup is None:
@@ -254,11 +371,28 @@ class DualRetracementEngine:
         # As the impulse wave expands higher/lower, dynamically update Target 1.000 (Keep Anchor locked!)
 
         if setup.direction == "LONG":
-            # 1. Update dynamic target if new high forms (before any layer fills)
-            if not setup.layers and candle.high > (setup.current_high_price or 0.0):
-                setup.current_high_price = candle.high
-                setup.current_high_timestamp = candle.timestamp
-                self._apply_bullish_fib(setup, setup.point_2_price, candle.high)
+            # 1. Check if a fresh micro-BOS formed while waiting for entry
+            if not setup.layers:
+                fresh_events = self._detect_fresh_bos_if_available(candle, "LONG")
+                if fresh_events:
+                    setup.state = RetracementState.INVALIDATED
+                    setup.invalidation_reason = "Superceded by fresh recent micro BOS."
+                    self._archived_setups.append(setup)
+                    return fresh_events
+
+                # Update dynamic target if new high forms (before any layer fills)
+                if candle.high > (setup.current_high_price or 0.0):
+                    setup.current_high_price = candle.high
+                    setup.current_high_timestamp = candle.timestamp
+                    # Bounded span for scalping: roll anchor up if span > 25 pts and a higher swing low exists
+                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (candle.high - setup.point_2_price) > 25.0:
+                        swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
+                        c_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._candles) - 1]
+                        higher_lows = [s for s in c_lows if s.timestamp > setup.point_2_timestamp and s.price > setup.point_2_price and (candle.high - s.price) >= 8.0]
+                        if higher_lows:
+                            setup.point_2_price = higher_lows[-1].price
+                            setup.point_2_timestamp = higher_lows[-1].timestamp
+                    self._apply_bullish_fib(setup, setup.point_2_price, candle.high)
 
             # 2. Fill layers on pullback touch (3-Tranche Scaling System)
             #    L1 @ 0.618, L2 @ 0.500, L3 @ 0.382 — all SL @ 0.236.
@@ -283,17 +417,31 @@ class DualRetracementEngine:
             if setup.layers:
                 setup.entry_touched = True
                 setup.entry_timestamp = candle.timestamp
-                # Keep state as TP_DYNAMIC so deeper layers can fill on the next candle.
-                # state will transition to TRADE_ACTIVE only after all 3 layers fill
-                # or the candle has no new fills.
                 if len(setup.layers) >= 3 or not new_fills:
                     setup.state = RetracementState.TRADE_ACTIVE
         else:
-            # 1. Update dynamic target if new low forms (before any layer fills)
-            if not setup.layers and candle.low < (setup.current_high_price or float("inf")):
-                setup.current_high_price = candle.low
-                setup.current_high_timestamp = candle.timestamp
-                self._apply_bearish_fib(setup, setup.point_2_price, candle.low)
+            # 1. Check if a fresh micro-BOS formed while waiting for entry
+            if not setup.layers:
+                fresh_events = self._detect_fresh_bos_if_available(candle, "SHORT")
+                if fresh_events:
+                    setup.state = RetracementState.INVALIDATED
+                    setup.invalidation_reason = "Superceded by fresh recent micro BOS."
+                    self._archived_setups.append(setup)
+                    return fresh_events
+
+                # Update dynamic target if new low forms (before any layer fills)
+                if candle.low < (setup.current_high_price or float("inf")):
+                    setup.current_high_price = candle.low
+                    setup.current_high_timestamp = candle.timestamp
+                    # Bounded span for scalping: roll anchor down if span > 25 pts and a lower swing high exists
+                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (setup.point_2_price - candle.low) > 25.0:
+                        swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
+                        c_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._candles) - 1]
+                        lower_highs = [s for s in c_highs if s.timestamp > setup.point_2_timestamp and s.price < setup.point_2_price and (s.price - candle.low) >= 8.0]
+                        if lower_highs:
+                            setup.point_2_price = lower_highs[-1].price
+                            setup.point_2_timestamp = lower_highs[-1].timestamp
+                    self._apply_bearish_fib(setup, setup.point_2_price, candle.low)
 
             # 2. Fill layers on pullback touch (SHORT: price rallies UP to the level)
             new_fills = self._fill_short_layers(candle)

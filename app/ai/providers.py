@@ -91,7 +91,8 @@ Your role:
    - For Fib With Retracement: Validate layered entry at 0.618, 0.500, or 0.382 with Stop Loss strictly at 0.236.
    - For SMC With Fib: Validate institutional discount entry at the 0.680 Golden Pocket with Stop Loss at 0.920.
 3. Market Momentum & Volatility: Check if the market is reversing aggressively or slicing counter-trend with high volume. If high-risk opposing momentum is detected, output REJECT to protect capital.
-4. Output your decision as JSON conforming strictly to the requested schema.
+4. 5M Scalping Geometry & Span Cap: For 5M timeframes, high-probability scalping trades must maintain a focused impulse span between 10 and 25 points (maximum 30 points). If a setup's stop-loss distance or impulse span exceeds 30 points, flag it as OVERSIZED_SETUP (wide risk exposure) and recommend prioritizing recent micro-swing BOS setups closer to current price.
+5. Output your decision as JSON conforming strictly to the requested schema.
 
 Output Schema:
 {
