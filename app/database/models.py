@@ -33,7 +33,7 @@ class SignalModel(Base):
     __tablename__ = "signals"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    created_at = Column(DateTime, default=get_utc_now, index=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
     symbol = Column(String(20), nullable=False, index=True)
     strategy = Column(String(50), nullable=False)
     strategy_version = Column(String(64), nullable=True, index=True)
@@ -65,7 +65,7 @@ class SignalModel(Base):
     final_r = Column(Float, nullable=True)
     regime = Column(String(20), nullable=True)
     session = Column(String(20), nullable=True)
-    outcome_updated_at = Column(DateTime, nullable=True)
+    outcome_updated_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     ai_validation = relationship("AIValidationModel", back_populates="signal", uselist=False, cascade="all, delete-orphan")
@@ -77,7 +77,7 @@ class AIValidationModel(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     signal_id = Column(String(36), ForeignKey("signals.id", ondelete="CASCADE"), nullable=False, unique=True)
-    created_at = Column(DateTime, default=get_utc_now)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
     status = Column(String(20), nullable=False)  # APPROVE, REJECT, CAUTION, UNAVAILABLE
     confidence = Column(Float, nullable=False)
     explanation = Column(Text, nullable=False)
@@ -96,7 +96,7 @@ class PaperTradeModel(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     signal_id = Column(String(36), ForeignKey("signals.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=get_utc_now, index=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
     symbol = Column(String(20), nullable=False)
     direction = Column(String(10), nullable=False)
     state = Column(String(30), nullable=False, default="SIGNAL_GENERATED", index=True)
@@ -108,12 +108,12 @@ class PaperTradeModel(Base):
     take_profit_1 = Column(Float, nullable=False)
     take_profit_2 = Column(Float, nullable=False)
     take_profit_3 = Column(Float, nullable=False)
-    opened_at = Column(DateTime, nullable=True)
+    opened_at = Column(DateTime(timezone=True), nullable=True)
     exit_price = Column(Float, nullable=True)
     exit_reason = Column(String(100), nullable=True)
     realized_pnl = Column(Float, nullable=True)
     realized_r = Column(Float, nullable=True)
-    closed_at = Column(DateTime, nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
     state_logs = Column(JSON, nullable=False, default=list)
 
     signal = relationship("SignalModel", back_populates="paper_trades")
@@ -123,10 +123,10 @@ class BacktestRunModel(Base):
     __tablename__ = "backtest_runs"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    created_at = Column(DateTime, default=get_utc_now)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
     symbol = Column(String(20), nullable=False)
-    start_date = Column(DateTime, nullable=False)
-    end_date = Column(DateTime, nullable=False)
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=False)
     initial_balance = Column(Float, nullable=False)
     final_balance = Column(Float, nullable=False)
     total_trades = Column(Integer, nullable=False)
@@ -146,7 +146,7 @@ class NotificationLogModel(Base):
     __tablename__ = "notification_logs"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    created_at = Column(DateTime, default=get_utc_now)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
     channel = Column(String(20), nullable=False)  # TELEGRAM, DISCORD, WEBHOOK
     recipient = Column(String(100), nullable=False)
     message_content = Column(Text, nullable=False)
@@ -161,4 +161,4 @@ class SystemStateModel(Base):
 
     key = Column(String(100), primary_key=True)
     value = Column(Text, nullable=False)
-    updated_at = Column(DateTime, default=get_utc_now, onupdate=get_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)

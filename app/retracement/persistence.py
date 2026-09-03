@@ -34,16 +34,16 @@ class RetracementSetupModel(Base):
     timeframe = Column(String(10), nullable=False, default="15m")
     state = Column(String(30), nullable=False, default=RetracementState.NO_SETUP.value)
 
-    point_1_timestamp = Column(DateTime, nullable=True)
+    point_1_timestamp = Column(DateTime(timezone=True), nullable=True)
     point_1_price = Column(Float, nullable=True)
 
-    bos_timestamp = Column(DateTime, nullable=True)
+    bos_timestamp = Column(DateTime(timezone=True), nullable=True)
     bos_price = Column(Float, nullable=True)
 
-    point_2_timestamp = Column(DateTime, nullable=True)
+    point_2_timestamp = Column(DateTime(timezone=True), nullable=True)
     point_2_price = Column(Float, nullable=True)
 
-    current_high_timestamp = Column(DateTime, nullable=True)
+    current_high_timestamp = Column(DateTime(timezone=True), nullable=True)
     current_high_price = Column(Float, nullable=True)
 
     fib_0 = Column(Float, nullable=True)
@@ -60,15 +60,15 @@ class RetracementSetupModel(Base):
     dynamic_tp = Column(Float, nullable=True)
     locked_tp = Column(Float, nullable=True)
     tp_before_freeze = Column(Float, nullable=True)
-    tp_locked = Column(DateTime, nullable=True)  # timestamp of TP freeze
-    entry_touched = Column(DateTime, nullable=True)  # timestamp of entry touch
-    entry_timestamp = Column(DateTime, nullable=True)
+    tp_locked = Column(DateTime(timezone=True), nullable=True)  # timestamp of TP freeze
+    entry_touched = Column(DateTime(timezone=True), nullable=True)  # timestamp of entry touch
+    entry_timestamp = Column(DateTime(timezone=True), nullable=True)
 
-    validation_passed = Column(DateTime, nullable=True)  # set when setup validated
+    validation_passed = Column(DateTime(timezone=True), nullable=True)  # set when setup validated
     insufficient_structure_reason = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=get_utc_now, nullable=False)
-    updated_at = Column(DateTime, default=get_utc_now, onupdate=get_utc_now, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now, nullable=False)
     invalidation_reason = Column(Text, nullable=True)
     completion_reason = Column(Text, nullable=True)
     strategy_version = Column(String(64), nullable=False, default=STRATEGY_VERSION)

@@ -34,11 +34,23 @@ sqlite_pragmas = (
     "PRAGMA foreign_keys=ON;"
 ) if "sqlite" in settings.DATABASE_URL else ""
 
+db_url = settings.DATABASE_URL
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+asyncpg://"):
+    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+connect_args = {}
+if "sqlite" in db_url:
+    connect_args = {"timeout": 20}
+elif "postgresql" in db_url:
+    connect_args = {"statement_cache_size": 0}
+
 engine: AsyncEngine = create_async_engine(
-    settings.DATABASE_URL,
+    db_url,
     echo=False,
     future=True,
-    connect_args={"timeout": 20} if "sqlite" in settings.DATABASE_URL else {},
+    connect_args=connect_args,
 )
 
 async_session_factory = async_sessionmaker(
@@ -111,12 +123,13 @@ async def _migrate_columns() -> None:
                     text(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
                 )
             logger.info("Migration: added column %s.%s", table, column)
-        except OperationalError as exc:
-            # "duplicate column name" is expected when the column already exists
-            if "duplicate column" in str(exc).lower():
+        except Exception as exc:
+            # "duplicate column name" / "already exists" is expected when the column already exists
+            err_msg = str(exc).lower()
+            if "duplicate" in err_msg or "already exists" in err_msg:
                 pass
             else:
-                logger.error("Migration failed for %s.%s: %s", table, column, exc)
+                logger.debug("Migration notice for %s.%s: %s", table, column, exc)
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
