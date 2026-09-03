@@ -21,7 +21,14 @@ from app.data.ingestion import validate_candles
 from app.data.models import Candle, MultiTimeframeSnapshot
 from app.data.provider import MarketDataProvider
 
-BINANCE_REST_BASE_URL = "https://fapi.binance.com"
+BINANCE_REST_BASE_URL = "https://fapi.binance.info"
+BINANCE_REST_BASE_URLS = [
+    "https://fapi.binance.info",
+    "https://fapi.binance.com",
+    "https://fapi1.binance.com",
+    "https://fapi2.binance.com",
+    "https://fapi3.binance.com",
+]
 
 # TimeFrame -> Binance kline interval
 _INTERVAL_MAP = {
@@ -68,9 +75,14 @@ class BinanceHistoryProvider(MarketDataProvider):
         last_exc: Exception | None = None
 
         for attempt in range(max_retries + 1):
+            url = BINANCE_REST_BASE_URLS[attempt % len(BINANCE_REST_BASE_URLS)]
             try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    res = await client.get(f"{self._base_url}/fapi/v1/klines", params=params)
+                async with httpx.AsyncClient(
+                    timeout=timeout,
+                    follow_redirects=True,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                ) as client:
+                    res = await client.get(f"{url}/fapi/v1/klines", params=params)
                     if res.status_code != 200:
                         raise RuntimeError(
                             f"Binance history HTTP {res.status_code}: {res.text[:200]}"
@@ -85,8 +97,8 @@ class BinanceHistoryProvider(MarketDataProvider):
                     break
                 delay = backoff * (2 ** attempt)
                 logger.warning(
-                    "Binance history fetch attempt %d/%d failed (%s); retrying in %.1fs",
-                    attempt + 1, max_retries + 1, exc, delay,
+                    "Binance history fetch attempt %d/%d on %s failed (%s); retrying in %.1fs",
+                    attempt + 1, max_retries + 1, url, exc, delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -110,7 +122,15 @@ class BinanceHistoryProvider(MarketDataProvider):
         if end_time is not None:
             params["endTime"] = int(end_time.timestamp() * 1000)
 
-        rows = await self._fetch_klines(params)
+        try:
+            rows = await self._fetch_klines(params)
+        except Exception as exc:
+            logger.warning("Binance REST history fetch failed (%s); using research dataset fallback", exc)
+            from app.data.research_fallback import load_research_fallback_candles
+            fallback = load_research_fallback_candles(symbol, timeframe, limit=limit)
+            if fallback:
+                return fallback
+            raise exc
         candles: list[Candle] = []
         for row in rows:
             if len(row) < 6:

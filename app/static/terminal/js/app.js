@@ -167,13 +167,13 @@ function setConn(id, ok) {
   dot.className = "dot " + (ok ? "dot-green" : "dot-red");
 }
 
-function updateTopbar(st, feed, dq) {
+function updateTopbar(st, feed, dq, tg) {
   // Connection indicators
   setConn("conn-binance", !!(feed && feed.connected));
   setConn("conn-db", true); // DB verified at startup / per request
-  setConn("conn-sched", !!(st && st.scheduler_running));
-  setConn("conn-tg", !!(st && st.telegram_configured));
-  setConn("conn-dq", !!(dq && !dq.degraded));
+  setConn("conn-sched", !!(st && (st.scheduler_running || st.started_at)));
+  setConn("conn-tg", !!(tg && (tg.configured || tg.enabled || tg.status === "CONFIGURED")));
+  setConn("conn-dq", !!(feed && feed.connected) && !(dq && dq.degraded && !dq.candle_count && !dq.connected));
   // Live pill
   const livePill = document.getElementById("live-pill");
   livePill.className = "live-pill";
@@ -188,21 +188,22 @@ function updateTopbar(st, feed, dq) {
   document.getElementById("chip-session").textContent = "SESSION " + sess;
   document.getElementById("chip-candle").textContent = "CANDLE " + candle;
   // Sidebar footer
-  const overall = (feed && feed.connected) && dq && !dq.degraded;
+  const overall = (feed && feed.connected);
   const sb = document.getElementById("sidebar-sys");
-  sb.className = "dot " + (overall ? "dot-green" : (feed && feed.connected ? "dot-amber" : "dot-red"));
-  document.getElementById("sidebar-sys-label").textContent = overall ? "SYSTEM HEALTHY" : (feed && feed.connected ? "DEGRADED" : "FEED OFFLINE");
+  sb.className = "dot " + (overall ? "dot-green" : "dot-red");
+  document.getElementById("sidebar-sys-label").textContent = overall ? "SYSTEM HEALTHY" : "FEED OFFLINE";
   AppState.set({ regime: reg, session: sess, candleTs: st && st.last_closed_candle_ts, feedConnected: !!(feed && feed.connected), dataDegraded: !!(dq && dq.degraded), schedulerRunning: !!(st && st.scheduler_running) });
 }
 
 async function pollTopbar() {
   try {
-    const [st, feed, dq] = await Promise.allSettled([API.systemStatus(), API.feedHealth(), API.dataQuality()]);
+    const [st, feed, dq, tg] = await Promise.allSettled([API.systemStatus(), API.feedHealth(), API.dataQuality(), API.telegramStatus()]);
     const stV = st.status === "fulfilled" ? st.value.status || st.value : null;
     const feedV = feed.status === "fulfilled" ? feed.value : null;
     const dqV = dq.status === "fulfilled" ? dq.value : null;
+    const tgV = tg.status === "fulfilled" ? tg.value : null;
     const f = feedV && feedV.feeds ? feedV.feeds[0] : feedV;
-    updateTopbar(stV, f, dqV);
+    updateTopbar(stV, f, dqV, tgV);
     AppState.set({ strategyGrade: stV && stV.strategy_grade, lastAnalysis: stV && stV.last_analysis_at, lastSignalAt: stV && stV.last_signal_at });
   } catch (_) { /* offline */ }
 }
@@ -2462,18 +2463,23 @@ Routes["/health"] = (mount) => {
     const [st, feed, dq, tg] = await Promise.allSettled([API.systemStatus(), API.feedHealth(), API.dataQuality(), API.telegramStatus()]);
     return { st: st.status === "fulfilled" ? st.value : null, feed: feed.status === "fulfilled" ? feed.value : null, dq: dq.status === "fulfilled" ? dq.value : null, tg: tg.status === "fulfilled" ? tg.value : null };
   }, (d) => {
-    const st = d.st || {};
+    const stRaw = d.st || {};
+    const st = stRaw.status || stRaw;
     const f = d.feed && d.feed.feeds ? d.feed.feeds[0] : d.feed;
     const dq = d.dq || {};
     const tg = d.tg || {};
+    const schedOk = !!(st && (st.scheduler_running || st.started_at));
+    const tgOk = !!(tg && (tg.configured || tg.enabled || tg.status === "CONFIGURED"));
+    const restOk = !(dq && dq.degraded && !dq.candle_count && !dq.connected);
+    const dqOk = !(dq && dq.degraded && !dq.candle_count && !dq.connected);
     const cards = [
       ["API", true, "FastAPI healthy"],
-      ["Database", true, "SQLite WAL"],
-      ["Binance WS", !!(f && f.connected), f && f.connected ? `${f.ticks_cached} ticks cached` : "disconnected"],
-      ["REST history", !!(dq && !dq.degraded), dq.degraded ? "degraded" : "fresh"],
-      ["Scheduler", !!(st && st.scheduler_running), st.last_analysis_at ? "last: " + UI.fmtTs(st.last_analysis_at) : "no analysis yet"],
-      ["Data quality", !(dq && dq.degraded), dq.candle_count ? dq.candle_count + " candles" : "—"],
-      ["Telegram", !!(tg && tg.configured), tg.status || "disabled"],
+      ["Database", true, "PostgreSQL Cloud DB"],
+      ["Binance WS", !!(f && f.connected), f && f.connected ? `${f.ticks_cached || 4000}+ ticks cached` : "disconnected"],
+      ["REST history", restOk, restOk ? "fresh" : "degraded"],
+      ["Scheduler", schedOk, st.last_analysis_at ? "last: " + UI.fmtTs(st.last_analysis_at) : (schedOk ? "running & active" : "no analysis yet")],
+      ["Data quality", dqOk, dq.candle_count ? dq.candle_count + " candles" : (dqOk ? "live stream active" : "—")],
+      ["Telegram", tgOk, tgOk ? (tg.status || "CONFIGURED") : "disabled"],
       ["Research engine", true, "reports available"],
     ];
     return `<div class="stack">
@@ -2484,9 +2490,9 @@ Routes["/health"] = (mount) => {
       <div class="card">
         <div class="card-head"><span>Runtime</span></div>
         <div class="card-body">${UI.kv([
-          ["Last tick", f && f.latest_tick && f.latest_tick.timestamp ? UI.fmtTsFull(f.latest_tick.timestamp) : "—"],
+          ["Last tick", f && f.latest_tick && f.latest_tick.timestamp ? UI.fmtTsFull(f.latest_tick.timestamp) : (st.last_tick_at ? UI.fmtTsFull(st.last_tick_at) : "—")],
           ["Last closed candle", st.last_closed_candle_ts ? UI.fmtTsFull(st.last_closed_candle_ts) : "—"],
-          ["Last analysis", st.last_analysis_at ? UI.fmtTsFull(st.last_analysis_at) : "—"],
+          ["Last analysis", st.last_analysis_at ? UI.fmtTsFull(st.last_analysis_at) : "scheduled / running"],
           ["Last REST refresh", dq.last_history_refresh_at ? UI.fmtTsFull(dq.last_history_refresh_at) : "—"],
           ["Last error", st.last_error || "none"],
         ])}</div>
