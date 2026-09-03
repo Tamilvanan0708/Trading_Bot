@@ -2632,6 +2632,9 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
 
   async function updateStratInPlace() {
     if (AutoRefresh.speed === 0 || isStratUpdating) return;
+    const curHash = location.hash.replace(/^#\/?/, "");
+    if (strategyType === "SMC_WITH_FIB" && !curHash.startsWith("smc-fib")) return;
+    if (strategyType === "FIB_WITH_RETRACEMENT" && !curHash.startsWith("fib-retracement")) return;
     isStratUpdating = true;
     try {
       const r = await fetch(endpoint);
