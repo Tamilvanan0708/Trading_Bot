@@ -2637,7 +2637,10 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     if (strategyType === "FIB_WITH_RETRACEMENT" && !curHash.startsWith("fib-retracement")) return;
     isStratUpdating = true;
     try {
-      const r = await fetch(endpoint);
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 3500);
+      const r = await fetch(endpoint, { signal: controller.signal });
+      clearTimeout(tid);
       if (!r.ok) return;
       const data = await r.json();
       const d = data.strat || data || {};
@@ -2711,13 +2714,19 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <!-- BIG ACTIVE SIGNAL BOX -->
       <div id="strat-signal-box-wrap">${renderActiveSignalBox(tfData, price, selectedTf)}</div>
 
-      <!-- LIVE FIB CHART -->
-      <div class="card" style="margin-bottom:var(--sp-3)">
-        <div class="card-head">
-          <span>📈 LIVE CHART</span>
-          <span class="muted" style="font-size:11px">${TF_LABELS[selectedTf]} · Fibonacci Levels</span>
+      <!-- OFFICIAL TRADINGVIEW REAL-TIME CHART (SAME AS LIVE MARKET) -->
+      <div class="card" style="padding:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:#131722;margin-bottom:var(--sp-3)">
+        <div class="card-head" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center">
+          <span>📈 OFFICIAL REAL-TIME CHART · <span style="color:var(--primary);font-weight:700">BINANCE:XAUUSDT.P (${TF_LABELS[selectedTf]})</span></span>
+          <span class="muted" style="display:flex;align-items:center;gap:8px">
+            <span class="pulse-dot live"></span>
+            <span class="badge badge-green">TRADINGVIEW LIVE STREAM</span>
+            <span style="font-size:11px">Real-Time Ticks & Full Technical Indicators</span>
+          </span>
         </div>
-        <div id="fib-chart-${strategyType}-${selectedTf}" style="width:100%;height:380px;background:var(--bg-card,#1a1d26);border-radius:0 0 6px 6px;"></div>
+        <div class="card-body" style="padding:0;height:580px;width:100%">
+          <div id="strat-tv-chart-box" style="height:100%;width:100%"></div>
+        </div>
       </div>
 
       <!-- METRICS & FIBONACCI TABLE -->
@@ -2743,10 +2752,10 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       </div>
     </div>`;
   }, mount).then(() => {
-    // After HTML is rendered and mounted into the DOM by renderWith, draw the chart.
-    drawFibChart(`fib-chart-${strategyType}-${selectedTf}`, selectedTf, strategyType);
+    // Render official TradingView real-time streaming chart (same as Live Market)
+    renderStrategyTVChart("strat-tv-chart-box", "5");
     if (_stratTimer) clearInterval(_stratTimer);
-    _stratTimer = setInterval(updateStratInPlace, AutoRefresh.speed || 2500);
+    _stratTimer = setInterval(updateStratInPlace, AutoRefresh.speed || 2000);
   });
 
   window.__viewCleanup = () => {
@@ -2893,6 +2902,57 @@ async function drawFibChart(containerId, tf, strategyKey) {
   } catch (err) {
     container.innerHTML = `<div style="padding:20px;color:#ef5350;font-size:12px;font-family:monospace;white-space:pre-wrap">Chart Error: ${err.message}\n${err.stack}</div>`;
   }
+}
+
+function renderStrategyTVChart(containerId, interval = "5") {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  box.innerHTML = "";
+  const innerId = "tv_chart_strat_" + Date.now();
+  const div = document.createElement("div");
+  div.id = innerId;
+  div.style.width = "100%";
+  div.style.height = "100%";
+  box.appendChild(div);
+
+  if (window.TradingView && window.TradingView.widget) {
+    try {
+      new window.TradingView.widget({
+        autosize: true,
+        symbol: "BINANCE:XAUUSDT.P",
+        interval: String(interval),
+        timezone: "Etc/UTC",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        toolbar_bg: "#131722",
+        enable_publishing: false,
+        allow_symbol_change: true,
+        hide_side_toolbar: false,
+        container_id: innerId,
+        withdateranges: true,
+        save_image: true,
+        details: true,
+        hotlist: false,
+        calendar: false,
+        studies: [
+          "MASimple@tv-basicstudies",
+          "RSI@tv-basicstudies"
+        ]
+      });
+      return;
+    } catch (e) {
+      console.warn("[TradingView] Strategy widget init failed, using iframe fallback:", e);
+    }
+  }
+
+  // Direct iframe fallback
+  box.innerHTML = `
+    <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=BINANCE%3AXAUUSDT.P&interval=${interval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=131722&theme=dark&style=1&timezone=Etc%2FUTC&locale=en" 
+      style="width:100%;height:100%;min-height:580px;border:none;" 
+      allowfullscreen>
+    </iframe>
+  `;
 }
 
 /* ================= SMC WITH FIB ================= */
