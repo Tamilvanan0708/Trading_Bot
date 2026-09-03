@@ -55,8 +55,8 @@ class DualRetracementEngine:
     def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int | None = None, right_bars: int | None = None):
         self.symbol = symbol
         self.timeframe = timeframe
-        # 2-bar fractal swings for low timeframes (5m/3m/1m) capture sharp local micro-structure
-        default_bars = 2 if timeframe.lower() in ("5m", "1m", "3m") else 3
+        # 3-bar fractal swings (7-bar window) capture true structural swing highs and lows
+        default_bars = 3
         self.left_bars = left_bars if left_bars is not None else default_bars
         self.right_bars = right_bars if right_bars is not None else default_bars
         self.setup: RetracementSetup | None = None
@@ -149,8 +149,8 @@ class DualRetracementEngine:
                 if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
             ]
             anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
-            if str(self.timeframe).lower() in ("1m", "3m", "5m") and (last_sh.price - anchor_low.price) > 25.0:
-                recent_lows = [s for s in lows_before_bos if (last_sh.price - s.price) <= 30.0]
+            if str(self.timeframe).lower() in ("1m", "3m", "5m") and (last_sh.price - anchor_low.price) > 35.0:
+                recent_lows = [s for s in lows_before_bos if (last_sh.price - s.price) <= 35.0]
                 if recent_lows:
                     anchor_low = recent_lows[-1]
                 elif lows_before_bos:
@@ -189,8 +189,8 @@ class DualRetracementEngine:
                 if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
             ]
             anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
-            if str(self.timeframe).lower() in ("1m", "3m", "5m") and (anchor_high.price - last_sl.price) > 25.0:
-                recent_highs = [s for s in highs_before_bos if (s.price - last_sl.price) <= 30.0]
+            if str(self.timeframe).lower() in ("1m", "3m", "5m") and (anchor_high.price - last_sl.price) > 35.0:
+                recent_highs = [s for s in highs_before_bos if (s.price - last_sl.price) <= 35.0]
                 if recent_highs:
                     anchor_high = recent_highs[-1]
                 elif highs_before_bos:
@@ -277,9 +277,11 @@ class DualRetracementEngine:
                     lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
                     if not lows_before:
                         return []
-                    anchor_low = lows_before[-1]
-                    if (last_sh.price - anchor_low.price) < 5.0 and len(lows_before) > 1:
-                        anchor_low = lows_before[-2]
+                    anchor_low = min(lows_before, key=lambda s: s.price)
+                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (last_sh.price - anchor_low.price) > 35.0:
+                        recent_lows = [s for s in lows_before if (last_sh.price - s.price) <= 35.0]
+                        if recent_lows:
+                            anchor_low = recent_lows[-1]
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,
@@ -319,9 +321,11 @@ class DualRetracementEngine:
                     highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
                     if not highs_before:
                         return []
-                    anchor_high = highs_before[-1]
-                    if (anchor_high.price - last_sl.price) < 5.0 and len(highs_before) > 1:
-                        anchor_high = highs_before[-2]
+                    anchor_high = max(highs_before, key=lambda s: s.price)
+                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (anchor_high.price - last_sl.price) > 35.0:
+                        recent_highs = [s for s in highs_before if (s.price - last_sl.price) <= 35.0]
+                        if recent_highs:
+                            anchor_high = recent_highs[-1]
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,
@@ -384,11 +388,11 @@ class DualRetracementEngine:
                 if candle.high > (setup.current_high_price or 0.0):
                     setup.current_high_price = candle.high
                     setup.current_high_timestamp = candle.timestamp
-                    # Bounded span for scalping: roll anchor up if span > 25 pts and a higher swing low exists
-                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (candle.high - setup.point_2_price) > 25.0:
+                    # Bounded span for scalping: roll anchor up if span > 35 pts and a higher swing low exists
+                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (candle.high - setup.point_2_price) > 35.0:
                         swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
                         c_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._candles) - 1]
-                        higher_lows = [s for s in c_lows if s.timestamp > setup.point_2_timestamp and s.price > setup.point_2_price and (candle.high - s.price) >= 8.0]
+                        higher_lows = [s for s in c_lows if s.timestamp > setup.point_2_timestamp and s.price > setup.point_2_price and (candle.high - s.price) >= 10.0]
                         if higher_lows:
                             setup.point_2_price = higher_lows[-1].price
                             setup.point_2_timestamp = higher_lows[-1].timestamp
@@ -433,11 +437,11 @@ class DualRetracementEngine:
                 if candle.low < (setup.current_high_price or float("inf")):
                     setup.current_high_price = candle.low
                     setup.current_high_timestamp = candle.timestamp
-                    # Bounded span for scalping: roll anchor down if span > 25 pts and a lower swing high exists
-                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (setup.point_2_price - candle.low) > 25.0:
+                    # Bounded span for scalping: roll anchor down if span > 35 pts and a lower swing high exists
+                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (setup.point_2_price - candle.low) > 35.0:
                         swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
                         c_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._candles) - 1]
-                        lower_highs = [s for s in c_highs if s.timestamp > setup.point_2_timestamp and s.price < setup.point_2_price and (s.price - candle.low) >= 8.0]
+                        lower_highs = [s for s in c_highs if s.timestamp > setup.point_2_timestamp and s.price < setup.point_2_price and (s.price - candle.low) >= 10.0]
                         if lower_highs:
                             setup.point_2_price = lower_highs[-1].price
                             setup.point_2_timestamp = lower_highs[-1].timestamp
