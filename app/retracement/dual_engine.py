@@ -583,52 +583,15 @@ class DualRetracementEngine:
                     metadata={"layer": layer["layer"], "lots": layer["lots"]},
                 ))
 
-        # ESCAPE PLAN: all 3 layers filled (price reached 0.382) and price
-        # bounces back to 0.618 → L2/L3 hit TP, L1 closes at breakeven.
+        # NOTE: The old "Escape Plan" (close L1 at breakeven when all 3 layers filled)
+        # has been replaced by the 2-Stage Smart Shield below, which is strictly better:
+        #   Stage 1 → L1 SL raised to 0.500 when L2/L3 TP hits (still has breathing room)
+        #   Stage 2 → L1 SL locked to 0.618 + $0.50 when price 2 pts above entry (guaranteed profit)
+        # The escape_armed flag is kept for backward compatibility but no longer triggers early exit.
         all_filled = {"L1", "L2", "L3"}.issubset(setup.layers.keys())
         if all_filled and setup.escape_armed is False:
-            setup.escape_armed = True
-        if setup.escape_armed:
-            escape_level = setup.fib_0_618
-            if escape_level is not None:
-                if setup.direction == "LONG" and candle.high >= escape_level:
-                    setup.state = RetracementState.COMPLETED
-                    setup.outcome = "ESCAPE"
-                    setup.completion_reason = (
-                        f"Escape plan: all layers filled, price returned to 0.618 — "
-                        f"L2/L3 TP hit, L1 closed at breakeven."
-                    )
-                    for layer in setup.layers.values():
-                        layer["state"] = "ESCAPE_CLOSED"
-                    events.append(RetracementEvent(
-                        setup_id=setup.setup_id,
-                        event_type=RetracementEventType.COMPLETED,
-                        state_before=RetracementState.TRADE_ACTIVE,
-                        state_after=RetracementState.COMPLETED,
-                        timestamp=candle.timestamp,
-                        price=escape_level,
-                        metadata={"reason": "ESCAPE_PLAN"},
-                    ))
-                    return events
-                elif setup.direction == "SHORT" and candle.low <= escape_level:
-                    setup.state = RetracementState.COMPLETED
-                    setup.outcome = "ESCAPE"
-                    setup.completion_reason = (
-                        f"Escape plan: all layers filled, price returned to 0.618 — "
-                        f"L2/L3 TP hit, L1 closed at breakeven."
-                    )
-                    for layer in setup.layers.values():
-                        layer["state"] = "ESCAPE_CLOSED"
-                    events.append(RetracementEvent(
-                        setup_id=setup.setup_id,
-                        event_type=RetracementEventType.COMPLETED,
-                        state_before=RetracementState.TRADE_ACTIVE,
-                        state_after=RetracementState.COMPLETED,
-                        timestamp=candle.timestamp,
-                        price=escape_level,
-                        metadata={"reason": "ESCAPE_PLAN"},
-                    ))
-                    return events
+            setup.escape_armed = True  # tracked for info purposes only
+
 
         # SL: shared stop at 0.236 — stops out ALL open layers.
         if setup.sl_price is not None:
@@ -650,31 +613,88 @@ class DualRetracementEngine:
                 ))
                 return events
 
-        # Individual TP checks per layer.
+        # Individual TP checks per layer + 2-Stage Smart Shield.
         if setup.direction == "LONG":
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
                 if candle.high >= layer["tp"]:
                     layer["state"] = "TP_HIT"
-                    # Breakeven Shield: When L2 or L3 hits TP at 0.618, lock L1 Stop Loss to Breakeven (0.618)
+                    # ── 2-STAGE SMART SHIELD ─────────────────────────────────────────
+                    # Stage 1: L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382).
+                    #   → Move L1 Stop Loss from 0.236 to 0.500 (L2 level).
+                    #     Gives L1 breathing room so market noise at 0.618 doesn't stop it out.
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
-                        if setup.fib_0_618 is not None:
-                            setup.layers["L1"]["sl"] = setup.fib_0_618
-                            setup.sl_price = setup.fib_0_618
-                            logger.info("[BREAKEVEN SHIELD] Locked L1 Stop Loss to Breakeven (0.618: %s)", setup.fib_0_618)
-        else:
+                        l2_level = setup.fib_0_500
+                        if l2_level is not None and setup.sl_price < l2_level:
+                            setup.layers["L1"]["sl"] = round(l2_level, 2)
+                            setup.sl_price = l2_level
+                            setup.layers["L1"]["shield_stage"] = 1
+                            logger.info(
+                                "[SMART SHIELD STAGE-1] L%s TP hit → L1 SL raised from 0.236 to 0.500 ($%.2f)",
+                                layer["layer"][-1], l2_level,
+                            )
+
+            # Stage 2: Price rises 2+ points above L1 entry (0.618) while L1 is still FILLED.
+            #   → Lock L1 SL to 0.618 + $0.50 (guaranteed profit, ride to 1.000 Target).
+            l1_layer = setup.layers.get("L1")
+            if (
+                l1_layer is not None
+                and l1_layer["state"] == "FILLED"
+                and l1_layer.get("shield_stage", 0) >= 1          # Stage 1 must have fired first
+                and l1_layer.get("shield_stage", 0) < 2           # Stage 2 hasn't fired yet
+                and setup.fib_0_618 is not None
+                and candle.high >= setup.fib_0_618 + 2.0           # Price 2 pts above L1 entry
+            ):
+                profit_lock = round(setup.fib_0_618 + 0.50, 2)
+                if setup.sl_price < profit_lock:
+                    setup.layers["L1"]["sl"] = profit_lock
+                    setup.sl_price = profit_lock
+                    l1_layer["shield_stage"] = 2
+                    logger.info(
+                        "[SMART SHIELD STAGE-2] Price 2+ pts above L1 entry → SL locked to $%.2f (PROFIT GUARANTEED)",
+                        profit_lock,
+                    )
+
+        else:  # SHORT
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
                 if candle.low <= layer["tp"]:
                     layer["state"] = "TP_HIT"
-                    # Breakeven Shield: When L2 or L3 hits TP at 0.618, lock L1 Stop Loss to Breakeven (0.618)
+                    # ── 2-STAGE SMART SHIELD ─────────────────────────────────────────
+                    # Stage 1: L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382).
+                    #   → Move L1 Stop Loss from 0.236 to 0.500 (L2 level).
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
-                        if setup.fib_0_618 is not None:
-                            setup.layers["L1"]["sl"] = setup.fib_0_618
-                            setup.sl_price = setup.fib_0_618
-                            logger.info("[BREAKEVEN SHIELD] Locked L1 Stop Loss to Breakeven (0.618: %s)", setup.fib_0_618)
+                        l2_level = setup.fib_0_500
+                        if l2_level is not None and setup.sl_price > l2_level:
+                            setup.layers["L1"]["sl"] = round(l2_level, 2)
+                            setup.sl_price = l2_level
+                            setup.layers["L1"]["shield_stage"] = 1
+                            logger.info(
+                                "[SMART SHIELD STAGE-1] L%s TP hit → L1 SL lowered from 0.236 to 0.500 ($%.2f)",
+                                layer["layer"][-1], l2_level,
+                            )
+
+            # Stage 2: Price drops 2+ points below L1 entry (0.618) while L1 is still FILLED (SHORT).
+            l1_layer = setup.layers.get("L1")
+            if (
+                l1_layer is not None
+                and l1_layer["state"] == "FILLED"
+                and l1_layer.get("shield_stage", 0) >= 1
+                and l1_layer.get("shield_stage", 0) < 2
+                and setup.fib_0_618 is not None
+                and candle.low <= setup.fib_0_618 - 2.0           # Price 2 pts below L1 entry (SHORT)
+            ):
+                profit_lock = round(setup.fib_0_618 - 0.50, 2)
+                if setup.sl_price > profit_lock:
+                    setup.layers["L1"]["sl"] = profit_lock
+                    setup.sl_price = profit_lock
+                    l1_layer["shield_stage"] = 2
+                    logger.info(
+                        "[SMART SHIELD STAGE-2] Price 2+ pts below L1 entry → SL locked to $%.2f (PROFIT GUARANTEED)",
+                        profit_lock,
+                    )
 
         # Setup completes only when EVERY filled layer has resolved (TP/SL/escape).
         open_layers = [l for l in setup.layers.values() if l["state"] == "FILLED"]
