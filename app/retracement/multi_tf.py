@@ -129,24 +129,15 @@ class RetracementMultiTFMonitor:
             return None
 
     async def _bootstrap_from_history(self) -> dict[str, list]:
-        """Load real historical candles from live service as fallback when WebSocket feed is offline.
-
-        Returns a dict of tf -> candle list for all monitored timeframes.
-        Always uses real Binance candles — never fabricates data.
-        """
+        """Load real historical candles via Binance REST provider when feed lacks enough candles."""
         try:
-            service = get_live_service()
-            await service._load_historical_base()
-            await service._load_5m_base()
-            from app.core.constants import TimeFrame as TF
-            snap = await service.get_multi_timeframe_snapshot(
-                self.symbol, include_forming=False, m15_limit=800,
-            )
+            from app.data.live.binance_history import BinanceHistoryProvider
+            provider = BinanceHistoryProvider(self.settings)
             result = {}
             for tf in self.timeframes:
-                result[tf] = list(snap.get_series(TF_MAP[tf]))
-            if snap.current_price:
-                self.live_price = snap.current_price
+                candles = await provider.get_ohlcv(self.symbol, TF_MAP[tf], limit=200)
+                if candles:
+                    result[tf] = candles
             return result
         except Exception as exc:  # noqa: BLE001
             logger.debug("[RETR-MULTI] historical bootstrap failed: %s", exc)
@@ -171,16 +162,16 @@ class RetracementMultiTFMonitor:
             engines_seeded = any(slot.last_processed_ts is not None for slot in self.slots.values())
 
             # Bootstrap from real Binance historical candles when:
-            # 1. Engines have never been seeded (first startup), AND
-            # 2. Either snap is None (feed offline) OR snap returns too few 15M candles for swing detection (DEGRADED feed)
-            snap_15m_count = len(list(snap.get_series(TF_MAP["15m"]))) if snap is not None else 0
-            needs_bootstrap = not engines_seeded and snap_15m_count < 50
+            # 1. Engines have never been seeded (first startup), OR
+            # 2. Either snap is None (feed offline) OR ANY active timeframe returns < 50 candles
+            active_counts = [len(list(snap.get_series(TF_MAP[tf]))) for tf in self.timeframes if snap is not None] if snap else []
+            needs_bootstrap = not engines_seeded or not active_counts or any(cnt < 50 for cnt in active_counts)
 
             hist_candles: dict[str, list] = {}
             if needs_bootstrap:
                 logger.info(
-                    "[RETR-MULTI] Engines unseeded (15M candles from snap=%d < 50) — bootstrapping from historical Binance candles.",
-                    snap_15m_count,
+                    "[RETR-MULTI] Timeframe candles insufficient (counts=%s) — bootstrapping from Binance REST directly.",
+                    active_counts,
                 )
                 hist_candles = await self._bootstrap_from_history()
 

@@ -656,6 +656,8 @@ async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
     tf = timeframe.lower()
     svc = get_live_service()
 
+    candles = []
+    live_price = None
     try:
         snap = await svc.get_multi_timeframe_snapshot(symbol, include_forming=True)
         tf_enum = RETR_TF_MAP.get(tf)
@@ -665,8 +667,19 @@ async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
         live_price = snap.current_price
     except Exception as exc:
         logger.debug("Chart snapshot failed: %s", exc)
-        candles = []
-        live_price = None
+
+    if len(candles) < 50:
+        try:
+            from app.data.live.binance_history import BinanceHistoryProvider
+            provider = BinanceHistoryProvider()
+            tf_enum = RETR_TF_MAP.get(tf, TimeFrame.M5)
+            fetched = await provider.get_ohlcv(symbol, tf_enum, limit=limit)
+            if fetched:
+                candles = fetched[-limit:]
+                if live_price is None:
+                    live_price = candles[-1].close
+        except Exception as e:
+            logger.debug("Chart REST fallback failed: %s", e)
 
     # Serialize OHLCV (Unix timestamp in seconds for lightweight-charts)
     ohlcv = []

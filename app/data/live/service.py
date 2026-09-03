@@ -535,6 +535,23 @@ class LiveMarketDataService:
             "Gaps=%s Dup=%s OOO=%s",
             added, len(self._closed_15m), self._gap_count, self._dup_count, self._ooo_count,
         )
+        # Also refresh 5M candles for low-timeframe strategies & chart
+        try:
+            fetched_5m = await provider.get_ohlcv(self._symbol, TimeFrame.M5, limit=200)
+            if fetched_5m:
+                cutoff_5m = _bucket_start(now, 5)
+                async with self._lock:
+                    existing_5m = {c.timestamp: c for c in self._closed_5m}
+                    for c in fetched_5m:
+                        ts = c.timestamp
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if ts < cutoff_5m and ts not in existing_5m:
+                            existing_5m[ts] = c.model_copy(update={"timestamp": ts})
+                    self._closed_5m = sorted(existing_5m.values(), key=lambda c: c.timestamp)[-400:]
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[HISTORY] 5M background refresh skipped: %s", exc)
+
         dq = await self.data_quality()
         if dq.degraded:
             logger.info("[HISTORY] Data quality is still DEGRADED: %s", dq.degradation_reason)

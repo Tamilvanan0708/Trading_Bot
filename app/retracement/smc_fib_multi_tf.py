@@ -90,17 +90,15 @@ class SMCFibMultiTFMonitor:
             return None
 
     async def _bootstrap_from_history(self) -> dict[str, list]:
-        """Load historical Binance candles as fallback when live WebSocket feed is offline."""
+        """Load historical Binance candles via Binance REST directly."""
         try:
-            service = get_live_service()
-            await service._load_historical_base()
-            await service._load_5m_base()
-            snap = await service.get_multi_timeframe_snapshot(self.symbol, include_forming=False)
+            from app.data.live.binance_history import BinanceHistoryProvider
+            provider = BinanceHistoryProvider(self.settings)
             result = {}
             for tf in self.timeframes:
-                result[tf] = list(snap.get_series(TF_MAP[tf]))
-            if snap.current_price:
-                self.live_price = snap.current_price
+                candles = await provider.get_ohlcv(self.symbol, TF_MAP[tf], limit=200)
+                if candles:
+                    result[tf] = candles
             return result
         except Exception as exc:  # noqa: BLE001
             logger.debug("[SMC-FIB-MULTI] historical bootstrap failed: %s", exc)
@@ -114,16 +112,15 @@ class SMCFibMultiTFMonitor:
             # Check if any engine has already been seeded
             engines_seeded = any(slot.last_processed_ts is not None for slot in self.slots.values())
 
-            # Bootstrap from real Binance historical candles when engines are unseeded AND
-            # the snapshot has too few candles (DEGRADED state) or feed is offline
-            snap_15m_count = len(list(snap.get_series(TF_MAP["15m"]))) if snap is not None else 0
-            needs_bootstrap = not engines_seeded and snap_15m_count < 50
+            # Bootstrap from real Binance historical candles when engines are unseeded OR any active timeframe has < 50 candles
+            active_counts = [len(list(snap.get_series(TF_MAP[tf]))) for tf in self.timeframes if snap is not None] if snap else []
+            needs_bootstrap = not engines_seeded or not active_counts or any(cnt < 50 for cnt in active_counts)
 
             hist_candles: dict[str, list] = {}
             if needs_bootstrap:
                 logger.info(
-                    "[SMC-FIB-MULTI] Engines unseeded (15M candles from snap=%d < 50) — bootstrapping from historical Binance candles.",
-                    snap_15m_count,
+                    "[SMC-FIB-MULTI] Timeframe candles insufficient (counts=%s) — bootstrapping from Binance REST directly.",
+                    active_counts,
                 )
                 hist_candles = await self._bootstrap_from_history()
 
