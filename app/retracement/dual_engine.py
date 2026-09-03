@@ -569,6 +569,20 @@ class DualRetracementEngine:
                 setup.locked_tp = l1["tp"]
                 setup.tp_locked = True
 
+        # Check and fill deeper retracement layers (L2 @ 0.500, L3 @ 0.382) as price pulls back during active trade
+        if len(setup.layers) < 3:
+            new_fills = self._fill_long_layers(candle) if setup.direction == "LONG" else self._fill_short_layers(candle)
+            for layer in new_fills:
+                events.append(RetracementEvent(
+                    setup_id=setup.setup_id,
+                    event_type=RetracementEventType.ENTRY_TOUCHED,
+                    state_before=RetracementState.TRADE_ACTIVE,
+                    state_after=RetracementState.TRADE_ACTIVE,
+                    timestamp=candle.timestamp,
+                    price=layer["entry_price"],
+                    metadata={"layer": layer["layer"], "lots": layer["lots"]},
+                ))
+
         # ESCAPE PLAN: all 3 layers filled (price reached 0.382) and price
         # bounces back to 0.618 → L2/L3 hit TP, L1 closes at breakeven.
         all_filled = {"L1", "L2", "L3"}.issubset(setup.layers.keys())
