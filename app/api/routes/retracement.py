@@ -631,6 +631,83 @@ async def get_smc_fib_dashboard(
     }
 
 
+@router.get("/strategy/fib-trend/{symbol}")
+async def get_fib_trend_dashboard(
+    symbol: str = "XAUUSD",
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Dashboard endpoint for 'Fib Go With Trend' strategy (9 EMA & 21 EMA + 0.618 Breakout Confirmation)."""
+    live_price = None
+    data_status = "NO_DATA"
+    try:
+        ls = get_live_service()
+        live_price = await ls.get_latest_price(symbol)
+        dq = await ls.data_quality()
+        data_status = "HEALTHY" if (dq.connected and not dq.degraded) else (
+            "HISTORICAL" if dq.historical_available else "NO_DATA")
+    except Exception:  # noqa: BLE001
+        pass
+
+    from app.retracement.fib_trend_multi_tf import get_fib_trend_multi_tf_service
+    from app.retracement.fib_trend_engine import FibTrendState
+    trend_multi = get_fib_trend_multi_tf_service(symbol)
+    try:
+        engines = await trend_multi.advance(db)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[FIB-TREND] multi-tf advance error: %s", exc)
+        engines = {tf: trend_multi.slots[tf].engine for tf in trend_multi.timeframes}
+
+    tf_cards = {}
+    for tf_str, eng in engines.items():
+        state_val = eng.state.value if hasattr(eng.state, "value") else str(eng.state)
+        dir_val = eng.direction.value if hasattr(eng.direction, "value") else str(eng.direction)
+        tf_cards[tf_str] = {
+            "timeframe": tf_str,
+            "state": state_val,
+            "direction": dir_val,
+            "point_0_price": eng.point_0_price,
+            "point_1_price": eng.point_1_price,
+            "fib_0_000": eng.fib_0_000,
+            "fib_0_236": eng.fib_0_236,
+            "fib_0_382": eng.fib_0_382,
+            "fib_0_500": eng.fib_0_500,
+            "fib_0_618": eng.fib_0_618,
+            "fib_1_000": eng.fib_1_000,
+            "fib_1_618": eng.fib_1_618,
+            "trigger_breakout_price": eng.trigger_breakout_price,
+            "entry_price": eng.entry_price or eng.trigger_breakout_price,
+            "sl_price": eng.sl_price or eng.fib_0_236,
+            "tp_price": eng.tp_price or eng.fib_1_618,
+            "entry_touched": eng.entry_touched,
+            "ema_9": eng.current_ema_9,
+            "ema_21": eng.current_ema_21,
+            "outcome": eng.outcome,
+            "completion_reason": eng.completion_reason,
+            "invalidation_reason": eng.invalidation_reason,
+            "levels": [
+                {"ratio": "1.618", "price": eng.fib_1_618, "meaning": "Target TP Extension", "color": "#00e676"},
+                {"ratio": "1.000", "price": eng.fib_1_000, "meaning": "Swing 1 Peak", "color": "#ffffff"},
+                {"ratio": "0.618", "price": eng.fib_0_618, "meaning": "Golden Pocket Touch", "color": "#ffb74d"},
+                {"ratio": "0.500", "price": eng.fib_0_500, "meaning": "Equilibrium", "color": "#42a5f5"},
+                {"ratio": "0.382", "price": eng.fib_0_382, "meaning": "Retracement Depth", "color": "#90caf9"},
+                {"ratio": "0.236", "price": eng.fib_0_236, "meaning": "Stop Loss Level", "color": "#ef5350"},
+                {"ratio": "0.000", "price": eng.fib_0_000, "meaning": "Anchor Origin", "color": "#b388ff"},
+            ] if eng.fib_1_000 else [],
+            "is_entry_ready": state_val == FibTrendState.WAITING_FOR_BREAKOUT.value,
+            "is_trade_active": state_val == FibTrendState.TRADE_ACTIVE.value,
+        }
+
+    return {
+        "strategy": "FIB_GO_WITH_TREND",
+        "symbol": symbol,
+        "live_price": live_price,
+        "data_status": data_status,
+        "timeframes_order": ["5m"],
+        "cascading_active_tf": "5m",
+        "timeframes": tf_cards,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Live Chart Data Endpoint — returns OHLCV + Fibonacci levels for chart rendering
 # ---------------------------------------------------------------------------
@@ -748,6 +825,36 @@ async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
                 }
     except Exception as exc:
         logger.debug("Fib Retracement levels for chart failed: %s", exc)
+
+    # Fib Go With Trend levels
+    try:
+        from app.retracement.fib_trend_multi_tf import get_fib_trend_multi_tf_service
+        trend_svc = get_fib_trend_multi_tf_service(symbol)
+        trend_slot = trend_svc.slots.get(tf)
+        if trend_slot and trend_slot.engine:
+            eng = trend_slot.engine
+            fib_levels["fib_trend"] = {
+                "direction": eng.direction.value if hasattr(eng.direction, "value") else str(eng.direction),
+                "state": eng.state.value if hasattr(eng.state, "value") else str(eng.state or "NO_SETUP"),
+                "p0": eng.point_0_price,
+                "p1": eng.point_1_price,
+                "fib_0_000": eng.fib_0_000,
+                "fib_0_236": eng.fib_0_236,
+                "fib_0_382": eng.fib_0_382,
+                "fib_0_500": eng.fib_0_500,
+                "fib_0_618": eng.fib_0_618,
+                "fib_1_000": eng.fib_1_000,
+                "fib_1_618": eng.fib_1_618,
+                "trigger_price": eng.trigger_breakout_price,
+                "entry_price": eng.entry_price or eng.trigger_breakout_price,
+                "sl": eng.sl_price or eng.fib_0_236,
+                "tp": eng.tp_price or eng.fib_1_618,
+                "ema_9": eng.current_ema_9,
+                "ema_21": eng.current_ema_21,
+                "entry_touched": eng.entry_touched,
+            }
+    except Exception as exc:
+        logger.debug("Fib Trend levels for chart failed: %s", exc)
 
     return {
         "symbol": symbol,

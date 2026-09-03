@@ -150,6 +150,51 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
                     elif existing and existing.outcome != l_state:
                         await repo.update_signal_outcome(sig_id, {"outcome": l_state})
                         await db.commit()
+
+            # 3. Fib Go With Trend: 9 EMA & 21 EMA + 0.618 Breakout Confirmation
+            from app.retracement.fib_trend_multi_tf import get_fib_trend_multi_tf_service
+            from app.retracement.fib_trend_engine import FibTrendState
+            trend_svc = get_fib_trend_multi_tf_service("XAUUSD")
+            trend_states = await trend_svc.advance(db)
+            t5 = trend_states.get("5m")
+            if t5 and t5.point_0_price and (t5.entry_price or t5.trigger_breakout_price):
+                dir_str = "LONG" if t5.direction == SignalDirection.LONG else "SHORT"
+                sig_id = f"FIB_TREND_5M_{dir_str}_{int(t5.point_0_price)}"
+                t_state = "FILLED" if t5.state in (FibTrendState.TRADE_ACTIVE, FibTrendState.COMPLETED) else "PENDING"
+                t_entry = float(t5.entry_price or t5.trigger_breakout_price or 0.0)
+                t_sl = float(t5.sl_price or t5.fib_0_236 or 0.0)
+                t_tp = float(t5.tp_price or t5.fib_1_618 or 0.0)
+                existing = await repo.get_signal_by_id(sig_id)
+                if existing is None and t_entry > 0:
+                    await repo.save_signal({
+                        "id": sig_id,
+                        "symbol": "XAUUSD",
+                        "strategy": "FIB_GO_WITH_TREND",
+                        "strategy_version": "FIB_TREND_V1",
+                        "direction": dir_str,
+                        "timeframe": "5m",
+                        "entry_price": t_entry,
+                        "stop_loss": t_sl,
+                        "take_profit_1": t_tp,
+                        "take_profit_2": t_tp,
+                        "take_profit_3": t_tp,
+                        "risk_reward": round(abs(t_tp - t_entry) / max(0.1, abs(t_entry - t_sl)), 2),
+                        "confidence_score": 95.0,
+                        "signal_quality": "VERY_STRONG",
+                        "market_bias": "BULLISH" if dir_str == "LONG" else "BEARISH",
+                        "regime": "TRENDING",
+                        "session": "LONDON",
+                        "outcome": t_state,
+                        "reasons": [
+                            f"Fib Go With Trend 9/21 EMA ({dir_str}), 0.01 lots",
+                            f"Anchor P0: ${t5.point_0_price:.2f} | Peak P1: ${t5.point_1_price:.2f} | TP (1.618): ${t_tp:.2f}",
+                            f"Rule 8 Breakout Trigger Price: ${t_entry:.2f}",
+                        ],
+                    })
+                    await db.commit()
+                elif existing and existing.outcome != t_state:
+                    await repo.update_signal_outcome(sig_id, {"outcome": t_state})
+                    await db.commit()
         except Exception:  # noqa: BLE001
             await db.rollback()
 
@@ -158,7 +203,7 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
         raw_signals = await repo.list_recent_signals(limit=limit * 5)
         signals = [
             s for s in raw_signals
-            if s.strategy in ("SMC_WITH_FIB", "FIB_WITH_RETRACEMENT", "RETRACEMENT")
+            if s.strategy in ("SMC_WITH_FIB", "FIB_WITH_RETRACEMENT", "RETRACEMENT", "FIB_GO_WITH_TREND")
         ][:limit]
 
         output = []

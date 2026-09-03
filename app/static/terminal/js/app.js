@@ -2657,6 +2657,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const curHash = location.hash.replace(/^#\/?/, "");
     if (strategyType === "SMC_WITH_FIB" && !curHash.startsWith("smc-fib")) return;
     if (strategyType === "FIB_WITH_RETRACEMENT" && !curHash.startsWith("fib-retracement")) return;
+    if (strategyType === "FIB_GO_WITH_TREND" && !curHash.startsWith("fib-trend")) return;
     isStratUpdating = true;
     try {
       const controller = new AbortController();
@@ -2900,8 +2901,9 @@ async function drawFibChart(containerId, tf, strategyKey) {
   }
   inst.priceLines = [];
 
+  const isTrend = strategyKey === "FIB_GO_WITH_TREND";
   const isSmc = strategyKey === "SMC_WITH_FIB";
-  const levs = isSmc ? data.fib_levels?.smc_fib : data.fib_levels?.fib_retracement;
+  const levs = isTrend ? data.fib_levels?.fib_trend : (isSmc ? data.fib_levels?.smc_fib : data.fib_levels?.fib_retracement);
   const lp = data.live_price;
   const badgeEl = document.getElementById("chart-strategy-status-badge");
 
@@ -2909,32 +2911,115 @@ async function drawFibChart(containerId, tf, strategyKey) {
     const isShort = (levs.direction || "").toUpperCase() === "SHORT";
     const dirIcon = isShort ? "▼ SHORT" : "▲ LONG";
 
-    // 1. BOS (Break of Structure) line
-    if (levs.bos) {
-      inst.priceLines.push(inst.candleSeries.createPriceLine({
-        price: Number(levs.bos),
-        color: "#00e5ff",
-        lineWidth: 2,
-        lineStyle: LightweightCharts.LineStyle.Solid,
-        axisLabelVisible: true,
-        title: `⚡️ BOS ${dirIcon}: $${Number(levs.bos).toFixed(2)}`,
-      }));
-    }
+    // Strategy specific levels
+    if (isTrend) {
+      // 9 EMA & 21 EMA + Fib Retracement + Rule 8 Breakout Trigger
+      if (levs.p0) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.p0),
+          color: "#b388ff",
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `⚓️ P0 ANCHOR: $${Number(levs.p0).toFixed(2)}`,
+        }));
+      }
+      if (levs.p1) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.p1),
+          color: "#ffffff",
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: `🏔 P1 PEAK: $${Number(levs.p1).toFixed(2)}`,
+        }));
+      }
+      if (levs.fib_0_618) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.fib_0_618),
+          color: "#ffb74d",
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `🎯 0.618 TOUCH ZONE: $${Number(levs.fib_0_618).toFixed(2)}`,
+        }));
+      }
+      if (levs.trigger_price) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.trigger_price),
+          color: "#00e5ff",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `⚡️ RULE 8 TRIGGER (0.618 BREAK): $${Number(levs.trigger_price).toFixed(2)}`,
+        }));
+      }
+      if (levs.sl) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.sl),
+          color: "#ef5350",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `🛑 STOP LOSS (0.236): $${Number(levs.sl).toFixed(2)}`,
+        }));
+      }
+      if (levs.tp) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.tp),
+          color: "#00e676",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `🏆 TAKE PROFIT (1.618): $${Number(levs.tp).toFixed(2)}`,
+        }));
+      }
 
-    // 2. Anchor Swing point
-    if (levs.anchor) {
-      inst.priceLines.push(inst.candleSeries.createPriceLine({
-        price: Number(levs.anchor),
-        color: "#b388ff",
-        lineWidth: 1,
-        lineStyle: LightweightCharts.LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: `⚓️ ANCHOR: $${Number(levs.anchor).toFixed(2)}`,
-      }));
-    }
+      if (badgeEl) {
+        const st = levs.state || "NO_SETUP";
+        if (st === "TRADE_ACTIVE") {
+          badgeEl.className = "badge badge-green";
+          badgeEl.textContent = "● TRADE ACTIVE (RULE 8 BREAKOUT TRIGGERED)";
+        } else if (st === "WAITING_FOR_BREAKOUT") {
+          badgeEl.className = "badge badge-amber";
+          badgeEl.textContent = "⚡️ 0.618 TOUCHED — WAITING FOR BREAKOUT";
+        } else if (st === "WAITING_FOR_0618") {
+          badgeEl.className = "badge badge-blue";
+          badgeEl.textContent = "⏳ WAITING FOR 0.618 RETRACEMENT (EMA ALIGNED)";
+        } else if (st === "SWING_1_EXPANSION") {
+          badgeEl.className = "badge badge-blue";
+          badgeEl.textContent = "📈 SWING 1 EXPANDING";
+        } else {
+          badgeEl.className = "badge badge-muted";
+          badgeEl.textContent = "SCANNING FOR 9/21 EMA CROSS";
+        }
+      }
+    } else {
+      // 1. BOS (Break of Structure) line
+      if (levs.bos) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.bos),
+          color: "#00e5ff",
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `⚡️ BOS ${dirIcon}: $${Number(levs.bos).toFixed(2)}`,
+        }));
+      }
 
-    // 3. Strategy specific levels
-    if (isSmc) {
+      // 2. Anchor Swing point
+      if (levs.anchor) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.anchor),
+          color: "#b388ff",
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `⚓️ ANCHOR: $${Number(levs.anchor).toFixed(2)}`,
+        }));
+      }
+
+      if (isSmc) {
       // SMC Single Golden Pocket @ 0.680
       const touched = levs.entry_touched;
       if (levs.entry) {
@@ -3144,6 +3229,17 @@ Routes["/fib-retracement"] = (mount) => {
     "🎯 Fib With Retracement",
     "Multi-Timeframe Cascading BOS Retracement Strategy · RETRACEMENT_BOS_V1",
     "FIB_WITH_RETRACEMENT"
+  );
+};
+
+/* ================= FIB GO WITH TREND ================= */
+Routes["/fib-trend"] = (mount) => {
+  buildRichStrategyView(
+    mount,
+    "/retracement/strategy/fib-trend/XAUUSD",
+    "📈 Fib Go With Trend",
+    "9 EMA & 21 EMA Trend Alignment · 0.618 Breakout Confirmation Strategy",
+    "FIB_GO_WITH_TREND"
   );
 };
 
