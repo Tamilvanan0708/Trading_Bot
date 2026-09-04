@@ -3009,19 +3009,42 @@ function renderPaperTradeRows(trades) {
       const tp1 = t.take_profit_1 ? `$${Number(t.take_profit_1).toFixed(2)}` : null;
       const tp2 = t.take_profit_2 ? `$${Number(t.take_profit_2).toFixed(2)}` : null;
       const isBeLocked = t.state_logs && Array.isArray(t.state_logs) && t.state_logs.some(l => l && (l.event === "BREAKEVEN_LOCKED" || (typeof l.reason === "string" && l.reason.includes("Breakeven"))));
-      const slDisplay = isBeLocked ? `<span style="color:#00e5ff;font-weight:700">🛡 BE: ${sl}</span>` : `SL: ${sl}`;
+      const slChip = isBeLocked ? `<div class="badge-be-chip">🛡 BE: ${sl}</div>` : `<div class="badge-sl-chip">🛑 SL: ${sl}</div>`;
 
       if (tp1 && tp2 && tp1 !== tp2) {
-        slTpContent = `${slDisplay}<br><span style="color:var(--text-dim);font-size:10px">TP1: ${tp1}</span><br><b style="color:var(--green-bright)">TP2: ${tp2}</b>`;
+        slTpContent = `${slChip}<div class="badge-tp1-chip">🎯 TP1: ${tp1}</div><div class="badge-tp2-chip">🏆 TP2: ${tp2}</div>`;
       } else {
-        slTpContent = `${slDisplay}<br><b style="color:var(--green-bright)">TP2: ${tp2 || tp1 || '—'}</b>`;
+        slTpContent = `${slChip}<div class="badge-tp2-chip">🏆 TP2: ${tp2 || tp1 || '—'}</div>`;
       }
     } else {
       const tp = t.take_profit_1 || t.take_profit ? `$${Number(t.take_profit_1 || t.take_profit).toFixed(2)}` : '—';
-      slTpContent = `SL: ${sl}<br>TP: ${tp}`;
+      slTpContent = `<div class="badge-sl-chip">🛑 SL: ${sl}</div><div class="badge-tp-chip">🎯 TP: ${tp}</div>`;
     }
 
-    return `<tr class="${trancheClass}">
+    // Outcome status pill & row accent
+    let statusBadge = '';
+    let outcomeRowClass = '';
+    if (!isClosed) {
+      statusBadge = '<span class="status-pill-open"><span class="pulse-dot live" style="width:6px;height:6px;display:inline-block;margin-right:4px"></span>LIVE OPEN</span>';
+      outcomeRowClass = 'row-outcome-open';
+    } else {
+      const reason = String(t.exit_reason || "").toUpperCase();
+      const realized = Number(t.realized_pnl != null ? t.realized_pnl : (t.pnl_usd || 0));
+      if (reason.includes("BREAKEVEN") || (realized === 0 && (reason.includes("BE") || reason.includes("BREAK")))) {
+        statusBadge = '<span class="status-pill-be">🛡 BREAKEVEN</span>';
+        outcomeRowClass = 'row-outcome-be';
+      } else if (reason.includes("TP") || realized > 0) {
+        statusBadge = '<span class="status-pill-tp">🎯 TP HIT</span>';
+        outcomeRowClass = 'row-outcome-win';
+      } else if (reason.includes("SL") || realized < 0) {
+        statusBadge = '<span class="status-pill-sl">🛑 SL HIT</span>';
+        outcomeRowClass = 'row-outcome-loss';
+      } else {
+        statusBadge = '<span class="badge badge-dim">CLOSED</span>';
+      }
+    }
+
+    return `<tr class="${trancheClass} ${outcomeRowClass}">
       <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
       <td>${stratBadge} <span class="badge badge-dim" style="font-size:10px">${t.layer || ''}</span></td>
       <td>${UI.dirBadge(t.direction)}</td>
@@ -3029,8 +3052,8 @@ function renderPaperTradeRows(trades) {
       <td class="num font-mono"><b>$${Number(curPx).toFixed(2)}</b></td>
       <td class="num ${ptsCls}"><b>${ptsSign}${absPts} PTS</b></td>
       <td><span class="pnl-pill ${pnlCls}">${pnlSign}$${absPnl}</span></td>
-      <td style="font-size:11px;color:var(--text-dim);line-height:1.35">${slTpContent}</td>
-      <td>${UI.statusBadge(t.status || t.state || t.exit_reason || "OPEN")}</td>
+      <td style="padding:6px 10px;vertical-align:middle">${slTpContent}</td>
+      <td style="vertical-align:middle">${statusBadge}</td>
       <td style="text-align:center">
         <div class="row-actions-wrap" style="justify-content:center">
           <button class="btn-mini-action btn-pt-chart" data-route="${stratRoute}" title="Open Strategy Chart">📈</button>
