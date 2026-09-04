@@ -80,7 +80,10 @@ class FibTrendEngine:
         self.entry_price: float | None = None
         self.entry_ts: datetime | None = None
         self.sl_price: float | None = None
-        self.tp_price: float | None = None
+        self.tp_price: float | None = None  # TP2 (1.618)
+        self.tp1_price: float | None = None  # TP1 (1.000)
+        self.tp1_hit: bool = False
+        self.tp1_ts: datetime | None = None
 
         self.outcome: str | None = None
         self.completion_reason: str | None = None
@@ -125,6 +128,9 @@ class FibTrendEngine:
         self.entry_ts = None
         self.sl_price = None
         self.tp_price = None
+        self.tp1_price = None
+        self.tp1_hit = False
+        self.tp1_ts = None
         self.outcome = None
         self.completion_reason = None
         self.invalidation_reason = None
@@ -378,32 +384,77 @@ class FibTrendEngine:
 
             return None
 
-        # State 5: Trade Active (Track TP and SL)
+        # State 5: Trade Active (2-Stage Take Profit & Breakeven Protection)
         if self.state == FibTrendState.TRADE_ACTIVE:
             if self.direction == SignalDirection.LONG:
-                if candle.low <= self.sl_price:
+                # Stage 1 TP: Check if price reached 1.000 (Swing 1 Peak)
+                if not self.tp1_hit and self.fib_1_000 and candle.high >= self.fib_1_000:
+                    self.tp1_hit = True
+                    self.tp1_ts = candle.timestamp
+                    self.tp1_price = self.fib_1_000
+                    # Idea B: Lock Stop Loss to Breakeven (Entry Price + $0.20 buffer)
+                    be_price = round(self.entry_price + 0.20, 2)
+                    if self.sl_price is not None and self.sl_price < be_price:
+                        self.sl_price = be_price
+                    logger.info(
+                        "[FIB-TREND] 🎯 TP1 Hit at $%.2f (1.000 Peak) → Stop Loss locked to Breakeven ($%.2f)",
+                        self.fib_1_000, self.sl_price,
+                    )
+
+                # Stop Loss check (SL or Breakeven)
+                if self.sl_price is not None and candle.low <= self.sl_price:
                     self.state = FibTrendState.COMPLETED
-                    self.outcome = "SL_HIT"
-                    self.completion_reason = f"Stop Loss hit at {self.sl_price}"
-                    logger.info("[FIB-TREND] %s", self.completion_reason)
+                    if self.tp1_hit:
+                        self.outcome = "BREAKEVEN_CLOSED"
+                        self.completion_reason = f"Trade closed at Breakeven (${self.sl_price:.2f}) with TP1 secured at ${self.tp1_price:.2f}"
+                        logger.info("[FIB-TREND] 🛡 %s", self.completion_reason)
+                    else:
+                        self.outcome = "SL_HIT"
+                        self.completion_reason = f"Stop Loss hit at {self.sl_price}"
+                        logger.info("[FIB-TREND] %s", self.completion_reason)
                     return {"event": "COMPLETED", "outcome": self.outcome}
-                if candle.high >= self.tp_price:
+
+                # Stage 2 TP: Check if price reached 1.618 (Extension Target)
+                if self.tp_price is not None and candle.high >= self.tp_price:
                     self.state = FibTrendState.COMPLETED
                     self.outcome = "TP_HIT"
-                    self.completion_reason = f"Take Profit (1.618 Extension) hit at {self.tp_price}"
+                    self.completion_reason = f"TP2 (1.618 Extension) hit at {self.tp_price} — Full Profit Secured!"
                     logger.info("[FIB-TREND] 🏆 %s", self.completion_reason)
                     return {"event": "COMPLETED", "outcome": self.outcome}
+
             else:  # SHORT
-                if candle.high >= self.sl_price:
+                # Stage 1 TP: Check if price reached 1.000 (Swing 1 Valley)
+                if not self.tp1_hit and self.fib_1_000 and candle.low <= self.fib_1_000:
+                    self.tp1_hit = True
+                    self.tp1_ts = candle.timestamp
+                    self.tp1_price = self.fib_1_000
+                    # Idea B: Lock Stop Loss to Breakeven (Entry Price - $0.20 buffer)
+                    be_price = round(self.entry_price - 0.20, 2)
+                    if self.sl_price is not None and self.sl_price > be_price:
+                        self.sl_price = be_price
+                    logger.info(
+                        "[FIB-TREND] 🎯 TP1 Hit at $%.2f (1.000 Valley) → Stop Loss locked to Breakeven ($%.2f)",
+                        self.fib_1_000, self.sl_price,
+                    )
+
+                # Stop Loss check (SL or Breakeven)
+                if self.sl_price is not None and candle.high >= self.sl_price:
                     self.state = FibTrendState.COMPLETED
-                    self.outcome = "SL_HIT"
-                    self.completion_reason = f"Stop Loss hit at {self.sl_price}"
-                    logger.info("[FIB-TREND] %s", self.completion_reason)
+                    if self.tp1_hit:
+                        self.outcome = "BREAKEVEN_CLOSED"
+                        self.completion_reason = f"Trade closed at Breakeven (${self.sl_price:.2f}) with TP1 secured at ${self.tp1_price:.2f}"
+                        logger.info("[FIB-TREND] 🛡 %s", self.completion_reason)
+                    else:
+                        self.outcome = "SL_HIT"
+                        self.completion_reason = f"Stop Loss hit at {self.sl_price}"
+                        logger.info("[FIB-TREND] %s", self.completion_reason)
                     return {"event": "COMPLETED", "outcome": self.outcome}
-                if candle.low <= self.tp_price:
+
+                # Stage 2 TP: Check if price reached 1.618 (Extension Target)
+                if self.tp_price is not None and candle.low <= self.tp_price:
                     self.state = FibTrendState.COMPLETED
                     self.outcome = "TP_HIT"
-                    self.completion_reason = f"Take Profit (1.618 Extension) hit at {self.tp_price}"
+                    self.completion_reason = f"TP2 (1.618 Extension) hit at {self.tp_price} — Full Profit Secured!"
                     logger.info("[FIB-TREND] 🏆 %s", self.completion_reason)
                     return {"event": "COMPLETED", "outcome": self.outcome}
 

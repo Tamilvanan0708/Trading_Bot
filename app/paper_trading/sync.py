@@ -325,7 +325,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                     entry_px = float(t5.entry_price or 0.0)
                     sl_px = float(t5.sl_price or t5.fib_0_236 or 0.0)
-                    tp_px = float(t5.tp_price or t5.fib_1_618 or 0.0)
+                    tp1_px = float(t5.fib_1_000 or 0.0)
+                    tp2_px = float(t5.tp_price or t5.fib_1_618 or 0.0)
 
                     if not existing and entry_px > 0:
                         _in_flight_signals.add(sig_id)
@@ -343,9 +344,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 target_entry=entry_px,
                                 actual_entry=entry_px,
                                 stop_loss=sl_px,
-                                take_profit_1=tp_px,
-                                take_profit_2=tp_px,
-                                take_profit_3=tp_px,
+                                take_profit_1=tp1_px,
+                                take_profit_2=tp2_px,
+                                take_profit_3=tp2_px,
                                 opened_at=datetime.now(timezone.utc),
                                 realized_pnl=0.0,
                                 realized_r=0.0,
@@ -365,7 +366,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     f"📈 *Direction:* {dir_badge}\n"
                                     f"💵 *Entry:* ${entry_px:.2f}\n"
                                     f"🛑 *Stop Loss (0.236):* ${sl_px:.2f}\n"
-                                    f"🎯 *Take Profit (1.618):* ${tp_px:.2f}\n"
+                                    f"🎯 *TP1 (1.000 Peak):* ${tp1_px:.2f}\n"
+                                    f"🏆 *TP2 (1.618 Target):* ${tp2_px:.2f}\n"
                                     f"🧠 *AI Verdict:* {ai_short}\n"
                                     f"━━━━━━━━━━━━━━━━━━━━"
                                 )
@@ -374,6 +376,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                         finally:
                             _in_flight_signals.discard(sig_id)
+                    elif existing and existing.state == "OPEN" and getattr(t5, "tp1_hit", False) and t5.sl_price:
+                        # Idea B: Update paper trade SL to Breakeven when TP1 hits
+                        if existing.stop_loss != t5.sl_price:
+                            old_sl = existing.stop_loss
+                            existing.stop_loss = t5.sl_price
+                            existing.state_logs.append({
+                                "event": "TP1_HIT_BREAKEVEN_LOCKED",
+                                "price": t5.fib_1_000,
+                                "old_sl": old_sl,
+                                "new_sl": t5.sl_price,
+                            })
+                            await db.commit()
+                            logger.info("[PAPER-AUTO] %s SL locked to Breakeven $%.2f (TP1 Hit)", sig_id, t5.sl_price)
+                            try:
+                                msg = (
+                                    f"🛡 *BREAKEVEN SHIELD LOCKED (TP1 HIT)*\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"📊 *Strategy:* Fib Go With Trend (5M)\n"
+                                    f"🎯 *TP1 Hit:* ${tp1_px:.2f} (Swing 1 Peak)\n"
+                                    f"🔒 *New Stop Loss:* ${t5.sl_price:.2f} (Breakeven Protected)\n"
+                                    f"🚀 *Next Target (TP2):* ${tp2_px:.2f} (Risk Free Runner)\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━"
+                                )
+                                await tg.send_raw_alert(msg)
+                            except Exception as tg_err:  # noqa: BLE001
+                                logger.warning("[PAPER-TG] Failed to send breakeven alert: %s", tg_err)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[PAPER-SYNC] Fib Trend sync error: %s", exc)
 

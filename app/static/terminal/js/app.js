@@ -2515,6 +2515,41 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   const selectedTf = "5m";
 
   function renderTimeline(state) {
+    if (strategyType === "FIB_GO_WITH_TREND") {
+      const trendSteps = [
+        ["1. 9/21 EMA CROSS", "EMA_CROSS"],
+        ["2. SWING 1 IMPULSE", "SWING_1_EXPANSION"],
+        ["3. 0.618 PULLBACK", "WAITING_FOR_0618"],
+        ["4. RULE 8 ARMED", "WAITING_FOR_BREAKOUT"],
+        ["5. BREAKOUT ENTRY", "TRADE_ACTIVE"],
+        ["6. TP1 / TP2 TARGET", "COMPLETED"],
+      ];
+      const s = String(state || "NO_SETUP").toUpperCase();
+      const trendMap = {
+        EMA_CROSS: 0,
+        SWING_1_EXPANSION: 1,
+        WAITING_FOR_0618: 2,
+        WAITING_FOR_BREAKOUT: 3,
+        TRADE_ACTIVE: 4,
+        COMPLETED: 5,
+        INVALIDATED: -1,
+        NO_SETUP: -1,
+      };
+      const activeIdx = trendMap[s] !== undefined ? trendMap[s] : -1;
+      const chips = trendSteps.map(([label, key], i) => {
+        let cls = "tl-step";
+        let labelTxt = label;
+        if (activeIdx === -1) cls += " tl-idle";
+        else if (i < activeIdx) cls += " tl-done";
+        else if (i === activeIdx) cls += " tl-active";
+        if (key === "COMPLETED" && activeIdx === 5) {
+          labelTxt = "TARGET REACHED ✓";
+        }
+        return `<div class="${cls}">${labelTxt}</div>`;
+      }).join(`<div class="tl-arrow">→</div>`);
+      return `<div class="tl-wrap" style="margin-bottom:var(--sp-2)">${chips}</div>`;
+    }
+
     const steps = [
       ["BOS", "BOS_DETECTED"],
       ["POINT 2", "POINT_2_IDENTIFIED"],
@@ -2559,6 +2594,60 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   }
 
   function renderActiveSignalBox(d, price, tf) {
+    if (strategyType === "FIB_GO_WITH_TREND") {
+      const state = String(d.state || "NO_SETUP").toUpperCase();
+      const isSetup = state !== "NO_SETUP";
+      const dir = d.direction || "LONG";
+      const dirBadge = dir === "LONG"
+        ? '<span class="badge badge-green" style="font-size:14px;padding:4px 10px">▲ LONG &nbsp; BULLISH 9/21 TREND</span>'
+        : '<span class="badge badge-red" style="font-size:14px;padding:4px 10px">▼ SHORT &nbsp; BEARISH 9/21 TREND</span>';
+      const entry = d.entry_price || d.trigger_breakout_price;
+      const sl = d.sl_price;
+      const tp1 = d.tp1_price || d.fib_1_000;
+      const tp2 = d.tp2_price || d.tp_price || d.fib_1_618;
+      const tp1Hit = !!d.tp1_hit;
+      const isTradeActive = state === "TRADE_ACTIVE";
+
+      return `<div class="card" style="border-color:rgba(52,211,153,0.35);margin-bottom:var(--sp-3)">
+        <div class="card-head">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            ${dirBadge}
+            <span class="badge badge-blue">XAUUSD · 5M FOCUS</span>
+            <span class="badge ${isTradeActive ? 'badge-green' : (isSetup ? 'badge-amber' : 'badge-muted')}">${state}</span>
+            <span class="badge" style="background:rgba(0,229,255,0.15);color:#00e5ff;border:1px solid #00e5ff">EMA: 9 (${d.ema_9 || '—'}) / 21 (${d.ema_21 || '—'})</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            ${tp1Hit ? '<span class="badge badge-green">🎯 TP1 HIT (BREAKEVEN LOCKED)</span>' : (isTradeActive ? '<span class="badge badge-green">● TRADE ACTIVE</span>' : (d.entry_touched ? '<span class="badge badge-amber">⚡ 0.618 TOUCHED</span>' : '<span class="badge badge-blue">SCANNING</span>'))}
+            <span style="font-size:12px;color:var(--text-dim)">LIVE: <b>$${Number(price || 0).toFixed(2)}</b></span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="grid grid-4" style="margin-bottom:var(--sp-3);display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+            <div class="metric">
+              <div class="metric-label">ENTRY (RULE 8 BREAK)</div>
+              <div class="metric-value">${entry != null ? `$${Number(entry).toFixed(2)}` : "—"}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">STOP LOSS ${tp1Hit ? '(🛡 BREAKEVEN)' : '(0.236)'}</div>
+              <div class="metric-value down">${sl != null ? `$${Number(sl).toFixed(2)}` : "—"}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">TARGET TP1 (1.000 PEAK)</div>
+              <div class="metric-value" style="color:#ffd54f">${tp1 != null ? `$${Number(tp1).toFixed(2)}` : "—"} ${tp1Hit ? '✅' : ''}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">TARGET TP2 (1.618 EXT)</div>
+              <div class="metric-value up">${tp2 != null ? `$${Number(tp2).toFixed(2)}` : "—"}</div>
+            </div>
+          </div>
+          <div class="row-between" style="font-size:12px;color:var(--text-dim);border-top:1px solid var(--border);padding-top:8px">
+            <div>RULE 8 TRIGGER: <b style="color:#00e5ff">${d.trigger_breakout_price ? `$${Number(d.trigger_breakout_price).toFixed(2)}` : 'ARMING AT 0.618'}</b> &nbsp;·&nbsp; P0 ANCHOR: <b>$${d.point_0_price || '—'}</b> &nbsp;·&nbsp; P1 PEAK: <b>$${d.point_1_price || '—'}</b></div>
+            <div>STATUS: <b style="color:var(--text-bright)">${tp1Hit ? '🛡 Risk-Free Runner to TP2' : (isTradeActive ? 'Active in Progress' : (state === 'WAITING_FOR_BREAKOUT' ? 'Awaiting Next Candle Breakout' : 'Awaiting 0.618 Touch'))}</b></div>
+          </div>
+        </div>
+      </div>`;
+    }
+
     const state = String(d.state || "NO_SETUP").toUpperCase();
     const isSetup = state !== "NO_SETUP";
     const dir = d.direction || "LONG";
@@ -2955,29 +3044,44 @@ async function drawFibChart(containerId, tf, strategyKey) {
         }));
       }
       if (levs.sl) {
+        const isBe = !!levs.tp1_hit;
         inst.priceLines.push(inst.candleSeries.createPriceLine({
           price: Number(levs.sl),
-          color: "#ef5350",
+          color: isBe ? "#26c6da" : "#ef5350",
           lineWidth: 2,
           lineStyle: LightweightCharts.LineStyle.Solid,
           axisLabelVisible: true,
-          title: `🛑 STOP LOSS (0.236): $${Number(levs.sl).toFixed(2)}`,
+          title: isBe ? `🛡 BREAKEVEN SL: $${Number(levs.sl).toFixed(2)}` : `🛑 STOP LOSS (0.236): $${Number(levs.sl).toFixed(2)}`,
         }));
       }
-      if (levs.tp) {
+      if (levs.tp1) {
+        const tp1Hit = !!levs.tp1_hit;
         inst.priceLines.push(inst.candleSeries.createPriceLine({
-          price: Number(levs.tp),
+          price: Number(levs.tp1),
+          color: tp1Hit ? "#00e676" : "#ffd54f",
+          lineWidth: 2,
+          lineStyle: tp1Hit ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: tp1Hit ? `✅ TP1 HIT (1.000): $${Number(levs.tp1).toFixed(2)}` : `🎯 TP1 (1.000 PEAK): $${Number(levs.tp1).toFixed(2)}`,
+        }));
+      }
+      if (levs.tp2 || levs.tp) {
+        inst.priceLines.push(inst.candleSeries.createPriceLine({
+          price: Number(levs.tp2 || levs.tp),
           color: "#00e676",
           lineWidth: 2,
           lineStyle: LightweightCharts.LineStyle.Solid,
           axisLabelVisible: true,
-          title: `🏆 TAKE PROFIT (1.618): $${Number(levs.tp).toFixed(2)}`,
+          title: `🏆 TP2 (1.618 EXT): $${Number(levs.tp2 || levs.tp).toFixed(2)}`,
         }));
       }
 
       if (badgeEl) {
         const st = levs.state || "NO_SETUP";
-        if (st === "TRADE_ACTIVE") {
+        if (levs.tp1_hit) {
+          badgeEl.className = "badge badge-green";
+          badgeEl.textContent = "🎯 TP1 HIT — RUNNING RISK-FREE TO TP2";
+        } else if (st === "TRADE_ACTIVE") {
           badgeEl.className = "badge badge-green";
           badgeEl.textContent = "● TRADE ACTIVE (RULE 8 BREAKOUT TRIGGERED)";
         } else if (st === "WAITING_FOR_BREAKOUT") {
