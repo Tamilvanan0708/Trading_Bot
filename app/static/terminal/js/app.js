@@ -3146,6 +3146,7 @@ async function drawFibChart(containerId, tf, strategyKey) {
       }
     }
   }
+}
 
   // 4. Live Binance Tick Price Line
   if (lp) {
