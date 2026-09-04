@@ -584,9 +584,8 @@ class DualRetracementEngine:
                 ))
 
         # NOTE: The old "Escape Plan" (close L1 at breakeven when all 3 layers filled)
-        # has been replaced by the 2-Stage Smart Shield below, which is strictly better:
-        #   Stage 1 → L1 SL raised to 0.500 when L2/L3 TP hits (still has breathing room)
-        #   Stage 2 → L1 SL locked to 0.618 + $0.50 when price 2 pts above entry (guaranteed profit)
+        # has been replaced by the Smart Shield below:
+        #   L1 SL raised to 0.500 when L2/L3 TP hits (breathing room maintained).
         # The escape_armed flag is kept for backward compatibility but no longer triggers early exit.
         all_filled = {"L1", "L2", "L3"}.issubset(setup.layers.keys())
         if all_filled and setup.escape_armed is False:
@@ -613,15 +612,15 @@ class DualRetracementEngine:
                 ))
                 return events
 
-        # Individual TP checks per layer + 2-Stage Smart Shield.
+        # Individual TP checks per layer + Smart Shield.
         if setup.direction == "LONG":
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
                 if candle.high >= layer["tp"]:
                     layer["state"] = "TP_HIT"
-                    # ── 2-STAGE SMART SHIELD ─────────────────────────────────────────
-                    # Stage 1: L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382).
+                    # ── SMART SHIELD ─────────────────────────────────────────────────
+                    # When L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382):
                     #   → Move L1 Stop Loss from 0.236 to 0.500 (L2 level).
                     #     Gives L1 breathing room so market noise at 0.618 doesn't stop it out.
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
@@ -631,30 +630,9 @@ class DualRetracementEngine:
                             setup.sl_price = l2_level
                             setup.layers["L1"]["shield_stage"] = 1
                             logger.info(
-                                "[SMART SHIELD STAGE-1] L%s TP hit → L1 SL raised from 0.236 to 0.500 ($%.2f)",
+                                "[SMART SHIELD] L%s TP hit → L1 SL raised from 0.236 to 0.500 ($%.2f)",
                                 layer["layer"][-1], l2_level,
                             )
-
-            # Stage 2: Price rises 2+ points above L1 entry (0.618) while L1 is still FILLED.
-            #   → Lock L1 SL to 0.618 + $0.50 (guaranteed profit, ride to 1.000 Target).
-            l1_layer = setup.layers.get("L1")
-            if (
-                l1_layer is not None
-                and l1_layer["state"] == "FILLED"
-                and l1_layer.get("shield_stage", 0) >= 1          # Stage 1 must have fired first
-                and l1_layer.get("shield_stage", 0) < 2           # Stage 2 hasn't fired yet
-                and setup.fib_0_618 is not None
-                and candle.high >= setup.fib_0_618 + 2.0           # Price 2 pts above L1 entry
-            ):
-                profit_lock = round(setup.fib_0_618 + 0.50, 2)
-                if setup.sl_price < profit_lock:
-                    setup.layers["L1"]["sl"] = profit_lock
-                    setup.sl_price = profit_lock
-                    l1_layer["shield_stage"] = 2
-                    logger.info(
-                        "[SMART SHIELD STAGE-2] Price 2+ pts above L1 entry → SL locked to $%.2f (PROFIT GUARANTEED)",
-                        profit_lock,
-                    )
 
         else:  # SHORT
             for layer in setup.layers.values():
@@ -662,8 +640,8 @@ class DualRetracementEngine:
                     continue
                 if candle.low <= layer["tp"]:
                     layer["state"] = "TP_HIT"
-                    # ── 2-STAGE SMART SHIELD ─────────────────────────────────────────
-                    # Stage 1: L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382).
+                    # ── SMART SHIELD ─────────────────────────────────────────────────
+                    # When L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382):
                     #   → Move L1 Stop Loss from 0.236 to 0.500 (L2 level).
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
                         l2_level = setup.fib_0_500
@@ -672,29 +650,9 @@ class DualRetracementEngine:
                             setup.sl_price = l2_level
                             setup.layers["L1"]["shield_stage"] = 1
                             logger.info(
-                                "[SMART SHIELD STAGE-1] L%s TP hit → L1 SL lowered from 0.236 to 0.500 ($%.2f)",
+                                "[SMART SHIELD] L%s TP hit → L1 SL lowered from 0.236 to 0.500 ($%.2f)",
                                 layer["layer"][-1], l2_level,
                             )
-
-            # Stage 2: Price drops 2+ points below L1 entry (0.618) while L1 is still FILLED (SHORT).
-            l1_layer = setup.layers.get("L1")
-            if (
-                l1_layer is not None
-                and l1_layer["state"] == "FILLED"
-                and l1_layer.get("shield_stage", 0) >= 1
-                and l1_layer.get("shield_stage", 0) < 2
-                and setup.fib_0_618 is not None
-                and candle.low <= setup.fib_0_618 - 2.0           # Price 2 pts below L1 entry (SHORT)
-            ):
-                profit_lock = round(setup.fib_0_618 - 0.50, 2)
-                if setup.sl_price > profit_lock:
-                    setup.layers["L1"]["sl"] = profit_lock
-                    setup.sl_price = profit_lock
-                    l1_layer["shield_stage"] = 2
-                    logger.info(
-                        "[SMART SHIELD STAGE-2] Price 2+ pts below L1 entry → SL locked to $%.2f (PROFIT GUARANTEED)",
-                        profit_lock,
-                    )
 
         # Setup completes only when EVERY filled layer has resolved (TP/SL/escape).
         open_layers = [l for l in setup.layers.values() if l["state"] == "FILLED"]
