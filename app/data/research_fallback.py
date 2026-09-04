@@ -21,8 +21,18 @@ from app.core.constants import TimeFrame
 from app.data.models import Candle
 from app.data.timeframe_resampler import resample_candles
 
-_FALLBACK_5M = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "research", "xauusd_5m_2yr.json"))
-_FALLBACK_15M = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "research", "xauusd_15m_full.json"))
+def _resolve_path(filename: str) -> str:
+    candidates = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "research", filename)),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "research", filename)),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return candidates[0]
+
+_FALLBACK_5M = _resolve_path("xauusd_5m_2yr.json")
+_FALLBACK_15M = _resolve_path("xauusd_15m_full.json")
 
 # In-memory cache: the 5M dataset is ~10MB JSON and is re-read/re-parsed on
 # every request (the overview loads it once per timeframe).  Cache the parsed

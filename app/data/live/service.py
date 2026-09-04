@@ -276,11 +276,14 @@ class LiveMarketDataService:
         """
         import json
         import os
-        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "research"))
+        root1 = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "research"))
+        root2 = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "research"))
         # Prefer the most complete/recent file
         candidates = [
-            os.path.join(root, "xauusd_15m_full.json"),
-            os.path.join(root, "xauusd_15m_real.json"),
+            os.path.join(root1, "xauusd_15m_full.json"),
+            os.path.join(root1, "xauusd_15m_real.json"),
+            os.path.join(root2, "xauusd_15m_full.json"),
+            os.path.join(root2, "xauusd_15m_real.json"),
         ]
         for path in candidates:
             if not os.path.exists(path):
@@ -317,36 +320,41 @@ class LiveMarketDataService:
         """Load real 5M XAUUSD candles from bundled local JSON research files."""
         import json
         import os
-        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "research"))
-        path = os.path.join(root, "xauusd_5m_2yr.json")
-        if not os.path.exists(path):
-            return []
-        try:
-            with open(path, encoding="utf-8") as f:
-                raw = json.load(f)
-            entries = raw.get("candles", raw) if isinstance(raw, dict) else raw
-            candles = []
-            for r in entries:
-                if not isinstance(r, dict) or "timestamp" not in r:
-                    continue
-                try:
-                    ts = datetime.fromisoformat(str(r["timestamp"]).replace("Z", "+00:00"))
-                    candles.append(Candle(
-                        timestamp=ts,
-                        open=float(r.get("open", 0)),
-                        high=float(r.get("high", 0)),
-                        low=float(r.get("low", 0)),
-                        close=float(r.get("close", 0)),
-                        volume=float(r.get("volume", 0) or 0),
-                    ))
-                except (ValueError, TypeError):
-                    continue
-            if candles:
-                candles.sort(key=lambda c: c.timestamp)
-                logger.info("[LOCAL JSON] Loaded %d 5M candles from xauusd_5m_2yr.json", len(candles))
-                return candles[-400:]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[LOCAL JSON] Failed to load 5m JSON: %s", exc)
+        root1 = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "research"))
+        root2 = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "research"))
+        candidates = [
+            os.path.join(root1, "xauusd_5m_2yr.json"),
+            os.path.join(root2, "xauusd_5m_2yr.json"),
+        ]
+        for path in candidates:
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    raw = json.load(f)
+                entries = raw.get("candles", raw) if isinstance(raw, dict) else raw
+                candles = []
+                for r in entries:
+                    if not isinstance(r, dict) or "timestamp" not in r:
+                        continue
+                    try:
+                        ts = datetime.fromisoformat(str(r["timestamp"]).replace("Z", "+00:00"))
+                        candles.append(Candle(
+                            timestamp=ts,
+                            open=float(r.get("open", 0)),
+                            high=float(r.get("high", 0)),
+                            low=float(r.get("low", 0)),
+                            close=float(r.get("close", 0)),
+                            volume=float(r.get("volume", 0) or 0),
+                        ))
+                    except (ValueError, TypeError):
+                        continue
+                if candles:
+                    candles.sort(key=lambda c: c.timestamp)
+                    logger.info("[LOCAL JSON] Loaded %d 5M candles from %s", len(candles), os.path.basename(path))
+                    return candles[-400:]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[LOCAL JSON] Failed to load 5m JSON: %s", exc)
         return []
 
     async def _load_historical_base(self) -> None:
