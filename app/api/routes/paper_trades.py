@@ -33,8 +33,20 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
         if t.exit_price and entry > 0:
             running_pts = round((float(t.exit_price) - entry) if t.direction == "LONG" else (entry - float(t.exit_price)), 2)
 
-    strat_name = "FIB RETRACEMENT" if "FIB_RETR" in (t.signal_id or "") else ("SMC WITH FIB" if "SMC_FIB" in (t.signal_id or "") else "CUSTOM STRATEGY")
-    layer_name = "L1" if "L1" in (t.signal_id or "") else ("L2" if "L2" in (t.signal_id or "") else ("L3" if "L3" in (t.signal_id or "") else "SINGLE"))
+    sig = (t.signal_id or "").upper()
+    logs_str = str(t.state_logs or "").upper()
+    if "FIB_TREND" in sig or "TREND" in sig or "TREND" in logs_str:
+        strat_name = "FIB GO WITH TREND"
+        layer_name = "Breakout (0.618)"
+    elif "SMC_FIB" in sig or "SMC" in sig or "SMC" in logs_str:
+        strat_name = "SMC WITH FIB"
+        layer_name = "Single (0.68)"
+    elif "FIB_RETR" in sig or "RETR" in sig:
+        strat_name = "FIB RETRACEMENT"
+        layer_name = "L1" if "L1" in sig else ("L2" if "L2" in sig else ("L3" if "L3" in sig else "L1"))
+    else:
+        strat_name = "FIB RETRACEMENT"
+        layer_name = "L1"
 
     return {
         "id": t.id,

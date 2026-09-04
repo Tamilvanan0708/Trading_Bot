@@ -3004,7 +3004,22 @@ function renderPaperTradeRows(trades) {
     }
 
     const sl = t.stop_loss ? `$${Number(t.stop_loss).toFixed(2)}` : '—';
-    const tp = t.take_profit_1 || t.take_profit ? `$${Number(t.take_profit_1 || t.take_profit).toFixed(2)}` : '—';
+    let slTpContent = '';
+    if (isTrend) {
+      const tp1 = t.take_profit_1 ? `$${Number(t.take_profit_1).toFixed(2)}` : null;
+      const tp2 = t.take_profit_2 ? `$${Number(t.take_profit_2).toFixed(2)}` : null;
+      const isBeLocked = t.state_logs && Array.isArray(t.state_logs) && t.state_logs.some(l => l && (l.event === "BREAKEVEN_LOCKED" || (typeof l.reason === "string" && l.reason.includes("Breakeven"))));
+      const slDisplay = isBeLocked ? `<span style="color:#00e5ff;font-weight:700">🛡 BE: ${sl}</span>` : `SL: ${sl}`;
+
+      if (tp1 && tp2 && tp1 !== tp2) {
+        slTpContent = `${slDisplay}<br><span style="color:var(--text-dim);font-size:10px">TP1: ${tp1}</span><br><b style="color:var(--green-bright)">TP2: ${tp2}</b>`;
+      } else {
+        slTpContent = `${slDisplay}<br><b style="color:var(--green-bright)">TP2: ${tp2 || tp1 || '—'}</b>`;
+      }
+    } else {
+      const tp = t.take_profit_1 || t.take_profit ? `$${Number(t.take_profit_1 || t.take_profit).toFixed(2)}` : '—';
+      slTpContent = `SL: ${sl}<br>TP: ${tp}`;
+    }
 
     return `<tr class="${trancheClass}">
       <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
@@ -3014,7 +3029,7 @@ function renderPaperTradeRows(trades) {
       <td class="num font-mono"><b>$${Number(curPx).toFixed(2)}</b></td>
       <td class="num ${ptsCls}"><b>${ptsSign}${absPts} PTS</b></td>
       <td><span class="pnl-pill ${pnlCls}">${pnlSign}$${absPnl}</span></td>
-      <td style="font-size:11px;color:var(--text-dim)">SL: ${sl}<br>TP: ${tp}</td>
+      <td style="font-size:11px;color:var(--text-dim);line-height:1.35">${slTpContent}</td>
       <td>${UI.statusBadge(t.status || t.state || t.exit_reason || "OPEN")}</td>
       <td style="text-align:center">
         <div class="row-actions-wrap" style="justify-content:center">
@@ -3096,6 +3111,16 @@ Routes["/paper"] = (mount) => {
         tbody.innerHTML = renderPaperTradeRows(filtered);
         wireChartButtons();
       }
+
+      // Sync filter pill counts live
+      const pillAll = mount.querySelector('.pt-pill[data-strat="ALL"] .pill-count');
+      const pillRet = mount.querySelector('.pt-pill[data-strat="RETRACEMENT"] .pill-count');
+      const pillSmc = mount.querySelector('.pt-pill[data-strat="SMC"] .pill-count');
+      const pillTrd = mount.querySelector('.pt-pill[data-strat="TREND"] .pill-count');
+      if (pillAll) pillAll.textContent = currentTrades.length;
+      if (pillRet) pillRet.textContent = currentTrades.filter(t => !String(t.strategy || "").toUpperCase().includes("SMC") && !String(t.strategy || "").toUpperCase().includes("TREND")).length;
+      if (pillSmc) pillSmc.textContent = currentTrades.filter(t => String(t.strategy || "").toUpperCase().includes("SMC")).length;
+      if (pillTrd) pillTrd.textContent = currentTrades.filter(t => String(t.strategy || "").toUpperCase().includes("TREND")).length;
     }
 
     function exportPaperTradesCSV() {
@@ -3104,7 +3129,7 @@ Routes["/paper"] = (mount) => {
         UI.toast("Export", "No paper trades to export.", "amber");
         return;
       }
-      const headers = ["Opened_At", "Strategy", "Layer", "Direction", "Entry_Price", "Exit_Price", "Running_Pts", "PnL_USD", "SL", "TP", "Status"];
+      const headers = ["Opened_At", "Strategy", "Layer", "Direction", "Entry_Price", "Exit_Price", "Running_Pts", "PnL_USD", "SL", "TP1", "TP2", "Status"];
       const lines = [headers.join(",")];
       list.forEach(t => {
         const entry = t.entry_price || t.actual_entry || t.target_entry || "";
@@ -3123,6 +3148,7 @@ Routes["/paper"] = (mount) => {
           pnl,
           t.stop_loss || "",
           t.take_profit_1 || t.take_profit || "",
+          t.take_profit_2 || "",
           t.status || t.state || "CLOSED"
         ].join(","));
       });

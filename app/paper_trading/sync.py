@@ -541,13 +541,26 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                 closed = False
                 pts = 0.0
 
+                is_trend = "FIB_TREND" in (t.signal_id or "") or any("TREND" in str(l) for l in (t.state_logs or []))
+                final_tp = (t.take_profit_2 if (is_trend and t.take_profit_2 and t.take_profit_2 > 0) else t.take_profit_1)
+
                 if t.direction == "LONG":
-                    if t.take_profit_1 and live_price >= t.take_profit_1:
+                    # For Trend trades: If TP1 reached, shift SL to Breakeven
+                    if is_trend and t.take_profit_1 and live_price >= t.take_profit_1:
+                        if t.stop_loss is None or t.stop_loss < entry:
+                            t.stop_loss = round(entry, 2)
+                            logs = list(t.state_logs or [])
+                            if not any(isinstance(l, dict) and l.get("event") == "BREAKEVEN_LOCKED" for l in logs):
+                                logs.append({"event": "BREAKEVEN_LOCKED", "price": live_price, "time": datetime.now(timezone.utc).isoformat()})
+                                t.state_logs = logs
+                                logger.info("[PAPER-AUTO] Trend trade %s hit TP1 (%.2f) -> Stop Loss moved to Breakeven (%.2f)", t.id, t.take_profit_1, t.stop_loss)
+
+                    if final_tp and live_price >= final_tp:
                         t.state = "CLOSED"
-                        t.exit_price = t.take_profit_1
+                        t.exit_price = final_tp
                         t.exit_reason = "TP_HIT"
                         t.closed_at = datetime.now(timezone.utc)
-                        pts = round(t.take_profit_1 - entry, 2)
+                        pts = round(final_tp - entry, 2)
                         t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
                         t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
                         closed = True
@@ -555,20 +568,30 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     elif t.stop_loss and live_price <= t.stop_loss:
                         t.state = "CLOSED"
                         t.exit_price = t.stop_loss
-                        t.exit_reason = "SL_HIT"
+                        t.exit_reason = "BREAKEVEN_HIT" if t.stop_loss >= entry else "SL_HIT"
                         t.closed_at = datetime.now(timezone.utc)
                         pts = round(t.stop_loss - entry, 2)
                         t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
                         t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
                         closed = True
-                        logger.info("[PAPER-AUTO] Closed LONG trade %s at SL: %.2f ($%.2f)", t.id, t.exit_price, t.realized_pnl)
+                        logger.info("[PAPER-AUTO] Closed LONG trade %s at %s: %.2f ($%.2f)", t.id, t.exit_reason, t.exit_price, t.realized_pnl)
                 elif t.direction == "SHORT":
-                    if t.take_profit_1 and live_price <= t.take_profit_1:
+                    # For Trend trades: If TP1 reached, shift SL to Breakeven
+                    if is_trend and t.take_profit_1 and live_price <= t.take_profit_1:
+                        if t.stop_loss is None or t.stop_loss > entry:
+                            t.stop_loss = round(entry, 2)
+                            logs = list(t.state_logs or [])
+                            if not any(isinstance(l, dict) and l.get("event") == "BREAKEVEN_LOCKED" for l in logs):
+                                logs.append({"event": "BREAKEVEN_LOCKED", "price": live_price, "time": datetime.now(timezone.utc).isoformat()})
+                                t.state_logs = logs
+                                logger.info("[PAPER-AUTO] Trend trade %s hit TP1 (%.2f) -> Stop Loss moved to Breakeven (%.2f)", t.id, t.take_profit_1, t.stop_loss)
+
+                    if final_tp and live_price <= final_tp:
                         t.state = "CLOSED"
-                        t.exit_price = t.take_profit_1
+                        t.exit_price = final_tp
                         t.exit_reason = "TP_HIT"
                         t.closed_at = datetime.now(timezone.utc)
-                        pts = round(entry - t.take_profit_1, 2)
+                        pts = round(entry - final_tp, 2)
                         t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
                         t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
                         closed = True
@@ -576,29 +599,35 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     elif t.stop_loss and live_price >= t.stop_loss:
                         t.state = "CLOSED"
                         t.exit_price = t.stop_loss
-                        t.exit_reason = "SL_HIT"
+                        t.exit_reason = "BREAKEVEN_HIT" if t.stop_loss <= entry else "SL_HIT"
                         t.closed_at = datetime.now(timezone.utc)
                         pts = round(entry - t.stop_loss, 2)
                         t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
                         t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
                         closed = True
-                        logger.info("[PAPER-AUTO] Closed SHORT trade %s at SL: %.2f ($%.2f)", t.id, t.exit_price, t.realized_pnl)
+                        logger.info("[PAPER-AUTO] Closed SHORT trade %s at %s: %.2f ($%.2f)", t.id, t.exit_reason, t.exit_price, t.realized_pnl)
 
-                # Telegram: Dispatch Trade Closed Alert (TP or SL)
+                # Telegram: Dispatch Trade Closed Alert (TP or SL or BE)
                 if closed:
                     try:
-                        strat_base = "Fib Retracement" if "FIB_RETR" in (t.signal_id or "") else "SMC With Fib"
-                        layer_tag = ""
-                        for tag in ("L1", "L2", "L3"):
-                            if f"_{tag}_" in (t.signal_id or "") or (t.signal_id or "").endswith(f"_{tag}"):
-                                layer_tag = f" ({tag})"
-                                break
-                        if not layer_tag and t.state_logs and isinstance(t.state_logs, list):
-                            for log_entry in t.state_logs:
-                                if isinstance(log_entry, dict) and log_entry.get("layer"):
-                                    layer_tag = f" ({log_entry['layer']})"
+                        if is_trend:
+                            strat_name = "Fib Go With Trend (Breakout)"
+                        elif "FIB_RETR" in (t.signal_id or ""):
+                            strat_base = "Fib Retracement"
+                            layer_tag = ""
+                            for tag in ("L1", "L2", "L3"):
+                                if f"_{tag}_" in (t.signal_id or "") or (t.signal_id or "").endswith(f"_{tag}"):
+                                    layer_tag = f" ({tag})"
                                     break
-                        strat_name = f"{strat_base}{layer_tag}"
+                            if not layer_tag and t.state_logs and isinstance(t.state_logs, list):
+                                for log_entry in t.state_logs:
+                                    if isinstance(log_entry, dict) and log_entry.get("layer"):
+                                        layer_tag = f" ({log_entry['layer']})"
+                                        break
+                            strat_name = f"{strat_base}{layer_tag}"
+                        else:
+                            strat_name = "SMC With Fib"
+
                         if t.exit_reason == "TP_HIT":
                             msg = (
                                 f"🎯 *TAKE PROFIT HIT!*\n"
@@ -608,6 +637,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 f"💵 *Entry:* ${entry:.2f}\n"
                                 f"💰 *Exit Price:* ${t.exit_price:.2f}\n"
                                 f"🏆 *Result:* +{pts:.2f} PTS (+${t.realized_pnl:.2f} USD)\n"
+                                f"━━━━━━━━━━━━━━━━━━━━"
+                            )
+                        elif t.exit_reason == "BREAKEVEN_HIT":
+                            msg = (
+                                f"🛡 *BREAKEVEN EXIT*\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"📊 *Strategy:* {strat_name}\n"
+                                f"🪙 *Symbol:* XAU/USD (5M)\n"
+                                f"💵 *Entry:* ${entry:.2f}\n"
+                                f"💰 *Exit Price:* ${t.exit_price:.2f}\n"
+                                f"⚖️ *Result:* {pts:+.2f} PTS (${t.realized_pnl:+.2f} USD — Capital Protected)\n"
                                 f"━━━━━━━━━━━━━━━━━━━━"
                             )
                         else:
