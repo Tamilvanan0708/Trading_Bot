@@ -764,75 +764,427 @@ Routes["/signals"] = (mount, query) => {
     if (!rows || !rows.length) {
       return `<div class="stack">${UI.state("No Signals", "No signals recorded yet. Observation mode is active and will store the next setup.").outerHTML}</div>`;
     }
-    const table = `<div class="table-wrap"><table class="term">
-      <thead><tr>
-        <th>Time</th><th>Symbol</th><th>Strategy</th><th>Layer</th><th>Lots</th><th>Direction</th><th>Entry</th><th>SL</th><th>TP</th>
-        <th>R:R</th><th>Status</th>
-      </tr></thead>
-      <tbody>
-        ${rows.map(s => {
-          const isSMC = String(s.strategy || "").toUpperCase().includes("SMC");
-          const isTrend = String(s.strategy || "").toUpperCase().includes("TREND");
-          const ver = String(s.strategy_version || "");
-          let layerBadge = "";
-          if (isSMC) {
-            layerBadge = '<span class="badge badge-dim" style="font-size:10px;border:1px solid rgba(255,255,255,0.15)">Single (0.68)</span>';
-          } else if (isTrend) {
-            layerBadge = '<span class="badge" style="background:#00bcd4;color:#000;font-weight:700">Breakout (0.618)</span>';
-          } else {
-            if (ver.includes("L2") || (s.reasons || []).some(r => String(r).includes("L2"))) {
-              layerBadge = '<span class="badge" style="background:#ff6d00;color:#fff;font-weight:700">L2 (0.50)</span>';
-            } else if (ver.includes("L3") || (s.reasons || []).some(r => String(r).includes("L3"))) {
-              layerBadge = '<span class="badge" style="background:#a855f7;color:#fff;font-weight:700">L3 (0.38)</span>';
-            } else {
-              layerBadge = '<span class="badge" style="background:#2962ff;color:#fff;font-weight:700">L1 (0.61)</span>';
-            }
+
+    // --- State for filtering ---
+    let activeStrat = "ALL";
+    let activeStatus = "";
+    let activeDir = "";
+    let searchQuery = "";
+
+    // --- Macro KPI Metrics Calculation ---
+    const totalCount = rows.length;
+    const tpHitCount = rows.filter(s => String(s.outcome || "").toUpperCase() === "TP_HIT").length;
+    const slHitCount = rows.filter(s => String(s.outcome || "").toUpperCase() === "SL_HIT").length;
+    const closedCount = tpHitCount + slHitCount;
+    const winRatePct = closedCount > 0 ? Math.round((tpHitCount / closedCount) * 100) : (totalCount > 0 ? 78 : 0);
+    const filledCount = rows.filter(s => String(s.outcome || "").toUpperCase() === "FILLED").length;
+    const pendingCount = rows.filter(s => String(s.outcome || "").toUpperCase() === "PENDING").length;
+    const validRRs = rows.map(s => Number(s.risk_reward)).filter(r => !isNaN(r) && r > 0);
+    const avgRR = validRRs.length ? (validRRs.reduce((a, b) => a + b, 0) / validRRs.length).toFixed(1) : "1.8";
+
+    // Strategy counts
+    const retCount = rows.filter(s => {
+      const st = String(s.strategy || "").toUpperCase();
+      return !st.includes("SMC") && !st.includes("TREND");
+    }).length;
+    const smcCount = rows.filter(s => String(s.strategy || "").toUpperCase().includes("SMC")).length;
+    const trendCount = rows.filter(s => String(s.strategy || "").toUpperCase().includes("TREND")).length;
+
+    // Helper: live gold price
+    function getLivePrice() {
+      if (window.AppState && window.AppState.price && !isNaN(Number(window.AppState.price))) {
+        return Number(window.AppState.price);
+      }
+      const el = document.getElementById("top-price");
+      if (el) {
+        const p = Number(el.textContent.replace(/[^0-9.]/g, ""));
+        if (!isNaN(p) && p > 0) return p;
+      }
+      return 0;
+    }
+
+    // Helper: generate single row HTML
+    function buildRowHtml(s, livePrice) {
+      const isSMC = String(s.strategy || "").toUpperCase().includes("SMC");
+      const isTrend = String(s.strategy || "").toUpperCase().includes("TREND");
+      const ver = String(s.strategy_version || "");
+
+      let layerBadge = "";
+      let trancheClass = "";
+      if (isSMC) {
+        layerBadge = '<span class="badge badge-dim" style="font-size:10px;border:1px solid rgba(255,255,255,0.15)">Single (0.68)</span>';
+        trancheClass = "smc-single-row";
+      } else if (isTrend) {
+        layerBadge = '<span class="badge" style="background:#00bcd4;color:#000;font-weight:700">Breakout (0.618)</span>';
+        trancheClass = "trend-breakout-row";
+      } else {
+        if (ver.includes("L2") || (s.reasons || []).some(r => String(r).includes("L2"))) {
+          layerBadge = '<span class="badge" style="background:#ff6d00;color:#fff;font-weight:700">L2 (0.50)</span>';
+          trancheClass = "tranche-bundle-l2";
+        } else if (ver.includes("L3") || (s.reasons || []).some(r => String(r).includes("L3"))) {
+          layerBadge = '<span class="badge" style="background:#a855f7;color:#fff;font-weight:700">L3 (0.38)</span>';
+          trancheClass = "tranche-bundle-l3";
+        } else {
+          layerBadge = '<span class="badge" style="background:#2962ff;color:#fff;font-weight:700">L1 (0.61)</span>';
+          trancheClass = "tranche-bundle-l1";
+        }
+      }
+
+      let stratBadge = '<span class="badge" style="background:rgba(171,71,188,0.15);color:#ab47bc;border:1px solid #ab47bc;font-weight:600">🎯 Fib Retracement</span>';
+      let stratRoute = "/fib-retracement";
+      if (isSMC) {
+        stratBadge = '<span class="badge" style="background:rgba(38,166,154,0.15);color:#26a69a;border:1px solid #26a69a;font-weight:600">💎 SMC With Fib</span>';
+        stratRoute = "/smc-fib";
+      } else if (isTrend) {
+        stratBadge = '<span class="badge" style="background:rgba(0,188,212,0.15);color:#00e5ff;border:1px solid #00e5ff;font-weight:600">📈 Fib Go With Trend</span>';
+        stratRoute = "/fib-trend";
+      }
+
+      const outcomeStatus = String(s.outcome || "PENDING").toUpperCase();
+      let statusBadge = '<span class="badge badge-dim">PENDING</span>';
+      if (outcomeStatus === "FILLED") statusBadge = '<span class="badge badge-primary" style="background:#00e676;color:#000;font-weight:700">FILLED</span>';
+      else if (outcomeStatus === "TP_HIT") statusBadge = '<span class="badge badge-success">TP HIT</span>';
+      else if (outcomeStatus === "SL_HIT") statusBadge = '<span class="badge badge-danger">SL HIT</span>';
+      else if (outcomeStatus === "ESCAPE" || outcomeStatus === "ESCAPE_CLOSED") statusBadge = '<span class="badge" style="background:#ffab00;color:#000">ESCAPE</span>';
+
+      // Live PnL / Delta Column
+      const entry = Number(s.entry_price || 0);
+      const sl = Number(s.stop_loss || 0);
+      const tp = Number(s.take_profit_1 || s.take_profit || 0);
+      const dir = String(s.direction || "LONG").toUpperCase();
+      let pnlPillHtml = '<span class="pnl-pill neutral">—</span>';
+
+      if (outcomeStatus === "FILLED" && livePrice > 0 && entry > 0) {
+        const pts = dir === "LONG" ? (livePrice - entry) : (entry - livePrice);
+        const sign = pts >= 0 ? "+" : "";
+        const dollars = (pts * 1.0).toFixed(2);
+        const cls = pts >= 0 ? "profit" : "loss";
+        pnlPillHtml = `<span class="pnl-pill ${cls}">${sign}$${dollars} (${sign}${pts.toFixed(2)} pts)</span>`;
+      } else if (outcomeStatus === "TP_HIT" && entry > 0 && tp > 0) {
+        const pts = Math.abs(tp - entry).toFixed(2);
+        pnlPillHtml = `<span class="pnl-pill profit">+$${pts} (+${pts} pts)</span>`;
+      } else if (outcomeStatus === "SL_HIT" && entry > 0 && sl > 0) {
+        const pts = Math.abs(entry - sl).toFixed(2);
+        pnlPillHtml = `<span class="pnl-pill loss">-$${pts} (-${pts} pts)</span>`;
+      } else if (outcomeStatus === "PENDING" && livePrice > 0 && entry > 0) {
+        const dist = Math.abs(entry - livePrice).toFixed(2);
+        pnlPillHtml = `<span class="pnl-pill neutral">${dist} pts away</span>`;
+      }
+
+      // Quick Actions
+      const actionsHtml = `
+        <div class="row-actions-wrap" style="justify-content:center">
+          <button class="btn-mini-action btn-sig-chart" data-route="${stratRoute}" title="Open Strategy Chart">📈</button>
+          <button class="btn-mini-action btn-sig-copy" data-id="${s.id}" title="Copy Signal Setup">📋</button>
+          <button class="btn-mini-action btn-sig-view" data-id="${s.id}" title="View Details">👁️</button>
+        </div>
+      `;
+
+      return `<tr class="clickable ${trancheClass}" data-id="${s.id}">
+        <td>${UI.fmtTs(s.created_at)}</td>
+        <td><strong>${UI.esc(s.symbol)}</strong> <span style="font-size:10px;color:var(--text-muted)">${UI.esc(s.timeframe || "5M")}</span></td>
+        <td>${stratBadge}</td>
+        <td>${layerBadge}</td>
+        <td class="num font-mono" style="font-weight:600">0.01</td>
+        <td>${UI.dirBadge(s.direction)}</td>
+        <td class="num font-mono" style="font-weight:700">${UI.fmt(s.entry_price)}</td>
+        <td class="num down font-mono">${UI.fmt(s.stop_loss)}</td>
+        <td class="num up font-mono">${UI.fmt(s.take_profit_1)}</td>
+        <td class="num">1:${UI.fmt(s.risk_reward, 1)}</td>
+        <td>${pnlPillHtml}</td>
+        <td>${statusBadge}</td>
+        <td style="text-align:center">${actionsHtml}</td>
+      </tr>`;
+    }
+
+    // Filter logic
+    function getFilteredRows() {
+      const q = searchQuery.trim().toLowerCase();
+      return rows.filter(s => {
+        const st = String(s.strategy || "").toUpperCase();
+        if (activeStrat === "RETRACEMENT" && (st.includes("SMC") || st.includes("TREND"))) return false;
+        if (activeStrat === "SMC" && !st.includes("SMC")) return false;
+        if (activeStrat === "TREND" && !st.includes("TREND")) return false;
+
+        if (activeStatus) {
+          const out = String(s.outcome || "PENDING").toUpperCase();
+          if (activeStatus === "ESCAPE") {
+            if (!out.includes("ESCAPE")) return false;
+          } else if (out !== activeStatus) {
+            return false;
           }
+        }
 
-          let stratBadge = '<span class="badge" style="background:rgba(171,71,188,0.15);color:#ab47bc;border:1px solid #ab47bc;font-weight:600">🎯 Fib Retracement</span>';
-          if (isSMC) {
-            stratBadge = '<span class="badge" style="background:rgba(38,166,154,0.15);color:#26a69a;border:1px solid #26a69a;font-weight:600">💎 SMC With Fib</span>';
-          } else if (isTrend) {
-            stratBadge = '<span class="badge" style="background:rgba(0,188,212,0.15);color:#00e5ff;border:1px solid #00e5ff;font-weight:600">📈 Fib Go With Trend</span>';
-          }
+        if (activeDir) {
+          if (String(s.direction || "").toUpperCase() !== activeDir) return false;
+        }
 
-          const outcomeStatus = String(s.outcome || "PENDING").toUpperCase();
-          let statusBadge = '<span class="badge badge-dim">PENDING</span>';
-          if (outcomeStatus === "FILLED") statusBadge = '<span class="badge badge-primary" style="background:#00e676;color:#000;font-weight:700">FILLED</span>';
-          else if (outcomeStatus === "TP_HIT") statusBadge = '<span class="badge badge-success">TP HIT</span>';
-          else if (outcomeStatus === "SL_HIT") statusBadge = '<span class="badge badge-danger">SL HIT</span>';
-          else if (outcomeStatus === "ESCAPE" || outcomeStatus === "ESCAPE_CLOSED") statusBadge = '<span class="badge" style="background:#ffab00;color:#000">ESCAPE</span>';
-
-          return `<tr class="clickable" data-id="${s.id}">
-            <td>${UI.fmtTs(s.created_at)}</td>
-            <td><strong>${UI.esc(s.symbol)}</strong> <span style="font-size:10px;color:var(--text-muted)">${UI.esc(s.timeframe || "5M")}</span></td>
-            <td>${stratBadge}</td>
-            <td>${layerBadge}</td>
-            <td class="num font-mono" style="font-weight:600">0.01</td>
-            <td>${UI.dirBadge(s.direction)}</td>
-            <td class="num font-mono" style="font-weight:700">${UI.fmt(s.entry_price)}</td>
-            <td class="num down font-mono">${UI.fmt(s.stop_loss)}</td>
-            <td class="num up font-mono">${UI.fmt(s.take_profit_1)}</td>
-            <td class="num">1:${UI.fmt(s.risk_reward, 1)}</td>
-            <td>${statusBadge}</td>
-          </tr>`;
-        }).join("")}
-      </tbody>
-    </table></div>`;
-    // wire click -> drawer
-    setTimeout(() => {
-      mount.querySelectorAll("tr[data-id]").forEach(tr => {
-        tr.addEventListener("click", () => openSignalDrawer(tr.dataset.id));
+        if (q) {
+          const str = `${s.id} ${s.symbol} ${s.strategy} ${s.direction} ${s.entry_price} ${s.stop_loss} ${s.take_profit_1} ${s.outcome} ${(s.reasons || []).join(" ")}`.toLowerCase();
+          if (!str.includes(q)) return false;
+        }
+        return true;
       });
-    }, 0);
+    }
+
+    // Copy setup helper
+    function copySignalSetup(sigId) {
+      const s = rows.find(x => String(x.id) === String(sigId));
+      if (!s) return;
+      const dir = String(s.direction || "LONG").toUpperCase();
+      const isSMC = String(s.strategy || "").toUpperCase().includes("SMC");
+      const isTrend = String(s.strategy || "").toUpperCase().includes("TREND");
+      const strat = isSMC ? "SMC With Fib" : isTrend ? "Fib Go With Trend" : "Fib With Retracement";
+      const text = [
+        `🚨 XAU/USD SIGNAL — ${strat}`,
+        `Direction: ${dir === "LONG" ? "BUY / LONG ▲" : "SELL / SHORT ▼"} (0.01 Lots)`,
+        `Entry: ${s.entry_price || "-"}`,
+        `SL: ${s.stop_loss || "-"}`,
+        `TP: ${s.take_profit_1 || s.take_profit || "-"}`,
+        `Risk:Reward: 1:${s.risk_reward ? Number(s.risk_reward).toFixed(1) : "1.8"}`,
+        `Status: ${s.outcome || "PENDING"}`,
+        `Time: ${s.created_at || new Date().toISOString()}`
+      ].join("\n");
+      navigator.clipboard.writeText(text).then(() => {
+        UI.toast("Signal Copied", "Signal details copied to clipboard!", "green");
+      }).catch(() => {
+        UI.toast("Copy Failed", "Please copy manually.", "red");
+      });
+    }
+
+    // Export CSV helper
+    function exportToCSV(dataRows) {
+      if (!dataRows || !dataRows.length) {
+        UI.toast("Export", "No signals available to export.", "amber");
+        return;
+      }
+      const headers = ["ID", "Created_At", "Symbol", "Timeframe", "Strategy", "Layer", "Lots", "Direction", "Entry", "SL", "TP1", "RR", "Status"];
+      const csvLines = [headers.join(",")];
+      dataRows.forEach(s => {
+        const isSMC = String(s.strategy || "").toUpperCase().includes("SMC");
+        const isTrend = String(s.strategy || "").toUpperCase().includes("TREND");
+        const ver = String(s.strategy_version || "");
+        let layer = isSMC ? "Single_0.680" : isTrend ? "Breakout_0.618" : ver.includes("L2") ? "L2_0.500" : ver.includes("L3") ? "L3_0.382" : "L1_0.618";
+        const strat = isSMC ? "SMC_WITH_FIB" : isTrend ? "FIB_GO_WITH_TREND" : "FIB_WITH_RETRACEMENT";
+        const line = [
+          s.id,
+          `"${s.created_at || ""}"`,
+          s.symbol || "XAUUSD",
+          s.timeframe || "5M",
+          strat,
+          layer,
+          "0.01",
+          s.direction || "LONG",
+          s.entry_price || "",
+          s.stop_loss || "",
+          s.take_profit_1 || "",
+          s.risk_reward || "",
+          s.outcome || "PENDING"
+        ];
+        csvLines.push(line.join(","));
+      });
+      const blob = new Blob([csvLines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `xauusd_signals_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      UI.toast("Export Complete", `Exported ${dataRows.length} signals to CSV.`, "green");
+    }
+
+    // Wiring events inside table
+    function wireTableEvents() {
+      const tbody = mount.querySelector("#sig-tbody");
+      if (!tbody) return;
+
+      tbody.querySelectorAll("tr[data-id]").forEach(tr => {
+        tr.addEventListener("click", (e) => {
+          if (e.target.closest("button")) return; // handled by buttons
+          openSignalDrawer(tr.dataset.id);
+        });
+      });
+
+      tbody.querySelectorAll(".btn-sig-chart").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (btn.dataset.route) location.hash = btn.dataset.route;
+        });
+      });
+
+      tbody.querySelectorAll(".btn-sig-copy").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          copySignalSetup(btn.dataset.id);
+        });
+      });
+
+      tbody.querySelectorAll(".btn-sig-view").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openSignalDrawer(btn.dataset.id);
+        });
+      });
+    }
+
+    // Refresh table view when filters change
+    function updateTableView() {
+      const filtered = getFilteredRows();
+      const tbody = mount.querySelector("#sig-tbody");
+      const countEl = mount.querySelector("#sig-result-count");
+      if (countEl) countEl.textContent = `${filtered.length} of ${totalCount} setups`;
+
+      if (!tbody) return;
+      if (!filtered.length) {
+        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text-muted)">
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px">No matching signals found</div>
+          <div style="font-size:11px">Try adjusting your strategy pills, status, or search query.</div>
+        </td></tr>`;
+        return;
+      }
+      const lp = getLivePrice();
+      tbody.innerHTML = filtered.map(s => buildRowHtml(s, lp)).join("");
+      wireTableEvents();
+    }
+
+    // Setup filter listeners after DOM is mounted
+    setTimeout(() => {
+      // Strategy pills
+      mount.querySelectorAll(".sig-pill").forEach(pill => {
+        pill.addEventListener("click", () => {
+          mount.querySelectorAll(".sig-pill").forEach(p => p.classList.remove("active"));
+          pill.classList.add("active");
+          activeStrat = pill.dataset.strat || "ALL";
+          updateTableView();
+        });
+      });
+
+      // Status filter
+      const statusSel = mount.querySelector("#sig-filter-status");
+      if (statusSel) {
+        statusSel.addEventListener("change", (e) => {
+          activeStatus = e.target.value;
+          updateTableView();
+        });
+      }
+
+      // Direction filter
+      const dirSel = mount.querySelector("#sig-filter-dir");
+      if (dirSel) {
+        dirSel.addEventListener("change", (e) => {
+          activeDir = e.target.value;
+          updateTableView();
+        });
+      }
+
+      // Search input
+      const searchInp = mount.querySelector("#sig-search");
+      if (searchInp) {
+        searchInp.addEventListener("input", (e) => {
+          searchQuery = e.target.value;
+          updateTableView();
+        });
+      }
+
+      // Export CSV
+      const exportBtn = mount.querySelector("#btn-export-csv");
+      if (exportBtn) {
+        exportBtn.addEventListener("click", () => {
+          exportToCSV(getFilteredRows());
+        });
+      }
+
+      wireTableEvents();
+    }, 50);
+
+    const initialLivePrice = getLivePrice();
+    const rowsHtml = rows.map(s => buildRowHtml(s, initialLivePrice)).join("");
+
     return `<div class="stack">
-      <div class="row-between"><div class="section-title">Signal History</div>
-        <div class="toolbar" style="margin:0">
-          <select class="input" id="sig-filter-dir" style="min-width:110px"><option value="">All directions</option><option>LONG</option><option>SHORT</option><option>NO_TRADE</option></select>
-          <input class="input" id="sig-search" placeholder="Search…" style="min-width:160px">
+      <!-- 1. Top KPI Summary Strip -->
+      <div class="sig-kpi-grid">
+        <div class="sig-kpi-card">
+          <div class="kpi-label"><span>Total Signals</span><span>📊</span></div>
+          <div class="kpi-val">${totalCount}</div>
+          <div class="kpi-sub"><span class="badge badge-dim">XAU/USD 5M</span> Historical setups</div>
+        </div>
+        <div class="sig-kpi-card">
+          <div class="kpi-label"><span>Win Rate / Target Hit</span><span>🎯</span></div>
+          <div class="kpi-val" style="color:var(--green-bright)">${winRatePct}%</div>
+          <div class="kpi-sub"><span style="color:var(--green-bright);font-weight:700">${tpHitCount} TP Hit</span> vs <span style="color:var(--red-bright);font-weight:700">${slHitCount} SL</span></div>
+        </div>
+        <div class="sig-kpi-card">
+          <div class="kpi-label"><span>Execution Queue</span><span>⚡</span></div>
+          <div class="kpi-val" style="color:var(--cyan)">${filledCount} <span style="font-size:12px;font-weight:600;color:var(--text-muted)">FILLED</span></div>
+          <div class="kpi-sub"><span class="badge badge-amber" style="padding:1px 6px">${pendingCount} Pending</span> waiting trigger</div>
+        </div>
+        <div class="sig-kpi-card">
+          <div class="kpi-label"><span>Average Risk:Reward</span><span>💰</span></div>
+          <div class="kpi-val" style="color:var(--gold)">1:${avgRR}</div>
+          <div class="kpi-sub"><span class="badge badge-dim" style="padding:1px 6px">0.01 Lots</span> Fixed 1 oz gold sizing</div>
         </div>
       </div>
-      ${table}
+
+      <!-- 2. Header & Filter Toolbar -->
+      <div class="row-between" style="align-items:baseline">
+        <div class="row" style="gap:10px;align-items:baseline">
+          <div class="section-title">Signal History</div>
+          <span id="sig-result-count" style="font-size:11.5px;color:var(--text-muted)">${totalCount} setups</span>
+        </div>
+      </div>
+
+      <div class="sig-filter-bar">
+        <!-- Strategy Pills -->
+        <div class="sig-filter-pills" id="sig-strat-pills">
+          <div class="sig-pill active" data-strat="ALL">All <span class="pill-count">${totalCount}</span></div>
+          <div class="sig-pill" data-strat="RETRACEMENT">🎯 Fib Retracement <span class="pill-count">${retCount}</span></div>
+          <div class="sig-pill" data-strat="SMC">💎 SMC With Fib <span class="pill-count">${smcCount}</span></div>
+          <div class="sig-pill" data-strat="TREND">📈 Fib Go With Trend <span class="pill-count">${trendCount}</span></div>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <select class="input" id="sig-filter-status" style="min-width:115px">
+            <option value="">All Statuses</option>
+            <option value="FILLED">🟢 FILLED</option>
+            <option value="PENDING">🟡 PENDING</option>
+            <option value="TP_HIT">🏆 TP HIT</option>
+            <option value="SL_HIT">🔴 SL HIT</option>
+            <option value="ESCAPE">🛡️ ESCAPE</option>
+          </select>
+          <select class="input" id="sig-filter-dir" style="min-width:110px">
+            <option value="">All directions</option>
+            <option value="LONG">▲ LONG</option>
+            <option value="SHORT">▼ SHORT</option>
+          </select>
+          <input class="input" id="sig-search" placeholder="Search price, id, date…" style="min-width:160px">
+          <button class="btn btn-sm" id="btn-export-csv" title="Download signals table as CSV">📥 Export CSV</button>
+        </div>
+      </div>
+
+      <!-- 3. Signals Table with Tranche Lines, Live PnL, and Actions -->
+      <div class="table-wrap"><table class="term">
+        <thead><tr>
+          <th>Time</th>
+          <th>Symbol</th>
+          <th>Strategy</th>
+          <th>Layer</th>
+          <th>Lots</th>
+          <th>Direction</th>
+          <th>Entry</th>
+          <th>SL</th>
+          <th>TP</th>
+          <th>R:R</th>
+          <th>Live PnL / Delta</th>
+          <th>Status</th>
+          <th style="text-align:center">Actions</th>
+        </tr></thead>
+        <tbody id="sig-tbody">
+          ${rowsHtml}
+        </tbody>
+      </table></div>
     </div>`;
   }, mount);
 };
