@@ -98,6 +98,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         ls = get_live_service()
         try:
             live_price = await ls.get_latest_price("XAUUSD")
+            if live_price is not None and live_price < 1000.0:
+                live_price = None
         except Exception:  # noqa: BLE001
             live_price = None
 
@@ -277,6 +279,24 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                             finally:
                                 _in_flight_signals.discard(sig_id)
+                    elif existing and existing.state == "OPEN":
+                        # If layer has completed TP in engine, resolve it
+                        if layer.get("state") == "TP_HIT":
+                            existing.state = "CLOSED"
+                            existing.exit_price = tp_px
+                            existing.exit_reason = "TP_HIT"
+                            existing.closed_at = datetime.now(timezone.utc)
+                            pts = round((tp_px - entry_px) if f5.direction == "LONG" else (entry_px - tp_px), 2)
+                            existing.realized_pnl = round(pts * (existing.lot_size or 0.01) * 100.0, 2)
+                            existing.realized_r = round(pts / max(0.1, abs(entry_px - (existing.stop_loss or 0.0))), 2)
+                            await db.commit()
+                            logger.info("[PAPER-AUTO] Engine TP_HIT closed Retracement %s (%s) @ %.2f (+$%.2f)", sig_id, l_key, tp_px, existing.realized_pnl)
+                        elif layer.get("sl") and layer.get("sl") != existing.stop_loss:
+                            eng_sl = float(layer["sl"])
+                            if (f5.direction == "LONG" and eng_sl > (existing.stop_loss or 0.0)) or (f5.direction == "SHORT" and eng_sl < (existing.stop_loss or 999999.0)):
+                                existing.stop_loss = eng_sl
+                                await db.commit()
+                                logger.info("[PAPER-AUTO] Trailing Smart Shield moved %s SL to %.2f", sig_id, eng_sl)
 
         except Exception as exc:  # noqa: BLE001
             logger.warning("[PAPER-SYNC] Fib sync error: %s", exc)
@@ -574,7 +594,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
             logger.warning("[PAPER-SYNC] Fib Trend sync error: %s", exc)
 
         # 4. Monitor OPEN trades against live price and resolve TP / SL
-        if live_price is not None:
+        # CRITICAL: live_price MUST be a valid, realistic Gold price (> $1000)
+        # Never allow live_price == 0.0 or garbage ticks to trigger a false Stop Loss!
+        if live_price is not None and live_price > 1000.0:
             open_trades = (await db.execute(
                 select(PaperTradeModel).where(PaperTradeModel.state == "OPEN")
             )).scalars().all()
@@ -611,7 +633,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
                         closed = True
                         logger.info("[PAPER-AUTO] Closed LONG trade %s at TP: %.2f (+$%.2f)", t.id, t.exit_price, t.realized_pnl)
-                    elif t.stop_loss and live_price <= t.stop_loss:
+                    elif t.stop_loss and live_price <= t.stop_loss and live_price > 1000.0:
                         t.state = "CLOSED"
                         t.exit_price = t.stop_loss
                         t.exit_reason = "BREAKEVEN_HIT" if t.stop_loss >= entry else "SL_HIT"
@@ -623,7 +645,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         logger.info("[PAPER-AUTO] Closed LONG trade %s at %s: %.2f ($%.2f)", t.id, t.exit_reason, t.exit_price, t.realized_pnl)
                 elif t.direction == "SHORT":
                     # For Trend trades: If TP1 reached, shift SL to Breakeven
-                    if is_trend and t.take_profit_1 and live_price <= t.take_profit_1:
+                    if is_trend and t.take_profit_1 and live_price <= t.take_profit_1 and live_price > 1000.0:
                         if t.stop_loss is None or t.stop_loss > entry:
                             t.stop_loss = round(entry, 2)
                             logs = list(t.state_logs or [])
@@ -632,7 +654,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 t.state_logs = logs
                                 logger.info("[PAPER-AUTO] Trend trade %s hit TP1 (%.2f) -> Stop Loss moved to Breakeven (%.2f)", t.id, t.take_profit_1, t.stop_loss)
 
-                    if final_tp and live_price <= final_tp:
+                    if final_tp and live_price <= final_tp and live_price > 1000.0:
                         t.state = "CLOSED"
                         t.exit_price = final_tp
                         t.exit_reason = "TP_HIT"
@@ -642,7 +664,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
                         closed = True
                         logger.info("[PAPER-AUTO] Closed SHORT trade %s at TP: %.2f (+$%.2f)", t.id, t.exit_price, t.realized_pnl)
-                    elif t.stop_loss and live_price >= t.stop_loss:
+                    elif t.stop_loss and live_price >= t.stop_loss and live_price > 1000.0:
                         t.state = "CLOSED"
                         t.exit_price = t.stop_loss
                         t.exit_reason = "BREAKEVEN_HIT" if t.stop_loss <= entry else "SL_HIT"

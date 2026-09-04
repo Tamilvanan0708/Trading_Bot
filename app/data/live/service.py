@@ -768,11 +768,25 @@ class LiveMarketDataService:
     async def get_latest_price(self, symbol: str) -> float:
         # Prefer the live feed's latest tick, then the last tick mid, then fallback.
         tick = await self.registry.latest_tick(symbol)
-        if tick is not None:
+        if tick is not None and tick.mid > 1000.0:
             return tick.mid
-        if self._live_price is not None:
+        if self._live_price is not None and self._live_price > 1000.0:
             return self._live_price
-        return self._last_price
+        if self._last_price > 1000.0:
+            return self._last_price
+        async with self._lock:
+            if self._closed_5m and self._closed_5m[-1].close > 1000.0:
+                return self._closed_5m[-1].close
+            if self._closed_15m and self._closed_15m[-1].close > 1000.0:
+                return self._closed_15m[-1].close
+        if self._historical_provider:
+            try:
+                hist_p = await self._historical_provider.get_latest_price(symbol)
+                if hist_p > 1000.0:
+                    return hist_p
+            except Exception:
+                pass
+        return 0.0
 
     async def data_quality(self) -> DataQualityStatus:
         """Computes the current data-quality state of the live pipeline."""
