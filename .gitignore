@@ -24,6 +24,9 @@ data/*.db-wal
 data/raw/*.csv
 data/processed/*.json
 data/research/*.json
+!data/research/xauusd_15m_full.json
+!data/research/xauusd_15m_real.json
+!data/research/xauusd_5m_2yr.json
 
 # IDE
 .vscode/

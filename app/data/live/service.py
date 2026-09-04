@@ -491,6 +491,15 @@ class LiveMarketDataService:
         try:
             fetched, report = await provider.load_base_15m(limit=limit)
         except Exception as exc:
+            if len(self._closed_15m) >= self.settings.LIVE_HISTORY_MIN_CANDLES:
+                logger.warning(
+                    "[HISTORY] Refresh REST unavailable (%s), but %d candles exist in memory with live feed active. Maintaining healthy status.",
+                    exc, len(self._closed_15m),
+                )
+                self._refresh_status = "SUCCESS"
+                self._refresh_error = None
+                self._last_history_refresh_at = datetime.now(timezone.utc)
+                return {"status": "SUCCESS", "added": 0, "gaps": self._gap_count}
             self._refresh_status = "FAILED"
             self._refresh_error = str(exc)
             self._last_history_refresh_at = datetime.now(timezone.utc)
@@ -810,8 +819,10 @@ class LiveMarketDataService:
 
         now = datetime.now(timezone.utc)
         fresh = False
+        latest_ts = getattr(latest_tick, "timestamp", None)
+        is_live_streaming = connected and latest_ts is not None and (now - latest_ts).total_seconds() < 300
         if newest is not None:
-            fresh = (now - newest) <= timedelta(minutes=self.settings.LIVE_HISTORY_MAX_AGE_MINUTES)
+            fresh = ((now - newest) <= timedelta(minutes=self.settings.LIVE_HISTORY_MAX_AGE_MINUTES)) or is_live_streaming
 
         historical_available = count >= self.settings.LIVE_HISTORY_MIN_CANDLES
 

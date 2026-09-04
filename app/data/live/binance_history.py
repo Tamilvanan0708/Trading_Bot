@@ -73,13 +73,23 @@ class BinanceHistoryProvider(MarketDataProvider):
         backoff = self.settings.BINANCE_HISTORY_RETRY_BACKOFF
         last_exc: Exception | None = None
 
+        user_agents = [
+            "binance-connector-python/3.0.0",
+            "curl/8.4.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        ]
+
         for attempt in range(max_retries + 1):
             url = BINANCE_REST_BASE_URLS[attempt % len(BINANCE_REST_BASE_URLS)]
+            ua = user_agents[attempt % len(user_agents)]
             try:
                 async with httpx.AsyncClient(
                     timeout=timeout,
                     follow_redirects=True,
-                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                    headers={
+                        "User-Agent": ua,
+                        "Accept": "application/json",
+                    },
                 ) as client:
                     res = await client.get(f"{url}/fapi/v1/klines", params=params)
                     if res.status_code != 200:
