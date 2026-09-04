@@ -821,4 +821,17 @@ tr.trend-breakout-row {
   letter-spacing: 0.4px;
 }
 
+/* ---------- Command Center Triple Cockpit Layout ---------- */
+.overview-strat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-4);
+}
+@media (max-width: 1200px) {
+  .overview-strat-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 
