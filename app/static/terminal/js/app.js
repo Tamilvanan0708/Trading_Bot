@@ -929,8 +929,9 @@ Routes["/signals"] = (mount, query) => {
     const totalCount = rows.length;
     const tpHitCount = rows.filter(s => String(s.outcome || "").toUpperCase() === "TP_HIT").length;
     const slHitCount = rows.filter(s => String(s.outcome || "").toUpperCase() === "SL_HIT").length;
-    const closedCount = tpHitCount + slHitCount;
-    const winRatePct = closedCount > 0 ? Math.round((tpHitCount / closedCount) * 100) : (totalCount > 0 ? 78 : 0);
+    const beHitCount = rows.filter(s => ["BREAKEVEN_HIT", "BREAKEVEN"].includes(String(s.outcome || "").toUpperCase())).length;
+    const closedCount = tpHitCount + slHitCount + beHitCount;
+    const winRatePct = (tpHitCount + slHitCount) > 0 ? Math.round((tpHitCount / (tpHitCount + slHitCount)) * 100) : 0;
     const filledCount = rows.filter(s => String(s.outcome || "").toUpperCase() === "FILLED").length;
     const pendingCount = rows.filter(s => String(s.outcome || "").toUpperCase() === "PENDING").length;
     const validRRs = rows.map(s => Number(s.risk_reward)).filter(r => !isNaN(r) && r > 0);
@@ -999,6 +1000,7 @@ Routes["/signals"] = (mount, query) => {
       if (outcomeStatus === "FILLED") statusBadge = '<span class="badge badge-primary" style="background:#00e676;color:#000;font-weight:700">FILLED</span>';
       else if (outcomeStatus === "TP_HIT") statusBadge = '<span class="badge badge-success">TP HIT</span>';
       else if (outcomeStatus === "SL_HIT") statusBadge = '<span class="badge badge-danger">SL HIT</span>';
+      else if (outcomeStatus === "BREAKEVEN_HIT" || outcomeStatus === "BREAKEVEN") statusBadge = '<span class="badge" style="background:rgba(255,171,0,0.15);color:#ffab00;border:1px solid #ffab00;font-weight:700">🛡 BREAKEVEN</span>';
       else if (outcomeStatus === "ESCAPE" || outcomeStatus === "ESCAPE_CLOSED") statusBadge = '<span class="badge" style="background:#ffab00;color:#000">ESCAPE</span>';
 
       // Live PnL / Delta Column
@@ -1015,15 +1017,29 @@ Routes["/signals"] = (mount, query) => {
         const sign = pts >= 0 ? "+" : "-";
         const cls = pts >= 0 ? "profit" : "loss";
         pnlPillHtml = `<span class="pnl-pill ${cls}">${sign}$${absDollars} (${sign}${absPts} pts)</span>`;
-      } else if (outcomeStatus === "TP_HIT" && entry > 0 && tp > 0) {
-        const pts = Math.abs(tp - entry).toFixed(2);
+      } else if (outcomeStatus === "TP_HIT" && entry > 0) {
+        const targetTp = isTrend && s.take_profit_2 && Number(s.take_profit_2) > 0 ? Number(s.take_profit_2) : tp;
+        const pts = Math.abs((targetTp || tp) - entry).toFixed(2);
         pnlPillHtml = `<span class="pnl-pill profit">+$${pts} (+${pts} pts)</span>`;
       } else if (outcomeStatus === "SL_HIT" && entry > 0 && sl > 0) {
         const pts = Math.abs(entry - sl).toFixed(2);
         pnlPillHtml = `<span class="pnl-pill loss">-$${pts} (-${pts} pts)</span>`;
+      } else if (outcomeStatus === "BREAKEVEN_HIT" || outcomeStatus === "BREAKEVEN") {
+        pnlPillHtml = `<span class="pnl-pill neutral">$0.00 (0.00 pts)</span>`;
       } else if (outcomeStatus === "PENDING" && livePrice > 0 && entry > 0) {
         const dist = Math.abs(entry - livePrice).toFixed(2);
         pnlPillHtml = `<span class="pnl-pill neutral">${dist} pts away</span>`;
+      }
+
+      // Dual TP Display for Trend Breakout trades
+      let tpDisplayHtml = `<span class="num up font-mono">${UI.fmt(s.take_profit_1)}</span>`;
+      if (isTrend && s.take_profit_2 && Number(s.take_profit_2) > 0 && Number(s.take_profit_2) !== Number(s.take_profit_1)) {
+        tpDisplayHtml = `
+          <div style="display:inline-flex;flex-direction:column;gap:2px;align-items:flex-end">
+            <div class="badge-tp1-chip" style="font-size:10px;padding:2px 5px">🎯 TP1: $${Number(s.take_profit_1).toFixed(2)}</div>
+            <div class="badge-tp2-chip" style="font-size:10px;padding:2px 5px">🏆 TP2: $${Number(s.take_profit_2).toFixed(2)}</div>
+          </div>
+        `;
       }
 
       // Quick Actions
@@ -1044,7 +1060,7 @@ Routes["/signals"] = (mount, query) => {
         <td>${UI.dirBadge(s.direction)}</td>
         <td class="num font-mono" style="font-weight:700">${UI.fmt(s.entry_price)}</td>
         <td class="num down font-mono">${UI.fmt(s.stop_loss)}</td>
-        <td class="num up font-mono">${UI.fmt(s.take_profit_1)}</td>
+        <td style="text-align:right;padding:6px 10px">${tpDisplayHtml}</td>
         <td class="num">1:${UI.fmt(s.risk_reward, 1)}</td>
         <td>${pnlPillHtml}</td>
         <td>${statusBadge}</td>
@@ -1065,6 +1081,8 @@ Routes["/signals"] = (mount, query) => {
           const out = String(s.outcome || "PENDING").toUpperCase();
           if (activeStatus === "ESCAPE") {
             if (!out.includes("ESCAPE")) return false;
+          } else if (activeStatus === "BREAKEVEN") {
+            if (!out.includes("BREAKEVEN") && !out.includes("BE")) return false;
           } else if (out !== activeStatus) {
             return false;
           }
@@ -1307,6 +1325,7 @@ Routes["/signals"] = (mount, query) => {
             <option value="PENDING">🟡 PENDING</option>
             <option value="TP_HIT">🏆 TP HIT</option>
             <option value="SL_HIT">🔴 SL HIT</option>
+            <option value="BREAKEVEN">🛡️ BREAKEVEN</option>
             <option value="ESCAPE">🛡️ ESCAPE</option>
           </select>
           <select class="input" id="sig-filter-dir" style="min-width:110px">
@@ -3044,14 +3063,18 @@ function renderPaperTradeRows(trades) {
       }
     }
 
+    const rrStr = t.risk_reward ? `1:${Number(t.risk_reward).toFixed(1)}` : '1:1.8';
+
     return `<tr class="${trancheClass} ${outcomeRowClass}">
       <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
       <td>${stratBadge} <span class="badge badge-dim" style="font-size:10px">${t.layer || ''}</span></td>
       <td>${UI.dirBadge(t.direction)}</td>
+      <td class="num font-mono" style="font-weight:600">0.01</td>
       <td class="num font-mono"><b>$${Number(entry).toFixed(2)}</b></td>
       <td class="num font-mono"><b>$${Number(curPx).toFixed(2)}</b></td>
       <td class="num ${ptsCls}"><b>${ptsSign}${absPts} PTS</b></td>
       <td><span class="pnl-pill ${pnlCls}">${pnlSign}$${absPnl}</span></td>
+      <td class="num font-mono" style="color:var(--text-bright)">${rrStr}</td>
       <td style="padding:6px 10px;vertical-align:middle">${slTpContent}</td>
       <td style="vertical-align:middle">${statusBadge}</td>
       <td style="text-align:center">
@@ -3152,7 +3175,7 @@ Routes["/paper"] = (mount) => {
         UI.toast("Export", "No paper trades to export.", "amber");
         return;
       }
-      const headers = ["Opened_At", "Strategy", "Layer", "Direction", "Entry_Price", "Exit_Price", "Running_Pts", "PnL_USD", "SL", "TP1", "TP2", "Status"];
+      const headers = ["Opened_At", "Strategy", "Layer", "Direction", "Lots", "Entry_Price", "Exit_Price", "Running_Pts", "PnL_USD", "Risk_Reward", "SL", "TP1", "TP2", "Status"];
       const lines = [headers.join(",")];
       list.forEach(t => {
         const entry = t.entry_price || t.actual_entry || t.target_entry || "";
@@ -3160,15 +3183,18 @@ Routes["/paper"] = (mount) => {
         const curPx = isClosed ? (t.exit_price || t.current_price || entry) : (t.current_price || t.exit_price || entry);
         const pts = t.running_pts != null ? Number(t.running_pts).toFixed(2) : "0.00";
         const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0))).toFixed(2);
+        const rr = t.risk_reward ? `1:${Number(t.risk_reward).toFixed(1)}` : "1:1.8";
         lines.push([
           `"${t.opened_at || t.created_at || ""}"`,
           `"${t.strategy || ""}"`,
           t.layer || "",
           t.direction || "LONG",
+          "0.01",
           entry,
           curPx,
           pts,
           pnl,
+          `"${rr}"`,
           t.stop_loss || "",
           t.take_profit_1 || t.take_profit || "",
           t.take_profit_2 || "",
@@ -3383,10 +3409,12 @@ Routes["/paper"] = (mount) => {
             <th>Opened</th>
             <th>Strategy / Layer</th>
             <th>Direction</th>
+            <th>Lots</th>
             <th>Entry Price</th>
             <th>Live / Exit</th>
             <th>Running Points</th>
             <th>PnL ($)</th>
+            <th>R:R</th>
             <th>SL / TP</th>
             <th>Status</th>
             <th style="text-align:center">Action</th>

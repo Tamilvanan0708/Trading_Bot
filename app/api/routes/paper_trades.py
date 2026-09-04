@@ -43,10 +43,17 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
         layer_name = "Single (0.68)"
     elif "FIB_RETR" in sig or "RETR" in sig:
         strat_name = "FIB RETRACEMENT"
-        layer_name = "L1" if "L1" in sig else ("L2" if "L2" in sig else ("L3" if "L3" in sig else "L1"))
+        layer_name = "L1 (0.618)" if "L1" in sig else ("L2 (0.500)" if "L2" in sig else ("L3 (0.382)" if "L3" in sig else "L1 (0.618)"))
     else:
         strat_name = "FIB RETRACEMENT"
-        layer_name = "L1"
+        layer_name = "L1 (0.618)"
+
+    target_tp = float(t.take_profit_2 or t.take_profit_1 or 0.0) if "TREND" in strat_name else float(t.take_profit_1 or 0.0)
+    risk_pts = (float(t.risk_amount or 0.0) / max(0.01, lots * 100.0)) if (t.risk_amount and t.risk_amount > 1.0) else abs(entry - float(t.stop_loss or 0.0))
+    reward_pts = abs(target_tp - entry)
+    if risk_pts < 1.5:
+        risk_pts = max(1.5, reward_pts / 1.8)
+    risk_reward = round(reward_pts / risk_pts, 1) if (risk_pts > 0 and reward_pts > 0) else 1.8
 
     return {
         "id": t.id,
@@ -72,6 +79,7 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
         "take_profit_1": t.take_profit_1,
         "take_profit_2": t.take_profit_2,
         "take_profit_3": t.take_profit_3,
+        "risk_reward": risk_reward,
         "opened_at": t.opened_at or t.created_at,
         "exit_price": t.exit_price,
         "exit_reason": t.exit_reason,

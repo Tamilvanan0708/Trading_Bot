@@ -16,7 +16,7 @@ from app.ai.validator import get_ai_validator
 from app.core.constants import MarketBias, SignalDirection, SignalQuality, StrategyType
 from app.core.logging import logger
 from app.data.live.service import get_live_service
-from app.database.models import PaperTradeModel
+from app.database.models import PaperTradeModel, SignalModel
 from app.database.repository import Repository
 from app.notifications.telegram_service import TelegramService
 from app.retracement.multi_tf import get_retracement_multi_tf_service
@@ -57,6 +57,44 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         except Exception as dedup_err:  # noqa: BLE001
             logger.warning("[PAPER-DEDUP] Deduplication check: %s", dedup_err)
 
+        repo = Repository(db)
+
+        # 0b. Catch-up sync: Synchronize closed paper trades with parent signal outcomes
+        try:
+            closed_pts = (await db.execute(
+                select(PaperTradeModel).where(PaperTradeModel.state == "CLOSED")
+            )).scalars().all()
+            dirty = False
+            for cpt in closed_pts:
+                if cpt.signal_id:
+                    sig = await repo.get_signal_by_id(cpt.signal_id)
+                    if sig and sig.outcome in ("FILLED", "OPEN", "PENDING", None) and cpt.exit_reason:
+                        sig.outcome = cpt.exit_reason
+                        sig.final_r = cpt.realized_r
+                        sig.outcome_updated_at = cpt.closed_at or datetime.now(timezone.utc)
+                        if cpt.exit_reason == "TP_HIT":
+                            sig.tp1_hit = True
+                        elif cpt.exit_reason == "SL_HIT":
+                            sig.sl_hit = True
+                        dirty = True
+            # Sanitize any inverted Stop Losses in signals table
+            all_sigs = (await db.execute(select(SignalModel))).scalars().all()
+            for s_item in all_sigs:
+                if s_item.direction == "LONG" and s_item.stop_loss and s_item.entry_price and s_item.stop_loss >= s_item.entry_price:
+                    s_item.stop_loss = round(s_item.entry_price - 8.19, 2)
+                    if s_item.take_profit_1:
+                        s_item.risk_reward = round(abs(s_item.take_profit_1 - s_item.entry_price) / max(0.1, abs(s_item.entry_price - s_item.stop_loss)), 2)
+                    dirty = True
+                elif s_item.direction == "SHORT" and s_item.stop_loss and s_item.entry_price and s_item.stop_loss <= s_item.entry_price:
+                    s_item.stop_loss = round(s_item.entry_price + 8.19, 2)
+                    if s_item.take_profit_1:
+                        s_item.risk_reward = round(abs(s_item.take_profit_1 - s_item.entry_price) / max(0.1, abs(s_item.stop_loss - s_item.entry_price)), 2)
+                    dirty = True
+            if dirty:
+                await db.commit()
+        except Exception as catchup_err:  # noqa: BLE001
+            logger.warning("[PAPER-SYNC] Catch-up signal outcome sync: %s", catchup_err)
+
         ls = get_live_service()
         try:
             live_price = await ls.get_latest_price("XAUUSD")
@@ -65,7 +103,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
         tg = TelegramService()
         validator = get_ai_validator()
-        repo = Repository(db)
 
         # 1. Fib With Retracement 5M: Check each tranche layer
         try:
@@ -83,6 +120,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     l_tp = float(f5.fib_1_000 if l_key == "L1" else (f5.fib_0_618 or 0.0))
                     sig_id = f"FIB_RETR_5M_{l_key}_{int(f5.point_2_price)}"
 
+                    # Determine true Stop Loss:
+                    # In Retracement, initial invalidation is always 0.236 level
+                    base_sl = float(f5.fib_0_236 or 0.0)
+                    layer_sl = float(layer.get("sl") or base_sl or f5.sl_price or 0.0)
+                    if f5.direction == "LONG":
+                        sig_sl = base_sl if (base_sl > 0 and base_sl < l_entry) else (layer_sl if (layer_sl > 0 and layer_sl < l_entry) else round(l_entry - 8.19, 2))
+                    else:
+                        sig_sl = base_sl if (base_sl > 0 and base_sl > l_entry) else (layer_sl if (layer_sl > 0 and layer_sl > l_entry) else round(l_entry + 8.19, 2))
+
                     # Sync Signal Model
                     try:
                         existing_sig = await repo.get_signal_by_id(sig_id)
@@ -95,11 +141,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 "direction": f5.direction,
                                 "timeframe": "5m",
                                 "entry_price": float(l_entry),
-                                "stop_loss": float(f5.sl_price or 0),
+                                "stop_loss": sig_sl,
                                 "take_profit_1": float(l_tp or 0),
                                 "take_profit_2": float(l_tp or 0),
                                 "take_profit_3": float(l_tp or 0),
-                                "risk_reward": round(abs((l_tp or 0) - l_entry) / max(0.1, abs(l_entry - (f5.sl_price or 0))), 2),
+                                "risk_reward": round(abs((l_tp or 0) - l_entry) / max(0.1, abs(l_entry - sig_sl)), 2),
                                 "confidence_score": 92.0,
                                 "signal_quality": "VERY_STRONG",
                                 "market_bias": "BULLISH" if f5.direction == "LONG" else "BEARISH",
@@ -128,7 +174,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         )).scalars().first()
 
                         entry_px = float(layer.get("entry_price") or 0.0)
-                        sl_px = float(layer.get("sl") or f5.sl_price or 0.0)
+                        sl_px = sig_sl
                         tp_px = float(layer.get("tp") or f5.fib_1_000 or 0.0)
 
                         if not existing and entry_px > 0:
@@ -419,7 +465,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             "timeframe": "5m",
                             "entry_price": t_entry,
                             "stop_loss": t_sl,
-                            "take_profit_1": tp2_px,
+                            "take_profit_1": tp1_px if tp1_px > 0 else tp2_px,
                             "take_profit_2": tp2_px,
                             "take_profit_3": tp2_px,
                             "risk_reward": round(abs(tp2_px - t_entry) / max(0.1, abs(t_entry - t_sl)), 2),
@@ -607,8 +653,24 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         closed = True
                         logger.info("[PAPER-AUTO] Closed SHORT trade %s at %s: %.2f ($%.2f)", t.id, t.exit_reason, t.exit_price, t.realized_pnl)
 
-                # Telegram: Dispatch Trade Closed Alert (TP or SL or BE)
+                # Telegram & Signal Sync: Dispatch Trade Closed Alert (TP or SL or BE)
                 if closed:
+                    # Synchronize parent SignalModel outcome
+                    if t.signal_id:
+                        try:
+                            sig = await repo.get_signal_by_id(t.signal_id)
+                            if sig:
+                                sig.outcome = t.exit_reason
+                                sig.final_r = t.realized_r
+                                sig.outcome_updated_at = t.closed_at or datetime.now(timezone.utc)
+                                if t.exit_reason == "TP_HIT":
+                                    sig.tp1_hit = True
+                                elif t.exit_reason == "SL_HIT":
+                                    sig.sl_hit = True
+                                await db.commit()
+                        except Exception as sig_sync_err:
+                            logger.warning("[PAPER-SYNC] Failed to update signal on close: %s", sig_sync_err)
+
                     try:
                         if is_trend:
                             strat_name = "Fib Go With Trend (Breakout)"
