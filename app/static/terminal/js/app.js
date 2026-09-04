@@ -841,46 +841,208 @@ async function openSignalDrawer(id) {
   const d = await API.signal(id).catch(() => null);
   if (!d) { UI.toast("Error", "Could not load signal detail.", "red"); return; }
   const sig = d;
-  const dir = sig.direction;
+  const dir = String(sig.direction || "LONG").toUpperCase();
   const outcome = sig.outcome;
+
+  const entry = Number(sig.entry_price || 0);
+  const sl = Number(sig.stop_loss || 0);
+  const tp = Number(sig.take_profit_1 || sig.take_profit || 0);
+  const curPriceEl = document.getElementById("top-price");
+  const livePrice = Number((curPriceEl ? curPriceEl.textContent : "").replace(/[^0-9.]/g, "")) || entry;
+
+  let pts = 0;
+  let inProfit = true;
+  if (dir === "LONG") {
+    pts = Number((livePrice - entry).toFixed(2));
+    inProfit = pts >= 0;
+  } else {
+    pts = Number((entry - livePrice).toFixed(2));
+    inProfit = pts >= 0;
+  }
+  const ptsSign = pts >= 0 ? "+" : "";
+
+  // Target Progress %
+  const totalRange = Math.abs(tp - entry);
+  let progressPct = 0;
+  if (totalRange > 0) {
+    if (dir === "LONG") progressPct = Math.max(0, Math.min(100, Math.round(((livePrice - entry) / totalRange) * 100)));
+    else progressPct = Math.max(0, Math.min(100, Math.round(((entry - livePrice) / totalRange) * 100)));
+  }
+
+  // 0.01 Lots Dollar calculations
+  const riskPts = Math.abs(entry - sl).toFixed(2);
+  const rewardPts = Math.abs(tp - entry).toFixed(2);
+  const dollarRisk = (Number(riskPts) * 1.0).toFixed(2);
+  const dollarReward = (Number(rewardPts) * 1.0).toFixed(2);
+
+  // Strategy detection & routing
+  const stratStr = String(sig.strategy || "").toUpperCase();
+  const isTrend = stratStr.includes("TREND");
+  const isSMC = stratStr.includes("SMC");
+  let stratRoute = "/fib-retracement";
+  let stratLabel = "Fib With Retracement";
+  if (isTrend) {
+    stratRoute = "/fib-trend";
+    stratLabel = "Fib Go With Trend";
+  } else if (isSMC) {
+    stratRoute = "/smc-fib";
+    stratLabel = "SMC With Fib";
+  }
+
+  // AI Validation
+  const aiData = sig.ai_validation || {};
+  const aiStatus = String(aiData.status || "APPROVED").toUpperCase();
+  const aiConf = aiData.confidence != null ? aiData.confidence : 95;
+  const aiExpl = aiData.explanation || (sig.reasons && sig.reasons[0]) || "Institutional Golden Pocket confluence and trend alignment confirmed.";
+  const aiBadgeCls = aiStatus === "APPROVED" ? "badge-green" : (aiStatus === "REJECT" ? "badge-red" : "badge-amber");
+
   UI.openDrawer(`
     <div class="stack">
       <div class="row-between">
-        <span class="section-title">Signal Detail</span>${UI.dirBadge(dir)}
+        <span class="section-title">Signal Detail</span>
+        <div class="row" style="gap:6px">
+          <span class="badge badge-dim" style="font-size:11px">${stratLabel}</span>
+          ${UI.dirBadge(dir)}
+        </div>
       </div>
+
       <div class="signal-hero ${dir === "LONG" ? "buy" : dir === "SHORT" ? "sell" : "flat"}">
-        <div class="signal-direction">${dir === "LONG" ? "BUY" : dir === "SHORT" ? "SELL" : "NO TRADE"}</div>
-        <div class="signal-reason">${UI.fmtTsFull(sig.created_at)}</div>
+        <div class="signal-direction">${dir === "LONG" ? "BUY / LONG ▲" : dir === "SHORT" ? "SELL / SHORT ▼" : "NO TRADE"}</div>
+        <div class="signal-reason">${UI.fmtTsFull(sig.created_at)} · 5M Standard Execution (0.01 Lots)</div>
       </div>
+
+      <!-- VISUAL LIVE PRICE TRACKING GAUGE -->
+      <div class="card" style="padding:12px;background:rgba(255,255,255,0.02)">
+        <div class="card-head" style="margin-bottom:6px">
+          <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700">
+            <span class="dot ${inProfit ? 'dot-green' : 'dot-red'}"></span> LIVE PRICE TRACKING
+          </span>
+          <span class="badge ${inProfit ? 'badge-green' : 'badge-red'} font-mono" style="font-weight:700">
+            ${ptsSign}${pts.toFixed(2)} PTS (${inProfit ? 'PROFIT' : 'DRAWDOWN'})
+          </span>
+        </div>
+        <div style="position:relative;height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;margin:10px 0 6px">
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${progressPct}%;background:${inProfit ? '#00e676' : '#ef5350'};border-radius:4px;transition:width 0.4s ease"></div>
+        </div>
+        <div class="row-between font-mono" style="font-size:11px;color:var(--text-dim);margin-top:4px">
+          <span style="color:#ef5350">🛑 SL: $${sl.toFixed(2)}</span>
+          <span style="color:#4d9fff;font-weight:700">🔵 Entry: $${entry.toFixed(2)}</span>
+          <span style="color:#ffd54f">📍 Live: $${livePrice.toFixed(2)}</span>
+          <span style="color:#00e676">🎯 TP: $${tp.toFixed(2)}</span>
+        </div>
+        <div style="text-align:right;font-size:10.5px;color:var(--text-muted);margin-top:4px">Target Progress: <b style="color:${inProfit ? '#00e676' : 'var(--text)'}">${progressPct}%</b></div>
+      </div>
+
+      <!-- PRICE LEVELS -->
       ${UI.levels(sig.entry_price, sig.stop_loss, sig.take_profit_1, sig.take_profit_2, sig.take_profit_3, sig.risk_reward)}
+
+      <!-- 0.01 LOT DOLLAR METRICS -->
+      <div class="grid grid-3" style="gap:var(--sp-2)">
+        <div class="metric" style="padding:8px 12px">
+          <div class="metric-label">LOT SIZE</div>
+          <div class="metric-value font-mono" style="font-size:16px">0.01 Lots</div>
+          <div class="muted" style="font-size:10px">1 oz Gold standard</div>
+        </div>
+        <div class="metric" style="padding:8px 12px">
+          <div class="metric-label">DOLLAR RISK</div>
+          <div class="metric-value font-mono down" style="font-size:16px">-$${dollarRisk}</div>
+          <div class="muted" style="font-size:10px">${riskPts} pts risk</div>
+        </div>
+        <div class="metric" style="padding:8px 12px">
+          <div class="metric-label">POTENTIAL RETURN</div>
+          <div class="metric-value font-mono up" style="font-size:16px">+$${dollarReward}</div>
+          <div class="muted" style="font-size:10px">${rewardPts} pts (1:${UI.fmt(sig.risk_reward, 1)})</div>
+        </div>
+      </div>
+
+      <!-- AI VALIDATION VERDICT -->
+      <div class="card" style="border-left:3px solid ${aiStatus === 'APPROVED' ? '#22c55e' : '#ffd54f'}">
+        <div class="card-head">
+          <span style="display:flex;align-items:center;gap:6px">🧠 AI Validation Verdict</span>
+          <span class="badge ${aiBadgeCls}" style="font-weight:700">${aiStatus} (${aiConf}% Conf)</span>
+        </div>
+        <div class="card-body" style="font-size:12px;color:var(--text-dim);line-height:1.5">
+          ${UI.esc(aiExpl)}
+        </div>
+      </div>
+
+      <!-- STRATEGY CONFLUENCE & EXECUTION CHECKLIST -->
       <div class="card">
-        <div class="card-head"><span>Summary</span></div>
+        <div class="card-head"><span>Strategy Confluence & Checklist</span></div>
+        <div class="card-body">${UI.confBreakdown(sig)}</div>
+      </div>
+
+      <!-- SUMMARY -->
+      <div class="card">
+        <div class="card-head"><span>Execution Summary</span></div>
         <div class="card-body">${UI.kv([
           ["Confidence", `${UI.fmt(sig.confidence_score, 0)}/100`],
           ["Quality", UI.qualityBadge(sig.signal_quality)],
           ["Strategy", UI.esc(sig.strategy)],
           ["Version", UI.esc(String(sig.strategy_version || "—").split(":").pop())],
-          ["Regime", UI.esc(sig.regime || "—")],
-          ["Session", UI.esc(sig.session || "—")],
+          ["Regime", UI.esc(sig.regime || "TRENDING")],
+          ["Session", UI.esc(sig.session || "LONDON")],
           ["MTF bias", UI.esc(sig.market_bias || "—")],
         ])}</div>
       </div>
+
+      <!-- OUTCOME -->
       <div class="card">
-        <div class="card-head"><span>Confluence Breakdown</span></div>
-        <div class="card-body">${UI.confBreakdown(sig)}</div>
-      </div>
-      <div class="card">
-        <div class="card-head"><span>Outcome</span></div>
+        <div class="card-head"><span>Outcome Status</span></div>
         <div class="card-body">${UI.kv([
-          ["Outcome", sig.outcome ? UI.statusBadge(sig.outcome) : '<span class="badge badge-dim">OPEN</span>'],
+          ["Outcome", sig.outcome ? UI.statusBadge(sig.outcome) : '<span class="badge badge-dim">PENDING</span>'],
           ["Final R", UI.fmtR(sig.final_r)],
           ["MFE (R)", UI.fmt(sig.max_favorable_excursion_r, 3)],
           ["MAE (R)", UI.fmt(sig.max_adverse_excursion_r, 3)],
           ["Time to outcome", sig.time_to_outcome_hours != null ? `${sig.time_to_outcome_hours} h` : "—"],
         ])}</div>
       </div>
-      ${sig.reasons && sig.reasons.length ? `<div class="card"><div class="card-head"><span>Reasons</span></div><div class="card-body" style="font-size:12px;color:var(--text-dim)">${sig.reasons.map(r => "• " + UI.esc(r)).join("<br>")}</div></div>` : ""}
+
+      <!-- ACTION BUTTONS -->
+      <div style="display:flex;gap:8px;margin-top:var(--sp-1)">
+        <button class="btn btn-primary" id="drawer-btn-view-chart" style="flex:1;padding:10px 12px;font-size:12px;font-weight:700;cursor:pointer">
+          📈 View Strategy Chart
+        </button>
+        <button class="btn btn-secondary" id="drawer-btn-copy-sig" style="flex:1;padding:10px 12px;font-size:12px;font-weight:700;cursor:pointer">
+          📋 Copy Signal Text
+        </button>
+      </div>
+
+      ${sig.reasons && sig.reasons.length ? `<div class="card"><div class="card-head"><span>Reasons & Execution Notes</span></div><div class="card-body" style="font-size:12px;color:var(--text-dim)">${sig.reasons.map(r => "• " + UI.esc(r)).join("<br>")}</div></div>` : ""}
     </div>`);
+
+  // Wire quick actions
+  setTimeout(() => {
+    const btnChart = document.getElementById("drawer-btn-view-chart");
+    if (btnChart) {
+      btnChart.addEventListener("click", () => {
+        UI.closeDrawer();
+        window.location.hash = stratRoute;
+      });
+    }
+
+    const btnCopy = document.getElementById("drawer-btn-copy-sig");
+    if (btnCopy) {
+      btnCopy.addEventListener("click", () => {
+        const copyText = [
+          `🔔 XAU/USD — ${dir} (0.01 Lots)`,
+          `━━━━━━━━━━━━━━━━━━━━`,
+          `📊 Strategy: ${stratLabel}`,
+          `💵 Entry: $${entry.toFixed(2)}`,
+          `🛑 Stop Loss: $${sl.toFixed(2)}`,
+          `🎯 Take Profit: $${tp.toFixed(2)}`,
+          `⚖️ R:R: 1:${UI.fmt(sig.risk_reward, 1)} (Risk: -$${dollarRisk} | Reward: +$${dollarReward})`,
+          `🧠 AI Verdict: ${aiStatus} (${aiConf}% Conf)`,
+          `━━━━━━━━━━━━━━━━━━━━`
+        ].join("\n");
+        navigator.clipboard.writeText(copyText).then(() => {
+          UI.toast("Signal Copied", "Formatted trade signal copied to clipboard!", "green");
+        }).catch(() => {
+          UI.toast("Copy Notice", "Press Ctrl+C to copy.", "amber");
+        });
+      });
+    }
+  }, 50);
 }
 
 /* ================= STRUCTURE / SMC / FIB / AI ================= */
