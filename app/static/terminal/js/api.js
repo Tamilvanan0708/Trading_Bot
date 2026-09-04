@@ -12,26 +12,48 @@ const API = {
       const s = q.toString();
       if (s) url += (url.includes("?") ? "&" : "?") + s;
     }
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) {
-      let detail = res.statusText;
-      try { const j = await res.json(); detail = j.detail || detail; } catch (_) {}
-      throw new Error(detail || `HTTP ${res.status}`);
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      clearTimeout(tid);
+      if (!res.ok) {
+        let detail = res.statusText;
+        try { const j = await res.json(); detail = j.detail || detail; } catch (_) {}
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
+      return res.json();
+    } catch (err) {
+      clearTimeout(tid);
+      if (err.name === "AbortError") throw new Error("Request timed out (server busy)");
+      throw err;
     }
-    return res.json();
   },
   async post(path, body) {
-    const res = await fetch(this.base + path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body || {}),
-    });
-    if (!res.ok) {
-      let detail = res.statusText;
-      try { const j = await res.json(); detail = j.detail || detail; } catch (_) {}
-      throw new Error(detail || `HTTP ${res.status}`);
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(this.base + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+        signal: controller.signal,
+      });
+      clearTimeout(tid);
+      if (!res.ok) {
+        let detail = res.statusText;
+        try { const j = await res.json(); detail = j.detail || detail; } catch (_) {}
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
+      return res.json();
+    } catch (err) {
+      clearTimeout(tid);
+      if (err.name === "AbortError") throw new Error("Request timed out (server busy)");
+      throw err;
     }
-    return res.json();
   },
   // ---- domain endpoints ----
   health: () => API.get("/health"),

@@ -101,9 +101,12 @@ class FibTrendMultiTFMonitor:
             for tf_str, tf_enum in TF_MAP.items():
                 if tf_str not in self.timeframes:
                     continue
-                candles = await provider.get_ohlcv(self.symbol, tf_enum, limit=120)
-                if candles:
-                    results[tf_str] = candles
+                try:
+                    candles = await asyncio.wait_for(provider.get_ohlcv(self.symbol, tf_enum, limit=120), timeout=3.0)
+                    if candles:
+                        results[tf_str] = candles
+                except Exception:
+                    pass
             if results:
                 self.data_status = "HISTORICAL"
                 self._cached_hist_candles = results

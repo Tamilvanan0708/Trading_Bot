@@ -141,9 +141,12 @@ class RetracementMultiTFMonitor:
             provider = BinanceHistoryProvider(get_settings())
             result = {}
             for tf in self.timeframes:
-                candles = await provider.get_ohlcv(self.symbol, TF_MAP[tf], limit=200)
-                if candles:
-                    result[tf] = candles
+                try:
+                    candles = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf], limit=200), timeout=3.0)
+                    if candles:
+                        result[tf] = candles
+                except Exception:
+                    pass
             if result:
                 self._cached_hist_candles = result
                 self._last_bootstrap_ts = now

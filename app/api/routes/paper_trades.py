@@ -71,11 +71,15 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
 @router.get("/paper-trades")
 async def list_paper_trades(limit: int = 50, db: AsyncSession = Depends(get_db_session)):
     """Lists simulated paper trading positions from the database with live running points and PnL."""
-    await sync_strategy_paper_trades(db)
+    import asyncio
+    try:
+        await asyncio.wait_for(sync_strategy_paper_trades(db), timeout=1.5)
+    except Exception:  # noqa: BLE001
+        pass
 
     ls = get_live_service()
     try:
-        live_price = await ls.get_latest_price("XAUUSD")
+        live_price = await asyncio.wait_for(ls.get_latest_price("XAUUSD"), timeout=1.0)
     except Exception:  # noqa: BLE001
         live_price = None
 

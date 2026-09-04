@@ -543,9 +543,9 @@ async def get_fib_retracement_dashboard(
 
     multi_svc = get_retracement_multi_tf_service(symbol)
     try:
-        states = await multi_svc.advance(db)
+        states = await asyncio.wait_for(multi_svc.advance(db), timeout=4.0)
     except Exception as exc:  # noqa: BLE001
-        logger.error("[STRATEGY] fib-retracement advance failed: %s", exc)
+        logger.warning("[STRATEGY] fib-retracement advance timeout/failed: %s", exc)
         states = multi_svc.current_state()
 
     # Persist fallback: fill None slots from DB when feed is unavailable
@@ -589,9 +589,9 @@ async def get_smc_fib_dashboard(
     TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h", "4h"]
     smc_multi = get_smc_fib_multi_tf_service(symbol)
     try:
-        states = await smc_multi.advance(db)
+        states = await asyncio.wait_for(smc_multi.advance(db), timeout=4.0)
     except Exception as exc:  # noqa: BLE001
-        logger.error("[SMC-FIB] multi-tf advance error: %s", exc)
+        logger.warning("[SMC-FIB] multi-tf advance timeout/error: %s", exc)
         states = {tf: smc_multi.slots[tf].engine.to_dict(live_price) for tf in TIMEFRAMES_ORDER}
 
     cascading_active_tf = None
@@ -652,9 +652,9 @@ async def get_fib_trend_dashboard(
     from app.retracement.fib_trend_engine import FibTrendState
     trend_multi = get_fib_trend_multi_tf_service(symbol)
     try:
-        engines = await trend_multi.advance(db)
+        engines = await asyncio.wait_for(trend_multi.advance(db), timeout=4.0)
     except Exception as exc:  # noqa: BLE001
-        logger.error("[FIB-TREND] multi-tf advance error: %s", exc)
+        logger.warning("[FIB-TREND] multi-tf advance timeout/error: %s", exc)
         engines = {tf: trend_multi.slots[tf].engine for tf in trend_multi.timeframes}
 
     tf_cards = {}

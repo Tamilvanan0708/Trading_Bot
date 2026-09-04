@@ -17,6 +17,7 @@ from app.core.constants import MarketBias, SignalDirection, SignalQuality, Strat
 from app.core.logging import logger
 from app.data.live.service import get_live_service
 from app.database.models import PaperTradeModel
+from app.database.repository import Repository
 from app.notifications.telegram_service import TelegramService
 from app.retracement.multi_tf import get_retracement_multi_tf_service
 from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
@@ -64,16 +65,61 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
         tg = TelegramService()
         validator = get_ai_validator()
+        repo = Repository(db)
 
         # 1. Fib With Retracement 5M: Check each tranche layer
         try:
             fib_svc = get_retracement_multi_tf_service("XAUUSD")
             fib_states = await fib_svc.advance(db)
             f5 = fib_states.get("5m")
-            if f5 and getattr(f5, "layers", None):
+            if f5 and getattr(f5, "layers", None) and getattr(f5, "point_2_price", None):
                 for l_key, layer in f5.layers.items():
+                    ratio_val = 0.618 if l_key == "L1" else (0.500 if l_key == "L2" else 0.382)
+                    attr = f"fib_{ratio_val:.3f}".replace(".", "_")
+                    l_entry = getattr(f5, attr, None) or float(layer.get("entry_price") or 0.0)
+                    if not l_entry:
+                        continue
+                    l_state = layer.get("state", "PENDING") if layer else "PENDING"
+                    l_tp = float(f5.fib_1_000 if l_key == "L1" else (f5.fib_0_618 or 0.0))
+                    sig_id = f"FIB_RETR_5M_{l_key}_{int(f5.point_2_price)}"
+
+                    # Sync Signal Model
+                    try:
+                        existing_sig = await repo.get_signal_by_id(sig_id)
+                        if existing_sig is None:
+                            await repo.save_signal({
+                                "id": sig_id,
+                                "symbol": "XAUUSD",
+                                "strategy": "FIB_WITH_RETRACEMENT",
+                                "strategy_version": f"FIB_RETR_V1:{l_key}",
+                                "direction": f5.direction,
+                                "timeframe": "5m",
+                                "entry_price": float(l_entry),
+                                "stop_loss": float(f5.sl_price or 0),
+                                "take_profit_1": float(l_tp or 0),
+                                "take_profit_2": float(l_tp or 0),
+                                "take_profit_3": float(l_tp or 0),
+                                "risk_reward": round(abs((l_tp or 0) - l_entry) / max(0.1, abs(l_entry - (f5.sl_price or 0))), 2),
+                                "confidence_score": 92.0,
+                                "signal_quality": "VERY_STRONG",
+                                "market_bias": "BULLISH" if f5.direction == "LONG" else "BEARISH",
+                                "regime": "TRENDING",
+                                "session": "LONDON",
+                                "outcome": l_state,
+                                "reasons": [
+                                    f"Fib With Retracement {l_key} @ {ratio_val:.3f} on 5M ({f5.direction}), 0.01 lots",
+                                    f"Anchor: ${f5.point_2_price:.2f} | BOS: ${f5.point_1_price:.2f} | Target: ${l_tp:.2f}",
+                                    f"3-Tranche Layer Execution: 0.01 lots each (Escape Plan: close at 0.618)",
+                                ],
+                            })
+                            await db.commit()
+                        elif existing_sig and existing_sig.outcome != l_state:
+                            await repo.update_signal_outcome(sig_id, {"outcome": l_state})
+                            await db.commit()
+                    except Exception:
+                        await db.rollback()
+
                     if layer.get("state") in ("FILLED", "TP_HIT", "ESCAPE_CLOSED"):
-                        sig_id = f"FIB_RETR_5M_{l_key}_{int(f5.point_2_price or 0)}"
                         if sig_id in _in_flight_signals:
                             continue
 
@@ -194,116 +240,152 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
             smc_svc = get_smc_fib_multi_tf_service("XAUUSD")
             smc_states = await smc_svc.advance(db)
             s5 = smc_states.get("5m") or {}
-            if s5.get("is_entry_touched") and s5.get("entry", {}).get("price"):
+            if s5.get("point_2") and s5.get("entry", {}).get("price"):
                 p2 = s5.get("point_2", {}).get("price") or 0.0
-                sig_id = f"SMC_FIB_5M_{int(p2)}"
-                if sig_id in _in_flight_signals:
-                    return
-
-                existing = (await db.execute(
-                    select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
-                )).scalars().first()
-
+                p1 = s5.get("point_1", {}).get("price") or 0.0
+                dir_str = str(s5.get("direction", "SHORT")).upper()
                 entry_px = float(s5.get("entry", {}).get("price") or 0.0)
                 sl_px = float(s5.get("sl", {}).get("price") or 0.0)
-                tp_px = float(s5.get("tp", {}).get("locked") or s5.get("tp", {}).get("dynamic") or 0.0)
-                dir_str = str(s5.get("direction", "LONG")).upper()
+                tp_px = float(s5.get("tp", {}).get("locked") or s5.get("tp", {}).get("dynamic") or s5.get("tp", {}).get("price") or 0.0)
+                sig_id = f"SMC_FIB_5M_{int(p2)}"
+                sig_state = "FILLED" if s5.get("is_entry_touched") else "PENDING"
 
-                if not existing and entry_px > 0:
-                    _in_flight_signals.add(sig_id)
-                    try:
-                        # --- AI VALIDATION GATE ---
-                        ai_approved = True
-                        ai_verdict = "APPROVED"
+                # Sync Signal Model
+                try:
+                    existing_sig = await repo.get_signal_by_id(sig_id)
+                    if existing_sig is None and entry_px > 0:
+                        await repo.save_signal({
+                            "id": sig_id,
+                            "symbol": "XAUUSD",
+                            "strategy": "SMC_WITH_FIB",
+                            "strategy_version": "SMC_WITH_FIB_V1",
+                            "direction": dir_str,
+                            "timeframe": "5m",
+                            "entry_price": entry_px,
+                            "stop_loss": sl_px,
+                            "take_profit_1": tp_px,
+                            "take_profit_2": tp_px,
+                            "take_profit_3": tp_px,
+                            "risk_reward": round(abs(tp_px - entry_px) / max(0.1, abs(entry_px - sl_px)), 2),
+                            "confidence_score": 95.0,
+                            "signal_quality": "VERY_STRONG",
+                            "market_bias": "BEARISH" if dir_str == "SHORT" else "BULLISH",
+                            "regime": "TRENDING",
+                            "session": "LONDON",
+                            "outcome": sig_state,
+                            "reasons": [
+                                f"SMC 0.680 Golden Pocket Single Entry on 5M ({dir_str}), 0.01 lots",
+                                f"Anchor (1.000): ${p2:.2f} | BOS: ${p1:.2f} | Target (0.000): ${tp_px:.2f}",
+                                f"Single Trade Execution: 0.01 Lots (No Layer Tranches)",
+                            ],
+                        })
+                        await db.commit()
+                    elif existing_sig and existing_sig.outcome != sig_state:
+                        await repo.update_signal_outcome(sig_id, {"outcome": sig_state})
+                        await db.commit()
+                except Exception:
+                    await db.rollback()
+
+                if s5.get("is_entry_touched") and sig_id not in _in_flight_signals:
+                    existing = (await db.execute(
+                        select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
+                    )).scalars().first()
+
+                    if not existing and entry_px > 0:
+                        _in_flight_signals.add(sig_id)
                         try:
-                            val_sig = SignalPayload(
+                            # --- AI VALIDATION GATE ---
+                            ai_approved = True
+                            ai_verdict = "APPROVED"
+                            try:
+                                val_sig = SignalPayload(
+                                    signal_id=sig_id,
+                                    instrument="XAUUSD",
+                                    direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
+                                    strategy=StrategyType.SMC,
+                                    timeframe="5m",
+                                    entry=entry_px,
+                                    stop_loss=sl_px,
+                                    take_profit_1=tp_px,
+                                    take_profit_2=tp_px,
+                                    take_profit_3=tp_px,
+                                    risk_reward=round(abs(tp_px - entry_px) / max(0.1, abs(entry_px - sl_px)), 2),
+                                    confidence_score=95.0,
+                                    signal_quality=SignalQuality.VERY_STRONG,
+                                    market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
+                                    fibonacci_levels={
+                                        "0.0": float(s5.get("point_2", {}).get("price") or 0.0),
+                                        "0.680": entry_px,
+                                        "1.0": float(s5.get("point_1", {}).get("price") or 0.0),
+                                    },
+                                    detected_structures={
+                                        "golden_pocket": entry_px,
+                                        "choch_price": float(s5.get("point_1", {}).get("price") or 0.0),
+                                        "anchor_price": float(s5.get("point_2", {}).get("price") or 0.0),
+                                        "bos_confirmation": "FULL_BODY_CLOSE",
+                                    },
+                                    reasons=[
+                                        f"SMC 5M Golden Pocket 0.680 retracement active at ${entry_px:.2f}",
+                                        f"Stop loss protected below swing low at ${sl_px:.2f}",
+                                        f"Take profit targeted at ${tp_px:.2f}",
+                                    ],
+                                )
+                                ai_res = await validator.validate(val_sig)
+                                ai_short = f"{ai_res.status.value} ({ai_res.confidence:.0f}% Conf)"
+                                ai_verdict = f"{ai_res.status.value} (conf={ai_res.confidence:.0f}%) — {ai_res.explanation}"
+                                if ai_res.status.value == "REJECT":
+                                    logger.warning("[AI-GATE] SMC With Fib %s REJECTED by AI Validator: %s", sig_id, ai_res.explanation)
+                                    ai_approved = False
+                            except Exception as ai_err:  # noqa: BLE001
+                                logger.warning("[AI-GATE] AI Validation check error: %s", ai_err)
+                                ai_short = "APPROVED (95% Conf)"
+
+                            if not ai_approved:
+                                return
+
+                            new_trade = PaperTradeModel(
+                                id=str(uuid.uuid4()),
                                 signal_id=sig_id,
-                                instrument="XAUUSD",
-                                direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
-                                strategy=StrategyType.SMC,
-                                timeframe="5m",
-                                entry=entry_px,
+                                symbol="XAUUSD",
+                                direction=dir_str,
+                                state="OPEN",
+                                lot_size=0.01,
+                                risk_amount=round(0.01 * abs(entry_px - sl_px) * 100.0, 2),
+                                target_entry=entry_px,
+                                actual_entry=entry_px,
                                 stop_loss=sl_px,
                                 take_profit_1=tp_px,
                                 take_profit_2=tp_px,
                                 take_profit_3=tp_px,
-                                risk_reward=round(abs(tp_px - entry_px) / max(0.1, abs(entry_px - sl_px)), 2),
-                                confidence_score=95.0,
-                                signal_quality=SignalQuality.VERY_STRONG,
-                                market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
-                                fibonacci_levels={
-                                    "0.0": float(s5.get("point_2", {}).get("price") or 0.0),
-                                    "0.680": entry_px,
-                                    "1.0": float(s5.get("point_1", {}).get("price") or 0.0),
-                                },
-                                detected_structures={
-                                    "golden_pocket": entry_px,
-                                    "choch_price": float(s5.get("point_1", {}).get("price") or 0.0),
-                                    "anchor_price": float(s5.get("point_2", {}).get("price") or 0.0),
-                                    "bos_confirmation": "FULL_BODY_CLOSE",
-                                },
-                                reasons=[
-                                    f"SMC 5M Golden Pocket 0.680 retracement active at ${entry_px:.2f}",
-                                    f"Stop loss protected below swing low at ${sl_px:.2f}",
-                                    f"Take profit targeted at ${tp_px:.2f}",
-                                ],
+                                opened_at=datetime.now(timezone.utc),
+                                realized_pnl=0.0,
+                                realized_r=0.0,
+                                state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "strategy": "SMC_WITH_FIB", "ai_validation": ai_verdict}],
                             )
-                            ai_res = await validator.validate(val_sig)
-                            ai_short = f"{ai_res.status.value} ({ai_res.confidence:.0f}% Conf)"
-                            ai_verdict = f"{ai_res.status.value} (conf={ai_res.confidence:.0f}%) — {ai_res.explanation}"
-                            if ai_res.status.value == "REJECT":
-                                logger.warning("[AI-GATE] SMC With Fib %s REJECTED by AI Validator: %s", sig_id, ai_res.explanation)
-                                ai_approved = False
-                        except Exception as ai_err:  # noqa: BLE001
-                            logger.warning("[AI-GATE] AI Validation check error: %s", ai_err)
-                            ai_short = "APPROVED (95% Conf)"
+                            db.add(new_trade)
+                            await db.commit()
+                            logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (SMC %s) @ %.2f", sig_id, dir_str, entry_px)
 
-                        if not ai_approved:
-                            return
-
-                        new_trade = PaperTradeModel(
-                            id=str(uuid.uuid4()),
-                            signal_id=sig_id,
-                            symbol="XAUUSD",
-                            direction=dir_str,
-                            state="OPEN",
-                            lot_size=0.01,
-                            risk_amount=round(0.01 * abs(entry_px - sl_px) * 100.0, 2),
-                            target_entry=entry_px,
-                            actual_entry=entry_px,
-                            stop_loss=sl_px,
-                            take_profit_1=tp_px,
-                            take_profit_2=tp_px,
-                            take_profit_3=tp_px,
-                            opened_at=datetime.now(timezone.utc),
-                            realized_pnl=0.0,
-                            realized_r=0.0,
-                            state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "strategy": "SMC_WITH_FIB", "ai_validation": ai_verdict}],
-                        )
-                        db.add(new_trade)
-                        await db.commit()
-                        logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (SMC %s) @ %.2f", sig_id, dir_str, entry_px)
-
-                        # Telegram: Dispatch Trade Opened Alert
-                        try:
-                            dir_badge = "BUY / LONG ▲" if dir_str == "LONG" else "SELL / SHORT ▼"
-                            msg = (
-                                f"🚀 *TRADE OPENED (0.01 Lots)*\n"
-                                f"━━━━━━━━━━━━━━━━━━━━\n"
-                                f"📊 *Strategy:* SMC With Fib (0.680)\n"
-                                f"🪙 *Symbol:* XAU/USD (5M)\n"
-                                f"📈 *Direction:* {dir_badge}\n"
-                                f"💵 *Entry:* ${entry_px:.2f}\n"
-                                f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
-                                f"🎯 *Take Profit:* ${tp_px:.2f}\n"
-                                f"🧠 *AI Verdict:* {ai_short}\n"
-                                f"━━━━━━━━━━━━━━━━━━━━"
-                            )
-                            await tg.send_raw_alert(msg)
-                        except Exception as tg_err:  # noqa: BLE001
-                            logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
-                    finally:
-                        _in_flight_signals.discard(sig_id)
+                            # Telegram: Dispatch Trade Opened Alert
+                            try:
+                                dir_badge = "BUY / LONG ▲" if dir_str == "LONG" else "SELL / SHORT ▼"
+                                msg = (
+                                    f"🚀 *TRADE OPENED (0.01 Lots)*\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"📊 *Strategy:* SMC With Fib (0.680)\n"
+                                    f"🪙 *Symbol:* XAU/USD (5M)\n"
+                                    f"📈 *Direction:* {dir_badge}\n"
+                                    f"💵 *Entry:* ${entry_px:.2f}\n"
+                                    f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
+                                    f"🎯 *Take Profit:* ${tp_px:.2f}\n"
+                                    f"🧠 *AI Verdict:* {ai_short}\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━"
+                                )
+                                await tg.send_raw_alert(msg)
+                            except Exception as tg_err:  # noqa: BLE001
+                                logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
+                        finally:
+                            _in_flight_signals.discard(sig_id)
 
         except Exception as exc:  # noqa: BLE001
             logger.warning("[PAPER-SYNC] SMC sync error: %s", exc)
@@ -315,18 +397,58 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
             trend_svc = get_fib_trend_multi_tf_service("XAUUSD")
             trend_states = await trend_svc.advance(db)
             t5 = trend_states.get("5m")
-            if t5 and t5.state in (FibTrendState.TRADE_ACTIVE, FibTrendState.COMPLETED) and t5.entry_price:
+            if t5 and t5.point_0_price and (t5.entry_price or t5.trigger_breakout_price):
                 dir_str = "LONG" if t5.direction == SignalDirection.LONG else "SHORT"
                 sig_id = f"FIB_TREND_5M_{dir_str}_{int(t5.point_0_price or 0)}"
-                if sig_id not in _in_flight_signals:
+                t_state = "FILLED" if t5.state in (FibTrendState.TRADE_ACTIVE, FibTrendState.COMPLETED) else "PENDING"
+                t_entry = float(t5.entry_price or t5.trigger_breakout_price or 0.0)
+                t_sl = float(t5.sl_price or t5.fib_0_236 or 0.0)
+                tp1_px = float(t5.fib_1_000 or 0.0)
+                tp2_px = float(t5.tp_price or t5.fib_1_618 or 0.0)
+
+                # Sync Signal Model
+                try:
+                    existing_sig = await repo.get_signal_by_id(sig_id)
+                    if existing_sig is None and t_entry > 0:
+                        await repo.save_signal({
+                            "id": sig_id,
+                            "symbol": "XAUUSD",
+                            "strategy": "FIB_GO_WITH_TREND",
+                            "strategy_version": "FIB_TREND_V1",
+                            "direction": dir_str,
+                            "timeframe": "5m",
+                            "entry_price": t_entry,
+                            "stop_loss": t_sl,
+                            "take_profit_1": tp2_px,
+                            "take_profit_2": tp2_px,
+                            "take_profit_3": tp2_px,
+                            "risk_reward": round(abs(tp2_px - t_entry) / max(0.1, abs(t_entry - t_sl)), 2),
+                            "confidence_score": 95.0,
+                            "signal_quality": "VERY_STRONG",
+                            "market_bias": "BULLISH" if dir_str == "LONG" else "BEARISH",
+                            "regime": "TRENDING",
+                            "session": "LONDON",
+                            "outcome": t_state,
+                            "reasons": [
+                                f"Fib Go With Trend 9/21 EMA ({dir_str}), 0.01 lots",
+                                f"Anchor P0: ${t5.point_0_price:.2f} | Peak P1: ${t5.point_1_price:.2f} | TP (1.618): ${tp2_px:.2f}",
+                                f"Rule 8 Breakout Trigger Price: ${t_entry:.2f}",
+                            ],
+                        })
+                        await db.commit()
+                    elif existing_sig and existing_sig.outcome != t_state:
+                        await repo.update_signal_outcome(sig_id, {"outcome": t_state})
+                        await db.commit()
+                except Exception:
+                    await db.rollback()
+
+                if t5.state in (FibTrendState.TRADE_ACTIVE, FibTrendState.COMPLETED) and t_entry > 0 and sig_id not in _in_flight_signals:
                     existing = (await db.execute(
                         select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
                     )).scalars().first()
 
-                    entry_px = float(t5.entry_price or 0.0)
-                    sl_px = float(t5.sl_price or t5.fib_0_236 or 0.0)
-                    tp1_px = float(t5.fib_1_000 or 0.0)
-                    tp2_px = float(t5.tp_price or t5.fib_1_618 or 0.0)
+                    entry_px = t_entry
+                    sl_px = t_sl
 
                     if not existing and entry_px > 0:
                         _in_flight_signals.add(sig_id)

@@ -237,16 +237,21 @@ async function pollPrice() {
 
 /* ---------------- Shared: helper to fetch + render with states ---------------- */
 async function renderWith(loader, renderer, mount) {
+  if (!mount) mount = document.getElementById("view-mount");
+  if (!mount) return null;
   mount.innerHTML = '<div class="stack"><div class="skel"></div><div class="skel" style="width:80%"></div><div class="skel" style="width:60%"></div></div>';
   try {
-    const data = await loader();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Connection timed out. Retrying…")), 8500)
+    );
+    const data = await Promise.race([loader(), timeoutPromise]);
     const html = await renderer(data);
     mount.innerHTML = html;
     mount.querySelectorAll("canvas[data-chart]").forEach(runCanvas);
     return data;
   } catch (err) {
     mount.innerHTML = "";
-    mount.appendChild(UI.state("Data Unavailable", UI.esc(err.message), "", true));
+    mount.appendChild(UI.state("Data Unavailable", UI.esc(err.message || "Failed to load view"), "", true));
     return null;
   }
 }
@@ -767,10 +772,13 @@ Routes["/signals"] = (mount, query) => {
       <tbody>
         ${rows.map(s => {
           const isSMC = String(s.strategy || "").toUpperCase().includes("SMC");
+          const isTrend = String(s.strategy || "").toUpperCase().includes("TREND");
           const ver = String(s.strategy_version || "");
           let layerBadge = "";
           if (isSMC) {
             layerBadge = '<span class="badge badge-dim" style="font-size:10px;border:1px solid rgba(255,255,255,0.15)">Single (0.68)</span>';
+          } else if (isTrend) {
+            layerBadge = '<span class="badge" style="background:#00bcd4;color:#000;font-weight:700">Breakout (0.618)</span>';
           } else {
             if (ver.includes("L2") || (s.reasons || []).some(r => String(r).includes("L2"))) {
               layerBadge = '<span class="badge" style="background:#ff6d00;color:#fff;font-weight:700">L2 (0.50)</span>';
@@ -781,9 +789,12 @@ Routes["/signals"] = (mount, query) => {
             }
           }
 
-          const stratBadge = isSMC
-            ? '<span class="badge" style="background:rgba(38,166,154,0.15);color:#26a69a;border:1px solid #26a69a;font-weight:600">💎 SMC With Fib</span>'
-            : '<span class="badge" style="background:rgba(171,71,188,0.15);color:#ab47bc;border:1px solid #ab47bc;font-weight:600">🎯 Fib Retracement</span>';
+          let stratBadge = '<span class="badge" style="background:rgba(171,71,188,0.15);color:#ab47bc;border:1px solid #ab47bc;font-weight:600">🎯 Fib Retracement</span>';
+          if (isSMC) {
+            stratBadge = '<span class="badge" style="background:rgba(38,166,154,0.15);color:#26a69a;border:1px solid #26a69a;font-weight:600">💎 SMC With Fib</span>';
+          } else if (isTrend) {
+            stratBadge = '<span class="badge" style="background:rgba(0,188,212,0.15);color:#00e5ff;border:1px solid #00e5ff;font-weight:600">📈 Fib Go With Trend</span>';
+          }
 
           const outcomeStatus = String(s.outcome || "PENDING").toUpperCase();
           let statusBadge = '<span class="badge badge-dim">PENDING</span>';
@@ -2777,10 +2788,18 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   }
 
   renderWith(async () => {
-    const r = await fetch(endpoint);
-    if (!r.ok) throw new Error("Strategy endpoint failed: " + r.status);
-    const strat = await r.json();
-    return { strat };
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 6000);
+    try {
+      const r = await fetch(endpoint, { signal: controller.signal });
+      clearTimeout(tid);
+      if (!r.ok) throw new Error("Strategy endpoint failed: " + r.status);
+      const strat = await r.json();
+      return { strat };
+    } catch (err) {
+      clearTimeout(tid);
+      throw err;
+    }
   }, (data) => {
     const d = data.strat || {};
     const price = d.live_price || 4428.0;
