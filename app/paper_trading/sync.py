@@ -123,13 +123,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     sig_id = f"FIB_RETR_5M_{l_key}_{int(f5.point_2_price)}"
 
                     # Determine true Stop Loss:
-                    # In Retracement, initial invalidation is always 0.236 level
+                    # Initial invalidation is 0.236 level, but trailed SL (layer_sl) takes priority if tighter!
                     base_sl = float(f5.fib_0_236 or 0.0)
-                    layer_sl = float(layer.get("sl") or base_sl or f5.sl_price or 0.0)
+                    layer_sl = float(layer.get("sl") or f5.sl_price or base_sl or 0.0)
                     if f5.direction == "LONG":
-                        sig_sl = base_sl if (base_sl > 0 and base_sl < l_entry) else (layer_sl if (layer_sl > 0 and layer_sl < l_entry) else round(l_entry - 8.19, 2))
+                        candidates = [s for s in (layer_sl, base_sl) if 0 < s < l_entry]
+                        sig_sl = max(candidates) if candidates else round(l_entry - 8.19, 2)
                     else:
-                        sig_sl = base_sl if (base_sl > 0 and base_sl > l_entry) else (layer_sl if (layer_sl > 0 and layer_sl > l_entry) else round(l_entry + 8.19, 2))
+                        candidates = [s for s in (layer_sl, base_sl) if s > l_entry]
+                        sig_sl = min(candidates) if candidates else round(l_entry + 8.19, 2)
 
                     # Sync Signal Model
                     try:
@@ -280,7 +282,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             finally:
                                 _in_flight_signals.discard(sig_id)
                     elif existing and existing.state == "OPEN":
-                        # If layer has completed TP in engine, resolve it
+                        # 1. Update Trailing Smart Shield if layer has tighter SL
+                        if layer.get("sl") and layer.get("sl") != existing.stop_loss:
+                            eng_sl = float(layer["sl"])
+                            if (f5.direction == "LONG" and eng_sl > (existing.stop_loss or 0.0)) or (f5.direction == "SHORT" and eng_sl < (existing.stop_loss or 999999.0)):
+                                existing.stop_loss = eng_sl
+                                await db.commit()
+                                logger.info("[PAPER-AUTO] Trailing Smart Shield moved %s SL to %.2f", sig_id, eng_sl)
+
+                        # 2. If layer has completed TP in engine, resolve it
                         if layer.get("state") == "TP_HIT":
                             existing.state = "CLOSED"
                             existing.exit_price = tp_px
@@ -291,12 +301,19 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             existing.realized_r = round(pts / max(0.1, abs(entry_px - (existing.stop_loss or 0.0))), 2)
                             await db.commit()
                             logger.info("[PAPER-AUTO] Engine TP_HIT closed Retracement %s (%s) @ %.2f (+$%.2f)", sig_id, l_key, tp_px, existing.realized_pnl)
-                        elif layer.get("sl") and layer.get("sl") != existing.stop_loss:
-                            eng_sl = float(layer["sl"])
-                            if (f5.direction == "LONG" and eng_sl > (existing.stop_loss or 0.0)) or (f5.direction == "SHORT" and eng_sl < (existing.stop_loss or 999999.0)):
-                                existing.stop_loss = eng_sl
-                                await db.commit()
-                                logger.info("[PAPER-AUTO] Trailing Smart Shield moved %s SL to %.2f", sig_id, eng_sl)
+
+                            # 3. Smart Shield Immediate Trigger: When L2 or L3 hits TP, IMMEDIATELY trail L1 SL to 0.500
+                            if l_key in ("L2", "L3"):
+                                l1_sig_id = f"FIB_RETR_5M_L1_{int(f5.point_2_price)}"
+                                l1_trade = (await db.execute(
+                                    select(PaperTradeModel).where(PaperTradeModel.signal_id == l1_sig_id, PaperTradeModel.state == "OPEN")
+                                )).scalars().first()
+                                if l1_trade:
+                                    new_l1_sl = float(f5.fib_0_500 or 0.0)
+                                    if (f5.direction == "LONG" and new_l1_sl > (l1_trade.stop_loss or 0.0)) or (f5.direction == "SHORT" and 0.0 < new_l1_sl < (l1_trade.stop_loss or 999999.0)):
+                                        l1_trade.stop_loss = new_l1_sl
+                                        await db.commit()
+                                        logger.info("[PAPER-AUTO] Smart Shield: L%s TP hit -> immediately trailed L1 SL to %.2f", l_key[-1], new_l1_sl)
 
         except Exception as exc:  # noqa: BLE001
             logger.warning("[PAPER-SYNC] Fib sync error: %s", exc)

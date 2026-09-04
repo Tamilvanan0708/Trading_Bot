@@ -220,3 +220,62 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
         "unrealized_pnl_usd": unrealized_pnl,
         "active_positions": len(active),
     }
+
+
+@router.post("/paper-trades/repair")
+@router.get("/paper-trades/repair")
+async def repair_paper_trades(db: AsyncSession = Depends(get_db_session)):
+    """Repairs false stop loss executions on Fib Retracement L1 trades.
+    
+    If an L1 layer was stopped out at 0.236 while L2 in the same setup reached TP,
+    L1's stop loss should have been trailed to 0.500 (canceling out L2 profit for breakeven),
+    rather than taking a full 11+ pt loss.
+    """
+    from sqlalchemy import select
+    from app.database.models import PaperTradeModel, SignalModel
+
+    trades = (await db.execute(select(PaperTradeModel))).scalars().all()
+    repaired_count = 0
+
+    # Group by base setup (e.g. FIB_RETR_5M_L1_4420 -> base: 4420)
+    for t in trades:
+        sig = t.signal_id or ""
+        if "FIB_RETR" in sig and "_L1_" in sig and t.state == "CLOSED" and t.exit_reason == "SL_HIT":
+            base_anchor = sig.split("_L1_")[-1]
+            l2_sig = f"FIB_RETR_5M_L2_{base_anchor}"
+            l2_trade = next((other for other in trades if other.signal_id == l2_sig), None)
+
+            if l2_trade and l2_trade.exit_reason == "TP_HIT":
+                # L2 reached TP! L1's SL should have been trailed to L2's entry price (0.500 level)
+                l2_entry = float(l2_trade.actual_entry or l2_trade.target_entry or 0.0)
+                l1_entry = float(t.actual_entry or t.target_entry or 0.0)
+                if l2_entry > 0 and l1_entry > 0:
+                    # L1 SL trailed to L2 entry
+                    t.stop_loss = l2_entry
+                    t.exit_price = l2_entry
+                    pts = (l2_entry - l1_entry) if t.direction == "LONG" else (l1_entry - l2_entry)
+                    t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
+                    t.realized_r = -1.0
+                    repaired_count += 1
+
+    if repaired_count > 0:
+        await db.commit()
+
+    return {
+        "status": "SUCCESS",
+        "repaired_trades": repaired_count,
+        "message": f"Successfully repaired {repaired_count} trades with proper 0.500 Smart Shield trailing.",
+    }
+
+
+@router.post("/paper-trades/reset")
+async def reset_paper_trades(db: AsyncSession = Depends(get_db_session)):
+    """Resets paper trading history back to initial state ($10,000 balance)."""
+    from sqlalchemy import text
+    await db.execute(text("DELETE FROM paper_trades"))
+    await db.execute(text("UPDATE signals SET outcome = 'PENDING' WHERE outcome IN ('TP_HIT', 'SL_HIT', 'BREAKEVEN_HIT')"))
+    await db.commit()
+    return {
+        "status": "SUCCESS",
+        "message": "Paper trades reset to clean slate. Account balance restored to $10,000.",
+    }
