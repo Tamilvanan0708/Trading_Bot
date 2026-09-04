@@ -856,10 +856,11 @@ Routes["/signals"] = (mount, query) => {
 
       if (outcomeStatus === "FILLED" && livePrice > 0 && entry > 0) {
         const pts = dir === "LONG" ? (livePrice - entry) : (entry - livePrice);
-        const sign = pts >= 0 ? "+" : "";
-        const dollars = (pts * 1.0).toFixed(2);
+        const absPts = Math.abs(pts).toFixed(2);
+        const absDollars = (Math.abs(pts) * 1.0).toFixed(2);
+        const sign = pts >= 0 ? "+" : "-";
         const cls = pts >= 0 ? "profit" : "loss";
-        pnlPillHtml = `<span class="pnl-pill ${cls}">${sign}$${dollars} (${sign}${pts.toFixed(2)} pts)</span>`;
+        pnlPillHtml = `<span class="pnl-pill ${cls}">${sign}$${absDollars} (${sign}${absPts} pts)</span>`;
       } else if (outcomeStatus === "TP_HIT" && entry > 0 && tp > 0) {
         const pts = Math.abs(tp - entry).toFixed(2);
         pnlPillHtml = `<span class="pnl-pill profit">+$${pts} (+${pts} pts)</span>`;
@@ -1113,7 +1114,7 @@ Routes["/signals"] = (mount, query) => {
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Win Rate / Target Hit</span><span>🎯</span></div>
           <div class="kpi-val" style="color:var(--green-bright)">${winRatePct}%</div>
-          <div class="kpi-sub"><span style="color:var(--green-bright);font-weight:700">${tpHitCount} TP Hit</span> vs <span style="color:var(--red-bright);font-weight:700">${slHitCount} SL</span></div>
+          <div class="kpi-sub"><span style="color:var(--green-bright);font-weight:700">${tpHitCount} TP</span> • <span style="color:var(--red-bright);font-weight:700">${slHitCount} SL</span> • <span style="color:var(--cyan);font-weight:700">${filledCount} Active</span></div>
         </div>
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Execution Queue</span><span>⚡</span></div>
@@ -2812,7 +2813,7 @@ Routes["/observation"] = (mount) => {
 
 function renderPaperTradeRows(trades) {
   if (!trades || !trades.length) {
-    return '<tr><td colspan="9" style="text-align:center;padding:32px 14px;color:var(--text-muted);font-size:13px">⏳ <b>No paper trades active yet.</b><br><span style="font-size:11px">A 0.01 lot paper trade is automatically opened with live PnL and running point tracking as soon as a 5M strategy entry (Fib L1/L2/L3 or SMC 0.680) is touched.</span></td></tr>';
+    return '<tr><td colspan="10" style="text-align:center;padding:32px 14px;color:var(--text-muted);font-size:13px">⏳ <b>No matching paper trades.</b><br><span style="font-size:11px">A 0.01 lot paper trade is automatically opened with live PnL and running point tracking as soon as a 5M strategy entry is touched.</span></td></tr>';
   }
   return trades.map(t => {
     const entry = t.entry_price || t.actual_entry || t.target_entry || 0;
@@ -2820,24 +2821,52 @@ function renderPaperTradeRows(trades) {
     const curPx = isClosed ? (t.exit_price || t.current_price || entry) : (t.current_price || t.exit_price || entry);
     const pts = Number(t.running_pts != null ? t.running_pts : 0);
     const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0)));
-    const ptsSign = pts >= 0 ? "+" : "";
-    const pnlSign = pnl >= 0 ? "+$" : "-$";
+    const absPts = Math.abs(pts).toFixed(2);
+    const absPnl = Math.abs(pnl).toFixed(2);
+    const ptsSign = pts >= 0 ? "+" : "-";
+    const pnlSign = pnl >= 0 ? "+" : "-";
     const ptsCls = pts >= 0 ? "up" : "down";
-    const pnlCls = pnl >= 0 ? "up" : "down";
-    const stratBadge = `<span class="badge ${t.strategy === 'SMC WITH FIB' ? 'badge-primary' : 'badge-blue'}" style="font-size:11px">${t.strategy || 'STRATEGY'} <b style="color:#fff">${t.layer || ''}</b></span>`;
+    const pnlCls = pnl >= 0 ? "profit" : "loss";
+
+    const stratStr = String(t.strategy || "").toUpperCase();
+    const isSMC = stratStr.includes("SMC");
+    const isTrend = stratStr.includes("TREND");
+    let stratBadge = '<span class="badge" style="background:rgba(171,71,188,0.15);color:#ab47bc;border:1px solid #ab47bc;font-weight:600">🎯 Fib Retracement</span>';
+    let stratRoute = "/fib-retracement";
+    let trancheClass = "tranche-bundle-l1";
+
+    if (isSMC) {
+      stratBadge = '<span class="badge" style="background:rgba(38,166,154,0.15);color:#26a69a;border:1px solid #26a69a;font-weight:600">💎 SMC With Fib</span>';
+      stratRoute = "/smc-fib";
+      trancheClass = "smc-single-row";
+    } else if (isTrend) {
+      stratBadge = '<span class="badge" style="background:rgba(0,188,212,0.15);color:#00e5ff;border:1px solid #00e5ff;font-weight:600">📈 Fib Go With Trend</span>';
+      stratRoute = "/fib-trend";
+      trancheClass = "trend-breakout-row";
+    } else {
+      if (String(t.layer || "").includes("L2")) trancheClass = "tranche-bundle-l2";
+      else if (String(t.layer || "").includes("L3")) trancheClass = "tranche-bundle-l3";
+      else trancheClass = "tranche-bundle-l1";
+    }
+
     const sl = t.stop_loss ? `$${Number(t.stop_loss).toFixed(2)}` : '—';
     const tp = t.take_profit_1 || t.take_profit ? `$${Number(t.take_profit_1 || t.take_profit).toFixed(2)}` : '—';
 
-    return `<tr>
+    return `<tr class="${trancheClass}">
       <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
-      <td>${stratBadge}</td>
+      <td>${stratBadge} <span class="badge badge-dim" style="font-size:10px">${t.layer || ''}</span></td>
       <td>${UI.dirBadge(t.direction)}</td>
-      <td class="num"><b>$${Number(entry).toFixed(2)}</b></td>
-      <td class="num"><b>$${Number(curPx).toFixed(2)}</b></td>
-      <td class="num ${ptsCls}"><b>${ptsSign}${pts.toFixed(2)} PTS</b></td>
-      <td class="num ${pnlCls}"><b>${pnlSign}${Math.abs(pnl).toFixed(2)}</b></td>
+      <td class="num font-mono"><b>$${Number(entry).toFixed(2)}</b></td>
+      <td class="num font-mono"><b>$${Number(curPx).toFixed(2)}</b></td>
+      <td class="num ${ptsCls}"><b>${ptsSign}${absPts} PTS</b></td>
+      <td><span class="pnl-pill ${pnlCls}">${pnlSign}$${absPnl}</span></td>
       <td style="font-size:11px;color:var(--text-dim)">SL: ${sl}<br>TP: ${tp}</td>
       <td>${UI.statusBadge(t.status || t.state || t.exit_reason || "OPEN")}</td>
+      <td style="text-align:center">
+        <div class="row-actions-wrap" style="justify-content:center">
+          <button class="btn-mini-action btn-pt-chart" data-route="${stratRoute}" title="Open Strategy Chart">📈</button>
+        </div>
+      </td>
     </tr>`;
   }).join("");
 }
@@ -2847,99 +2876,323 @@ Routes["/paper"] = (mount) => {
   let _paperTimer = null;
   let isUpdating = false;
 
-  async function updatePaperInPlace() {
-    if (AutoRefresh.speed === 0 || isUpdating) return;
-    isUpdating = true;
-    try {
-      const [acctRes, ptRes] = await Promise.allSettled([API.account(), API.paperTrades()]);
-      const acct = acctRes.status === "fulfilled" ? acctRes.value : null;
-      const raw = ptRes.status === "fulfilled" ? ptRes.value : null;
-      if (acct) {
-        const elB = document.getElementById("paper-metric-balance");
-        const elE = document.getElementById("paper-metric-equity");
-        const elR = document.getElementById("paper-metric-rpnl");
-        const elU = document.getElementById("paper-metric-upnl");
-        if (elB && acct.current_balance != null) elB.textContent = "$" + UI.fmt(acct.current_balance, 2);
-        if (elE && acct.equity != null) elE.textContent = "$" + UI.fmt(acct.equity, 2);
-        if (elR && acct.realized_pnl_usd != null) elR.textContent = UI.fmt(acct.realized_pnl_usd, 2);
-        if (elU && acct.unrealized_pnl_usd != null) elU.textContent = UI.fmt(acct.unrealized_pnl_usd, 2);
-      }
-      const trades = Array.isArray(raw) ? raw : (raw && raw.database_trades) || [];
-      const tbody = document.getElementById("paper-trades-tbody");
-      if (tbody) {
-        tbody.innerHTML = renderPaperTradeRows(trades);
-      }
-    } catch (_) {}
-    finally {
-      isUpdating = false;
-    }
-  }
-
   renderWith(async () => {
     const [acct, pt, ov] = await Promise.allSettled([API.account(), API.paperTrades(), API.overview("XAUUSD")]);
-    return { acct: acct.status === "fulfilled" ? acct.value : null, pt: pt.status === "fulfilled" ? pt.value : [], ov: ov.status === "fulfilled" ? ov.value : null };
+    return {
+      acct: acct.status === "fulfilled" ? acct.value : null,
+      pt: pt.status === "fulfilled" ? pt.value : [],
+      ov: ov.status === "fulfilled" ? ov.value : null
+    };
   }, (d) => {
     const acct = d.acct || {};
     const raw = d.pt;
-    const trades = Array.isArray(raw) ? raw : (raw && raw.database_trades) || [];
+    let currentTrades = Array.isArray(raw) ? raw : (raw && raw.database_trades) || [];
     const safety = (d.ov && d.ov.safety) || {};
     const blocked = safety.headline === "PAPER_TRADING_BLOCKED" || safety.headline === "SIGNALS_BLOCKED";
     const obsMode = safety.observation_mode || false;
+
+    // Filters state
+    let activeStrat = "ALL";
+    let activeOutcome = "";
+    let activeDir = "";
+    let searchQuery = "";
+
+    function getFilteredTrades() {
+      const q = searchQuery.trim().toLowerCase();
+      return currentTrades.filter(t => {
+        const st = String(t.strategy || "").toUpperCase();
+        if (activeStrat === "RETRACEMENT" && (st.includes("SMC") || st.includes("TREND"))) return false;
+        if (activeStrat === "SMC" && !st.includes("SMC")) return false;
+        if (activeStrat === "TREND" && !st.includes("TREND")) return false;
+
+        const isClosed = t.status === "CLOSED" || t.state === "CLOSED";
+        const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0)));
+
+        if (activeOutcome === "WIN" && (!isClosed || pnl <= 0)) return false;
+        if (activeOutcome === "LOSS" && (!isClosed || pnl >= 0)) return false;
+        if (activeOutcome === "OPEN" && isClosed) return false;
+
+        if (activeDir && String(t.direction || "").toUpperCase() !== activeDir) return false;
+
+        if (q) {
+          const str = `${t.id || ''} ${t.strategy || ''} ${t.layer || ''} ${t.direction || ''} ${t.entry_price || ''} ${t.status || ''}`.toLowerCase();
+          if (!str.includes(q)) return false;
+        }
+        return true;
+      });
+    }
+
+    function wireChartButtons() {
+      const tbody = mount.querySelector("#paper-trades-tbody");
+      if (!tbody) return;
+      tbody.querySelectorAll(".btn-pt-chart").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (btn.dataset.route) location.hash = btn.dataset.route;
+        });
+      });
+    }
+
+    function updateTableView() {
+      const filtered = getFilteredTrades();
+      const tbody = mount.querySelector("#paper-trades-tbody");
+      const countEl = mount.querySelector("#paper-trade-count");
+      if (countEl) countEl.textContent = `${filtered.length} of ${currentTrades.length} trades`;
+      if (tbody) {
+        tbody.innerHTML = renderPaperTradeRows(filtered);
+        wireChartButtons();
+      }
+    }
+
+    function exportPaperTradesCSV() {
+      const list = getFilteredTrades();
+      if (!list || !list.length) {
+        UI.toast("Export", "No paper trades to export.", "amber");
+        return;
+      }
+      const headers = ["Opened_At", "Strategy", "Layer", "Direction", "Entry_Price", "Exit_Price", "Running_Pts", "PnL_USD", "SL", "TP", "Status"];
+      const lines = [headers.join(",")];
+      list.forEach(t => {
+        const entry = t.entry_price || t.actual_entry || t.target_entry || "";
+        const isClosed = t.status === "CLOSED" || t.state === "CLOSED";
+        const curPx = isClosed ? (t.exit_price || t.current_price || entry) : (t.current_price || t.exit_price || entry);
+        const pts = t.running_pts != null ? Number(t.running_pts).toFixed(2) : "0.00";
+        const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0))).toFixed(2);
+        lines.push([
+          `"${t.opened_at || t.created_at || ""}"`,
+          `"${t.strategy || ""}"`,
+          t.layer || "",
+          t.direction || "LONG",
+          entry,
+          curPx,
+          pts,
+          pnl,
+          t.stop_loss || "",
+          t.take_profit_1 || t.take_profit || "",
+          t.status || t.state || "CLOSED"
+        ].join(","));
+      });
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `xauusd_paper_trades_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      UI.toast("Export Complete", `Exported ${list.length} paper trades to CSV.`, "green");
+    }
+
+    // In-place poller update function
+    async function updatePaperInPlace() {
+      if (AutoRefresh.speed === 0 || isUpdating) return;
+      isUpdating = true;
+      try {
+        const [acctRes, ptRes] = await Promise.allSettled([API.account(), API.paperTrades()]);
+        const newAcct = acctRes.status === "fulfilled" ? acctRes.value : null;
+        const newRaw = ptRes.status === "fulfilled" ? ptRes.value : null;
+        if (newAcct) {
+          const elB = document.getElementById("paper-metric-balance");
+          const elE = document.getElementById("paper-metric-equity");
+          const elR = document.getElementById("paper-metric-rpnl");
+          const elU = document.getElementById("paper-metric-upnl");
+          if (elB && newAcct.current_balance != null) elB.textContent = "$" + UI.fmt(newAcct.current_balance, 2);
+          if (elE && newAcct.equity != null) elE.textContent = "$" + UI.fmt(newAcct.equity, 2);
+          if (elR && newAcct.realized_pnl_usd != null) {
+            const rp = Number(newAcct.realized_pnl_usd);
+            const sgn = rp >= 0 ? "+" : "-";
+            elR.textContent = `${sgn}$${Math.abs(rp).toFixed(2)}`;
+            elR.style.color = rp >= 0 ? "var(--green-bright)" : "var(--red-bright)";
+          }
+          if (elU && newAcct.unrealized_pnl_usd != null) {
+            const up = Number(newAcct.unrealized_pnl_usd);
+            const sgn = up >= 0 ? "+$" : "-$";
+            elU.textContent = `${sgn}${Math.abs(up).toFixed(2)}`;
+          }
+        }
+        if (newRaw) {
+          currentTrades = Array.isArray(newRaw) ? newRaw : (newRaw.database_trades || []);
+          updateTableView();
+        }
+      } catch (_) {}
+      finally {
+        isUpdating = false;
+      }
+    }
+
+    // Initial KPI numbers
+    const balance = acct.current_balance != null ? Number(acct.current_balance) : 10000;
+    const equity = acct.equity != null ? Number(acct.equity) : 10000;
+    const rpnl = Number(acct.realized_pnl_usd != null ? acct.realized_pnl_usd : 0);
+    const upnl = Number(acct.unrealized_pnl_usd != null ? acct.unrealized_pnl_usd : 0);
+    const returnPct = ((rpnl / 10000.0) * 100).toFixed(2);
+    const rpnlSign = rpnl >= 0 ? "+" : "-";
+    const returnSign = rpnl >= 0 ? "+" : "";
+
+    const closedTrades = currentTrades.filter(t => t.status === "CLOSED" || t.state === "CLOSED");
+    const winTrades = closedTrades.filter(t => Number(t.pnl_usd != null ? t.pnl_usd : (t.realized_pnl || 0)) > 0);
+    const lossTrades = closedTrades.filter(t => Number(t.pnl_usd != null ? t.pnl_usd : (t.realized_pnl || 0)) < 0);
+    const winRate = closedTrades.length ? Math.round((winTrades.length / closedTrades.length) * 100) : 0;
+    const openTrades = currentTrades.filter(t => t.status !== "CLOSED" && t.state !== "CLOSED");
+
+    // Strategy counts
+    const retCount = currentTrades.filter(t => {
+      const st = String(t.strategy || "").toUpperCase();
+      return !st.includes("SMC") && !st.includes("TREND");
+    }).length;
+    const smcCount = currentTrades.filter(t => String(t.strategy || "").toUpperCase().includes("SMC")).length;
+    const trendCount = currentTrades.filter(t => String(t.strategy || "").toUpperCase().includes("TREND")).length;
+
+    setTimeout(() => {
+      // Wire strategy pills
+      mount.querySelectorAll(".pt-pill").forEach(pill => {
+        pill.addEventListener("click", () => {
+          mount.querySelectorAll(".pt-pill").forEach(p => p.classList.remove("active"));
+          pill.classList.add("active");
+          activeStrat = pill.dataset.strat || "ALL";
+          updateTableView();
+        });
+      });
+
+      // Wire outcome select
+      const outSel = mount.querySelector("#paper-filter-outcome");
+      if (outSel) {
+        outSel.addEventListener("change", (e) => {
+          activeOutcome = e.target.value;
+          updateTableView();
+        });
+      }
+
+      // Wire direction select
+      const dirSel = mount.querySelector("#paper-filter-dir");
+      if (dirSel) {
+        dirSel.addEventListener("change", (e) => {
+          activeDir = e.target.value;
+          updateTableView();
+        });
+      }
+
+      // Wire search input
+      const searchInp = mount.querySelector("#paper-search");
+      if (searchInp) {
+        searchInp.addEventListener("input", (e) => {
+          searchQuery = e.target.value;
+          updateTableView();
+        });
+      }
+
+      // Wire export CSV
+      const expBtn = mount.querySelector("#btn-export-paper-csv");
+      if (expBtn) {
+        expBtn.addEventListener("click", exportPaperTradesCSV);
+      }
+
+      wireChartButtons();
+
+      if (_paperTimer) clearInterval(_paperTimer);
+      _paperTimer = setInterval(updatePaperInPlace, AutoRefresh.speed || 2000);
+    }, 50);
+
     return `<div class="stack">
+      <!-- 1. Header & Live Indicator -->
       <div class="row-between">
-        <div class="section-title">Paper Trading</div>
+        <div class="section-title">Paper Trading Simulation</div>
         <div style="display:flex;align-items:center;gap:8px">
           <span class="badge badge-green" style="display:flex;align-items:center;gap:4px"><span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>LIVE AUTO-REFRESH</span>
           ${blocked ? '<span class="badge badge-red">BLOCKED</span>' : '<span class="badge badge-green">ENABLED</span>'}
         </div>
       </div>
-      <div class="card" style="border-color:${blocked ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'}">
-        <div class="card-head"><span>Safety status</span></div>
-        <div class="card-body">
-          ${UI.kv([
-            ["Paper trading", blocked ? '<span class="badge badge-red">BLOCKED</span>' : '<span class="badge badge-green">ENABLED</span>'],
-            ["Reason", blocked ? (safety.reason || "Automatic paper trading blocked") : "Active — auto order simulation enabled"],
-            ["Observation mode", obsMode ? '<span class="badge badge-amber">ACTIVE</span>' : '<span class="badge badge-muted">OFF</span>'],
-            ["Real money", '<span class="badge badge-red">DISABLED</span>'],
-            ["Max drawdown", '30%'],
-            ["Daily loss limit", '3%'],
-            ["Consecutive loss limit", '5'],
-          ])}
+
+      <!-- 2. Compact Safety Ribbon Bar (Replaces bulky card) -->
+      <div class="paper-safety-bar">
+        <div class="safety-chip"><span class="label">Simulation:</span> <span class="badge ${blocked ? 'badge-red' : 'badge-green'}">${blocked ? 'BLOCKED' : 'ACTIVE (0.01 Lots)'}</span></div>
+        <div class="safety-chip"><span class="label">Max DD:</span> <span class="badge badge-dim">30% Guard</span></div>
+        <div class="safety-chip"><span class="label">Daily Loss Limit:</span> <span class="badge badge-dim">3% / 5 Loss Max</span></div>
+        <div class="safety-chip"><span class="label">Real Money:</span> <span class="badge badge-red">DISABLED</span></div>
+        <div class="safety-chip"><span class="label">Observation:</span> <span class="badge ${obsMode ? 'badge-amber' : 'badge-muted'}">${obsMode ? 'ACTIVE' : 'OFF'}</span></div>
+        <div class="safety-chip" style="margin-left:auto"><span class="label">Execution:</span> <span class="badge badge-blue">Instant 5M Runner</span></div>
+      </div>
+
+      <!-- 3. Financial KPI Summary Grid -->
+      <div class="sig-kpi-grid">
+        <div class="sig-kpi-card">
+          <div class="kpi-label"><span>Account Balance</span><span>💼</span></div>
+          <div class="kpi-val" id="paper-metric-balance">$${UI.fmt(balance, 2)}</div>
+          <div class="kpi-sub"><span class="badge badge-dim">Equity: $${UI.fmt(equity, 2)}</span> Initial $10,000</div>
+        </div>
+        <div class="sig-kpi-card">
+          <div class="kpi-label"><span>Realized Net PnL</span><span>📈</span></div>
+          <div class="kpi-val" id="paper-metric-rpnl" style="${rpnl >= 0 ? 'color:var(--green-bright)' : 'color:var(--red-bright)'}">${rpnlSign}$${Math.abs(rpnl).toFixed(2)}</div>
+          <div class="kpi-sub"><span class="badge ${rpnl >= 0 ? 'badge-green' : 'badge-red'}">${returnSign}${returnPct}% Return</span> All closed trades</div>
+        </div>
+        <div class="sig-kpi-card">
+          <div class="kpi-label"><span>Win Rate / Closed</span><span>🎯</span></div>
+          <div class="kpi-val" style="color:var(--green-bright)">${winRate}%</div>
+          <div class="kpi-sub"><span style="color:var(--green-bright);font-weight:700">${winTrades.length} Wins</span> • <span style="color:var(--red-bright);font-weight:700">${lossTrades.length} Losses</span></div>
+        </div>
+        <div class="sig-kpi-card">
+          <div class="kpi-label"><span>Active Queue / Floating</span><span>⚡</span></div>
+          <div class="kpi-val" id="paper-metric-upnl" style="color:var(--cyan)">${upnl >= 0 ? "+$" : "-$"}${Math.abs(upnl).toFixed(2)}</div>
+          <div class="kpi-sub"><span class="badge badge-amber">${openTrades.length} Open</span> Live floating trades</div>
         </div>
       </div>
-      <div class="grid grid-4">
-        <div class="metric"><div class="metric-label">BALANCE</div><div class="metric-value" id="paper-metric-balance">${acct.current_balance != null ? "$" + UI.fmt(acct.current_balance, 2) : "—"}</div></div>
-        <div class="metric"><div class="metric-label">EQUITY</div><div class="metric-value" id="paper-metric-equity">${acct.equity != null ? "$" + UI.fmt(acct.equity, 2) : "—"}</div></div>
-        <div class="metric"><div class="metric-label">REALIZED PNL</div><div class="metric-value" id="paper-metric-rpnl">${acct.realized_pnl_usd != null ? UI.fmt(acct.realized_pnl_usd, 2) : "—"}</div></div>
-        <div class="metric"><div class="metric-label">UNREALIZED PNL</div><div class="metric-value" id="paper-metric-upnl">${acct.unrealized_pnl_usd != null ? UI.fmt(acct.unrealized_pnl_usd, 2) : "—"}</div></div>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <span>Active & Historical Paper Trades</span>
-          <span class="muted" style="font-size:11px">5M Dedicated Real-Time Simulation (0.01 Lots) · Auto-Syncs In-Place</span>
+
+      <!-- 4. Table Header & Filter Bar -->
+      <div class="row-between" style="align-items:baseline">
+        <div class="row" style="gap:10px;align-items:baseline">
+          <div class="section-title">Active & Historical Paper Trades</div>
+          <span id="paper-trade-count" style="font-size:11.5px;color:var(--text-muted)">${currentTrades.length} trades</span>
         </div>
-        <div class="card-body flush"><div class="table-wrap"><table class="term">
-          <thead>
-            <tr>
-              <th>Opened</th>
-              <th>Strategy / Layer</th>
-              <th>Direction</th>
-              <th>Entry Price</th>
-              <th>Live / Exit</th>
-              <th>Running Points</th>
-              <th>PnL ($)</th>
-              <th>SL / TP</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="paper-trades-tbody">${renderPaperTradeRows(trades)}</tbody>
-        </table></div></div>
       </div>
+
+      <div class="sig-filter-bar">
+        <!-- Strategy Pills -->
+        <div class="sig-filter-pills" id="paper-strat-pills">
+          <div class="sig-pill pt-pill active" data-strat="ALL">All <span class="pill-count">${currentTrades.length}</span></div>
+          <div class="sig-pill pt-pill" data-strat="RETRACEMENT">🎯 Fib Retracement <span class="pill-count">${retCount}</span></div>
+          <div class="sig-pill pt-pill" data-strat="SMC">💎 SMC With Fib <span class="pill-count">${smcCount}</span></div>
+          <div class="sig-pill pt-pill" data-strat="TREND">📈 Fib Go With Trend <span class="pill-count">${trendCount}</span></div>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <select class="input" id="paper-filter-outcome" style="min-width:125px">
+            <option value="">All Outcomes</option>
+            <option value="WIN">🟢 Wins (Profit)</option>
+            <option value="LOSS">🔴 Losses (Risk)</option>
+            <option value="OPEN">⚡ Open / Active</option>
+          </select>
+          <select class="input" id="paper-filter-dir" style="min-width:110px">
+            <option value="">All directions</option>
+            <option value="LONG">▲ LONG</option>
+            <option value="SHORT">▼ SHORT</option>
+          </select>
+          <input class="input" id="paper-search" placeholder="Search price, layer…" style="min-width:150px">
+          <button class="btn btn-sm" id="btn-export-paper-csv" title="Export paper trades to CSV">📥 Export CSV</button>
+        </div>
+      </div>
+
+      <!-- 5. Table with Tranche Connectors, Financial PnL, and Chart Actions -->
+      <div class="table-wrap"><table class="term">
+        <thead>
+          <tr>
+            <th>Opened</th>
+            <th>Strategy / Layer</th>
+            <th>Direction</th>
+            <th>Entry Price</th>
+            <th>Live / Exit</th>
+            <th>Running Points</th>
+            <th>PnL ($)</th>
+            <th>SL / TP</th>
+            <th>Status</th>
+            <th style="text-align:center">Action</th>
+          </tr>
+        </thead>
+        <tbody id="paper-trades-tbody">${renderPaperTradeRows(currentTrades)}</tbody>
+      </table></div>
     </div>`;
-  }, mount).then(() => {
-    if (_paperTimer) clearInterval(_paperTimer);
-    _paperTimer = setInterval(updatePaperInPlace, AutoRefresh.speed || 2000);
-  });
+  }, mount);
 
   window.__viewCleanup = () => {
     if (_paperTimer) {
