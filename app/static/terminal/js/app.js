@@ -3332,21 +3332,6 @@ Routes["/paper"] = (mount) => {
         });
       }
 
-      // Wire reset paper account
-      const resetBtn = mount.querySelector("#btn-reset-paper");
-      if (resetBtn) {
-        resetBtn.addEventListener("click", async () => {
-          if (!confirm("Are you sure you want to reset all paper trades to start fresh from $10,000?")) return;
-          try {
-            const res = await API.post("/paper-trades/reset");
-            alert(res.message || "Paper trading reset!");
-            location.reload();
-          } catch (err) {
-            alert("Reset failed: " + err.message);
-          }
-        });
-      }
-
       wireChartButtons();
 
       if (_paperTimer) clearInterval(_paperTimer);
@@ -3430,7 +3415,6 @@ Routes["/paper"] = (mount) => {
           <input class="input" id="paper-search" placeholder="Search price, layer…" style="min-width:150px">
           <button class="btn btn-sm" id="btn-export-paper-csv" title="Export paper trades to CSV">📥 Export CSV</button>
           <button class="btn btn-sm" id="btn-repair-paper" style="border-color:#388e3c;color:#81c784" title="Repair false SL losses by applying Smart Shield trailing">🔧 Repair SL</button>
-          <button class="btn btn-sm" id="btn-reset-paper" style="border-color:#d32f2f;color:#ef5350" title="Reset paper balance to initial $10,000">🔄 Reset</button>
         </div>
       </div>
 

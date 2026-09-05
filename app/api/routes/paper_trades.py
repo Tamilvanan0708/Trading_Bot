@@ -266,16 +266,3 @@ async def repair_paper_trades(db: AsyncSession = Depends(get_db_session)):
         "repaired_trades": repaired_count,
         "message": f"Successfully repaired {repaired_count} trades with proper 0.500 Smart Shield trailing.",
     }
-
-
-@router.post("/paper-trades/reset")
-async def reset_paper_trades(db: AsyncSession = Depends(get_db_session)):
-    """Resets paper trading history back to initial state ($10,000 balance)."""
-    from sqlalchemy import text
-    await db.execute(text("DELETE FROM paper_trades"))
-    await db.execute(text("UPDATE signals SET outcome = 'PENDING' WHERE outcome IN ('TP_HIT', 'SL_HIT', 'BREAKEVEN_HIT')"))
-    await db.commit()
-    return {
-        "status": "SUCCESS",
-        "message": "Paper trades reset to clean slate. Account balance restored to $10,000.",
-    }
