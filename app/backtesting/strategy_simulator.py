@@ -433,124 +433,104 @@ class StrategyBacktester:
         timeline.sort(key=lambda x: x[0])
 
         trades: list[BacktestTradeRecord] = []
-        active_trade: dict[str, Any] | None = None
+        active_setup_tf: str | None = None
+        resolved_layers: set[tuple[str, str]] = set()
 
         for ts, tf, candle in timeline:
             eng = engines[tf]
 
-            # 1. Resolve active trade if open
-            if active_trade is not None:
-                is_long = active_trade["direction"] == "LONG"
-                sl = active_trade["sl_price"]
-                tp = active_trade["tp_price"]
-
-                closed = False
-                exit_reason = ""
-                exit_price = 0.0
-
-                if is_long:
-                    if candle.low <= sl:
-                        closed = True
-                        exit_reason = "SL_HIT"
-                        exit_price = sl
-                    elif candle.high >= tp:
-                        closed = True
-                        exit_reason = "TP_HIT"
-                        exit_price = tp
-                else:
-                    if candle.high >= sl:
-                        closed = True
-                        exit_reason = "SL_HIT"
-                        exit_price = sl
-                    elif candle.low <= tp:
-                        closed = True
-                        exit_reason = "TP_HIT"
-                        exit_price = tp
-
-                if closed:
-                    pts = round((exit_price - active_trade["entry_price"]) if is_long else (active_trade["entry_price"] - exit_price), 2)
-                    pnl_usd = round(pts * self.lot_size * 100.0, 2)
-                    risk_pts = max(0.1, abs(active_trade["entry_price"] - sl))
-                    r_mult = round(pts / risk_pts, 2)
-
-                    record = BacktestTradeRecord(
-                        trade_id=active_trade["id"],
-                        strategy="Fib Retracement",
-                        timeframe=active_trade["timeframe"].upper(),
-                        direction=active_trade["direction"],
-                        zero_level=active_trade["zero_level"],
-                        entry_time=active_trade["entry_time"],
-                        entry_price=active_trade["entry_price"],
-                        sl_price=sl,
-                        tp_price=tp,
-                        exit_time=candle.timestamp.isoformat(),
-                        exit_price=exit_price,
-                        exit_reason=exit_reason,
-                        pnl_pts=pts,
-                        pnl_usd=pnl_usd,
-                        r_multiple=r_mult,
-                        status="WIN" if pnl_usd > 0 else "LOSS",
-                    )
-                    trades.append(record)
-                    engines[active_trade["timeframe"]].archive_completed()
-                    active_trade = None
-
-            # 2. Advance engine
-            prev_setup = eng.setup
-            prev_touched = getattr(prev_setup, "entry_touched", False) if prev_setup else False
+            # 1. Advance engine with this candle
             eng.process_candle(candle)
-            curr_setup = eng.setup
+            setup = eng.setup
 
-            # If setup completed or invalidated without being taken as an active trade, archive it so engine can find the next BOS
-            if curr_setup is not None and curr_setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
-                if active_trade is None or active_trade["timeframe"] != tf:
-                    eng.archive_completed()
-                    curr_setup = eng.setup
+            # 2. Track layer fills and resolutions
+            if setup is not None and setup.layers:
+                # Acquire Single Active Trade Lock if free and inside date range
+                if active_setup_tf is None and candle.timestamp >= start_date:
+                    active_setup_tf = tf
 
-            # 3. Check for new entry touch (L1 0.618)
-            if active_trade is None and candle.timestamp >= start_date and curr_setup is not None:
-                if curr_setup.entry_touched and not prev_touched and curr_setup.entry_price and curr_setup.sl_price:
-                    dir_str = curr_setup.direction
-                    entry_px = float(curr_setup.entry_price)
-                    sl_px = float(curr_setup.sl_price or (curr_setup.fib_0_236 or (entry_px - 8.0 if dir_str == "LONG" else entry_px + 8.0)))
-                    tp_px = float(curr_setup.locked_tp or curr_setup.fib_1_000 or (entry_px + 16.0 if dir_str == "LONG" else entry_px - 16.0))
-                    zero_px = float(curr_setup.point_2_price or 0.0)
+                # Process layer outcomes if this timeframe holds the lock
+                if active_setup_tf == tf:
+                    for l_key in ("L1", "L2", "L3"):
+                        if l_key not in setup.layers:
+                            continue
+                        l_data = setup.layers[l_key]
+                        lid = (setup.setup_id, l_key)
+                        if lid not in resolved_layers and l_data.get("state") in ("TP_HIT", "SL_HIT"):
+                            resolved_layers.add(lid)
+                            is_long = setup.direction == "LONG"
+                            entry_px = float(l_data["entry_price"])
+                            sl_px = float(l_data.get("sl") or setup.sl_price or (entry_px - 8.0 if is_long else entry_px + 8.0))
+                            tp_px = float(l_data.get("tp") or (entry_px + 16.0 if is_long else entry_px - 16.0))
+                            exit_reason = l_data["state"]
+                            exit_px = tp_px if exit_reason == "TP_HIT" else float(setup.sl_price or sl_px)
 
-                    active_trade = {
-                        "id": f"RETR_{tf.upper()}_{int(candle.timestamp.timestamp())}",
-                        "timeframe": tf,
-                        "direction": dir_str,
-                        "entry_time": candle.timestamp.isoformat(),
-                        "entry_price": entry_px,
-                        "sl_price": sl_px,
-                        "tp_price": tp_px,
-                        "zero_level": zero_px,
-                    }
+                            pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
+                            pnl_usd = round(pts * self.lot_size * 100.0, 2)
+                            risk_pts = max(0.1, abs(entry_px - sl_px))
+                            r_mult = round(pts / risk_pts, 2)
 
-        if active_trade is not None:
-            last_c = timeline[-1][2] if timeline else None
-            exit_px = last_c.close if last_c else active_trade["entry_price"]
-            is_long = active_trade["direction"] == "LONG"
-            pts = round((exit_px - active_trade["entry_price"]) if is_long else (active_trade["entry_price"] - exit_px), 2)
-            pnl_usd = round(pts * self.lot_size * 100.0, 2)
-            trades.append(BacktestTradeRecord(
-                trade_id=active_trade["id"],
-                strategy="Fib Retracement",
-                timeframe=active_trade["timeframe"].upper(),
-                direction=active_trade["direction"],
-                zero_level=active_trade["zero_level"],
-                entry_time=active_trade["entry_time"],
-                entry_price=active_trade["entry_price"],
-                sl_price=active_trade["sl_price"],
-                tp_price=active_trade["tp_price"],
-                exit_time=last_c.timestamp.isoformat() if last_c else active_trade["entry_time"],
-                exit_price=exit_px,
-                exit_reason="EXPIRED",
-                pnl_pts=pts,
-                pnl_usd=pnl_usd,
-                r_multiple=round(pts / max(0.1, abs(active_trade["entry_price"] - active_trade["sl_price"])), 2),
-                status="OPEN",
-            ))
+                            trades.append(BacktestTradeRecord(
+                                trade_id=f"RETR_{tf.upper()}_{l_key}_{int(ts.timestamp())}",
+                                strategy=f"Fib Retracement [{l_key}]",
+                                timeframe=tf.upper(),
+                                direction=setup.direction,
+                                zero_level=float(setup.point_2_price or 0.0),
+                                entry_time=l_data.get("filled_at") or candle.timestamp.isoformat(),
+                                entry_price=entry_px,
+                                sl_price=sl_px,
+                                tp_price=tp_px,
+                                exit_time=candle.timestamp.isoformat(),
+                                exit_price=exit_px,
+                                exit_reason=exit_reason,
+                                pnl_pts=pts,
+                                pnl_usd=pnl_usd,
+                                r_multiple=r_mult,
+                                status="WIN" if pnl_usd > 0 else "LOSS",
+                            ))
+
+            # 3. Setup completion / invalidation lifecycle
+            if setup is not None and setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
+                if active_setup_tf == tf:
+                    active_setup_tf = None
+                eng.archive_completed()
+
+        # Close any open layers at the end of the simulation window
+        if active_setup_tf is not None:
+            eng = engines[active_setup_tf]
+            if eng.setup and eng.setup.layers:
+                last_c = timeline[-1][2] if timeline else None
+                for l_key in ("L1", "L2", "L3"):
+                    if l_key not in eng.setup.layers:
+                        continue
+                    l_data = eng.setup.layers[l_key]
+                    lid = (eng.setup.setup_id, l_key)
+                    if lid not in resolved_layers and l_data.get("state") == "FILLED":
+                        resolved_layers.add(lid)
+                        is_long = eng.setup.direction == "LONG"
+                        entry_px = float(l_data["entry_price"])
+                        exit_px = float(last_c.close if last_c else entry_px)
+                        pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
+                        pnl_usd = round(pts * self.lot_size * 100.0, 2)
+                        sl_px = float(l_data.get("sl") or eng.setup.sl_price or entry_px)
+                        trades.append(BacktestTradeRecord(
+                            trade_id=f"RETR_{active_setup_tf.upper()}_{l_key}_{int(timeline[-1][0].timestamp())}",
+                            strategy=f"Fib Retracement [{l_key}]",
+                            timeframe=active_setup_tf.upper(),
+                            direction=eng.setup.direction,
+                            zero_level=float(eng.setup.point_2_price or 0.0),
+                            entry_time=l_data.get("filled_at") or (eng.setup.entry_timestamp.isoformat() if eng.setup.entry_timestamp else ""),
+                            entry_price=entry_px,
+                            sl_price=sl_px,
+                            tp_price=float(l_data.get("tp") or entry_px),
+                            exit_time=last_c.timestamp.isoformat() if last_c else "",
+                            exit_price=exit_px,
+                            exit_reason="EXPIRED",
+                            pnl_pts=pts,
+                            pnl_usd=pnl_usd,
+                            r_multiple=round(pts / max(0.1, abs(entry_px - sl_px)), 2),
+                            status="OPEN",
+                        ))
 
         return trades
 

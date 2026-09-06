@@ -4527,10 +4527,17 @@ Routes["/backtest"] = (mount) => {
       const pnlSign = t.pnl_usd > 0 ? "+" : "";
       const dirBadge = t.direction === "LONG" ? `<span class="badge badge-green" style="font-size:10px">BUY ▲</span>` : `<span class="badge badge-red" style="font-size:10px">SELL ▼</span>`;
 
+      let stratBadgeCls = "badge-blue";
+      if (t.strategy.includes("[L1]")) stratBadgeCls = "badge-blue";
+      else if (t.strategy.includes("[L2]")) stratBadgeCls = "badge-amber";
+      else if (t.strategy.includes("[L3]")) stratBadgeCls = "badge-violet";
+      else if (t.strategy.includes("SMC")) stratBadgeCls = "badge-cyan";
+      else if (t.strategy.includes("Trend")) stratBadgeCls = "badge-green";
+
       return `<tr>
         <td class="muted">${i + 1}</td>
         <td><b>${t.entry_time ? t.entry_time.replace("T", " ").replace("+00:00", "") : "—"}</b></td>
-        <td><span class="badge badge-blue" style="font-size:10px">${UI.esc(t.strategy)}</span></td>
+        <td><span class="badge ${stratBadgeCls}" style="font-size:10px;font-weight:700">${UI.esc(t.strategy)}</span></td>
         <td><b>${UI.esc(t.timeframe)}</b></td>
         <td>${dirBadge}</td>
         <td class="num" style="color:#ffd54f">$${Number(t.zero_level).toFixed(2)}</td>
