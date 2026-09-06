@@ -90,6 +90,7 @@ async def get_backtest(id: str, db: AsyncSession = Depends(get_db_session)):
 
 class StrategyBacktestRequest(BaseModel):
     strategy: str = Field(default="FIB_GO_WITH_TREND", description="FIB_GO_WITH_TREND | SMC_WITH_FIB | FIB_WITH_RETRACEMENT | ALL")
+    timeframe: str = Field(default="ALL", description="ALL | 5m | 15m | 30m | 1h | 2h | 4h")
     start_date: str = Field(default="2026-07-01", description="YYYY-MM-DD")
     end_date: str = Field(default="2026-07-31", description="YYYY-MM-DD")
     symbol: str = Field(default="XAUUSD")
@@ -130,7 +131,7 @@ async def run_strategy_backtest(req: StrategyBacktestRequest):
     )
 
     try:
-        result = await backtester.run(req.strategy, s_dt, e_dt)
+        result = await backtester.run(req.strategy, s_dt, e_dt, timeframe=req.timeframe)
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Backtest execution failed: {exc}")

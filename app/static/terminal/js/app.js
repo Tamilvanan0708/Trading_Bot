@@ -4506,7 +4506,7 @@ Routes["/backtest"] = (mount) => {
         <div class="card" style="padding:10px 16px;margin-bottom:var(--sp-3);background:rgba(41,98,255,0.06);border-color:rgba(41,98,255,0.2)">
           <div class="row-between">
             <div style="font-size:12px;color:var(--text)">
-              📅 <b>Simulation Window:</b> ${summary.start_date} to ${summary.end_date} · <b>Total Trades:</b> ${summary.total_trades}
+              📅 <b>Simulation Window:</b> ${summary.start_date} to ${summary.end_date} · <b>Timeframe:</b> <span class="badge badge-blue" style="font-size:10px">${summary.timeframe || 'ALL'}</span> · <b>Total Trades:</b> ${summary.total_trades}
             </div>
             <div style="font-size:12px">
               <b>Capital:</b> $${summary.initial_capital} ➜ <b style="color:${summary.net_profit_usd >= 0 ? '#00e676' : '#ef5350'}">$${Number(summary.final_balance).toFixed(2)}</b>
@@ -4570,6 +4570,19 @@ Routes["/backtest"] = (mount) => {
                 <option value="SMC_WITH_FIB" ${window.__btStrategy === 'SMC_WITH_FIB' ? 'selected' : ''}>SMC with Fib (5M, 15M, 30M, 1H, 4H)</option>
                 <option value="FIB_WITH_RETRACEMENT" ${window.__btStrategy === 'FIB_WITH_RETRACEMENT' ? 'selected' : ''}>Fib Retracement (5M, 15M, 30M, 1H, 4H)</option>
                 <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>All 3 Strategies Combined</option>
+              </select>
+            </div>
+
+            <div style="width:140px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TIMEFRAME</label>
+              <select id="bt-timeframe" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
+                <option value="ALL" ${(!window.__btTimeframe || window.__btTimeframe === 'ALL') ? 'selected' : ''}>ALL TIMEFRAMES</option>
+                <option value="5m" ${window.__btTimeframe === '5m' ? 'selected' : ''}>5m (5 Minutes)</option>
+                <option value="15m" ${window.__btTimeframe === '15m' ? 'selected' : ''}>15m (15 Minutes)</option>
+                <option value="30m" ${window.__btTimeframe === '30m' ? 'selected' : ''}>30m (30 Minutes)</option>
+                <option value="1h" ${window.__btTimeframe === '1h' ? 'selected' : ''}>1h (1 Hour)</option>
+                <option value="2h" ${window.__btTimeframe === '2h' ? 'selected' : ''}>2h (2 Hours)</option>
+                <option value="4h" ${window.__btTimeframe === '4h' ? 'selected' : ''}>4h (4 Hours)</option>
               </select>
             </div>
 
@@ -4663,12 +4676,14 @@ Routes["/backtest"] = (mount) => {
     if (runBtn) {
       runBtn.addEventListener("click", async () => {
         const strat = mount.querySelector("#bt-strategy")?.value || "FIB_GO_WITH_TREND";
+        const tf = mount.querySelector("#bt-timeframe")?.value || "ALL";
         const fDate = mount.querySelector("#bt-from-date")?.value || "2026-07-01";
         const tDate = mount.querySelector("#bt-to-date")?.value || "2026-07-31";
         const lot = parseFloat(mount.querySelector("#bt-lot-size")?.value || "0.01");
         const cap = parseFloat(mount.querySelector("#bt-capital")?.value || "1000");
 
         window.__btStrategy = strat;
+        window.__btTimeframe = tf;
         window.__btFromDate = fDate;
         window.__btToDate = tDate;
         window.__btLotSize = lot;
@@ -4683,6 +4698,7 @@ Routes["/backtest"] = (mount) => {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               strategy: strat,
+              timeframe: tf,
               start_date: fDate,
               end_date: tDate,
               lot_size: lot,
@@ -4744,7 +4760,7 @@ Routes["/backtest"] = (mount) => {
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `backtest_${window.__btStrategy || 'all'}_${window.__btFromDate || 'start'}_to_${window.__btToDate || 'end'}.csv`);
+        link.setAttribute("download", `backtest_${window.__btStrategy || 'all'}_${window.__btTimeframe || 'ALL'}_${window.__btFromDate || 'start'}_to_${window.__btToDate || 'end'}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

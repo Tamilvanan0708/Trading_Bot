@@ -67,6 +67,7 @@ class StrategyBacktester:
         strategy_name: str,
         start_date: datetime,
         end_date: datetime,
+        timeframe: str = "ALL",
     ) -> dict[str, Any]:
         """Run backtest for requested strategy over [start_date, end_date]."""
         # Ensure UTC timezone
@@ -79,24 +80,25 @@ class StrategyBacktester:
         warmup_start = start_date - timedelta(days=7)
 
         strat_key = strategy_name.upper().strip()
+        tf_key = (timeframe or "ALL").strip().lower()
         all_trades: list[BacktestTradeRecord] = []
 
         if strat_key == "FIB_GO_WITH_TREND":
-            all_trades = await self._run_fib_trend(warmup_start, start_date, end_date)
+            all_trades = await self._run_fib_trend(warmup_start, start_date, end_date, selected_tf=tf_key)
         elif strat_key == "SMC_WITH_FIB":
-            all_trades = await self._run_smc_fib(warmup_start, start_date, end_date)
+            all_trades = await self._run_smc_fib(warmup_start, start_date, end_date, selected_tf=tf_key)
         elif strat_key == "FIB_WITH_RETRACEMENT":
-            all_trades = await self._run_fib_retracement(warmup_start, start_date, end_date)
+            all_trades = await self._run_fib_retracement(warmup_start, start_date, end_date, selected_tf=tf_key)
         elif strat_key in ("ALL", "ALL_COMBINED"):
-            t_trend = await self._run_fib_trend(warmup_start, start_date, end_date)
-            t_smc = await self._run_smc_fib(warmup_start, start_date, end_date)
-            t_retr = await self._run_fib_retracement(warmup_start, start_date, end_date)
+            t_trend = await self._run_fib_trend(warmup_start, start_date, end_date, selected_tf=tf_key)
+            t_smc = await self._run_smc_fib(warmup_start, start_date, end_date, selected_tf=tf_key)
+            t_retr = await self._run_fib_retracement(warmup_start, start_date, end_date, selected_tf=tf_key)
             all_trades = t_trend + t_smc + t_retr
             all_trades.sort(key=lambda t: t.entry_time)
         else:
             raise ValueError(f"Unknown strategy: {strategy_name}")
 
-        summary = self._compute_summary(all_trades, start_date, end_date)
+        summary = self._compute_summary(all_trades, start_date, end_date, selected_tf=timeframe)
         return {
             "summary": summary,
             "trades": [t.__dict__ for t in all_trades],
@@ -110,8 +112,16 @@ class StrategyBacktester:
         warmup_start: datetime,
         start_date: datetime,
         end_date: datetime,
+        selected_tf: str = "all",
     ) -> list[BacktestTradeRecord]:
-        timeframes = ["15m", "30m", "1h", "2h", "4h"]
+        allowed = ["15m", "30m", "1h", "2h", "4h"]
+        if selected_tf != "all":
+            if selected_tf not in allowed:
+                return []
+            timeframes = [selected_tf]
+        else:
+            timeframes = allowed
+
         engines = {tf: FibTrendEngine(symbol=self.symbol, timeframe=tf) for tf in timeframes}
 
         # Fetch candles for each timeframe
@@ -254,8 +264,16 @@ class StrategyBacktester:
         warmup_start: datetime,
         start_date: datetime,
         end_date: datetime,
+        selected_tf: str = "all",
     ) -> list[BacktestTradeRecord]:
-        timeframes = ["5m", "15m", "30m", "1h", "4h"]
+        allowed = ["5m", "15m", "30m", "1h", "4h"]
+        if selected_tf != "all":
+            if selected_tf not in allowed:
+                return []
+            timeframes = [selected_tf]
+        else:
+            timeframes = allowed
+
         engines = {tf: SMCFibEngine(symbol=self.symbol, timeframe=tf) for tf in timeframes}
 
         tf_candles: dict[str, list[Candle]] = {}
@@ -391,8 +409,16 @@ class StrategyBacktester:
         warmup_start: datetime,
         start_date: datetime,
         end_date: datetime,
+        selected_tf: str = "all",
     ) -> list[BacktestTradeRecord]:
-        timeframes = ["5m", "15m", "30m", "1h", "4h"]
+        allowed = ["5m", "15m", "30m", "1h", "4h"]
+        if selected_tf != "all":
+            if selected_tf not in allowed:
+                return []
+            timeframes = [selected_tf]
+        else:
+            timeframes = allowed
+
         engines = {tf: DualRetracementEngine(symbol=self.symbol, timeframe=tf) for tf in timeframes}
 
         tf_candles: dict[str, list[Candle]] = {}
@@ -536,6 +562,7 @@ class StrategyBacktester:
         trades: list[BacktestTradeRecord],
         start_date: datetime,
         end_date: datetime,
+        selected_tf: str = "ALL",
     ) -> dict[str, Any]:
         closed_trades = [t for t in trades if t.exit_reason in ("TP_HIT", "SL_HIT")]
         total = len(closed_trades)
@@ -569,6 +596,7 @@ class StrategyBacktester:
 
         return {
             "symbol": self.symbol,
+            "timeframe": selected_tf.upper(),
             "start_date": start_date.strftime("%Y-%m-%d"),
             "end_date": end_date.strftime("%Y-%m-%d"),
             "initial_capital": self.initial_capital,
