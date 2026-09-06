@@ -621,19 +621,19 @@ class DualRetracementEngine:
                 if candle.high >= layer["tp"]:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = layer["tp"]
-                    # ── SMART SHIELD: DIRECT BREAKEVEN ───────────────────────────────
+                    # ── SMART SHIELD: 0.500 BUFFER SHIELD ─────────────────────────────
                     # When L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382):
-                    #   → Move L1 Stop Loss directly to 0.618 (L1 Breakeven entry price).
-                    #     Locks in 100% of L2/L3 profit with zero downside risk on L1!
+                    #   → Move L1 Stop Loss to 0.500 (L2 entry price).
+                    #     Gives L1 breathing room so market noise at 0.618 doesn't stop it out early!
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
-                        be_level = setup.fib_0_618
-                        if be_level is not None and setup.sl_price < be_level:
-                            setup.layers["L1"]["sl"] = round(be_level, 2)
-                            setup.sl_price = be_level
+                        l2_level = setup.fib_0_500
+                        if l2_level is not None and setup.sl_price < l2_level:
+                            setup.layers["L1"]["sl"] = round(l2_level, 2)
+                            setup.sl_price = l2_level
                             setup.layers["L1"]["shield_stage"] = 1
                             logger.info(
-                                "[SMART SHIELD] L%s TP hit → L1 SL moved to Breakeven 0.618 ($%.2f)",
-                                layer["layer"][-1], be_level,
+                                "[SMART SHIELD] L%s TP hit → L1 SL raised to 0.500 ($%.2f)",
+                                layer["layer"][-1], l2_level,
                             )
 
         else:  # SHORT
@@ -643,19 +643,19 @@ class DualRetracementEngine:
                 if candle.low <= layer["tp"]:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = layer["tp"]
-                    # ── SMART SHIELD: DIRECT BREAKEVEN ───────────────────────────────
+                    # ── SMART SHIELD: 0.500 BUFFER SHIELD ─────────────────────────────
                     # When L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382):
-                    #   → Move L1 Stop Loss directly to 0.618 (L1 Breakeven entry price).
-                    #     Locks in 100% of L2/L3 profit with zero downside risk on L1!
+                    #   → Move L1 Stop Loss to 0.500 (L2 entry price).
+                    #     Gives L1 breathing room so market noise at 0.618 doesn't stop it out early!
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
-                        be_level = setup.fib_0_618
-                        if be_level is not None and setup.sl_price > be_level:
-                            setup.layers["L1"]["sl"] = round(be_level, 2)
-                            setup.sl_price = be_level
+                        l2_level = setup.fib_0_500
+                        if l2_level is not None and setup.sl_price > l2_level:
+                            setup.layers["L1"]["sl"] = round(l2_level, 2)
+                            setup.sl_price = l2_level
                             setup.layers["L1"]["shield_stage"] = 1
                             logger.info(
-                                "[SMART SHIELD] L%s TP hit → L1 SL moved to Breakeven 0.618 ($%.2f)",
-                                layer["layer"][-1], be_level,
+                                "[SMART SHIELD] L%s TP hit → L1 SL lowered to 0.500 ($%.2f)",
+                                layer["layer"][-1], l2_level,
                             )
 
         # Setup completes only when EVERY filled layer has resolved (TP/SL/escape).

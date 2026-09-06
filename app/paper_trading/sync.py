@@ -329,18 +329,18 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 await db.commit()
                                 logger.info("[PAPER-AUTO] Engine TP_HIT closed Retracement %s (%s) @ %.2f (+$%.2f)", sig_id, l_key, tp_px, existing.realized_pnl)
 
-                                # 3. Smart Shield Immediate Trigger: When L2 or L3 hits TP, IMMEDIATELY trail L1 SL to 0.618 (Breakeven)
+                                # 3. Smart Shield Immediate Trigger: When L2 or L3 hits TP, trail L1 SL to 0.500 (Buffer Shield)
                                 if l_key in ("L2", "L3"):
                                     l1_sig_id = f"FIB_RETR_{tf_key.upper()}_L1_{int(f_state.point_2_price)}"
                                     l1_trade = (await db.execute(
                                         select(PaperTradeModel).where(PaperTradeModel.signal_id == l1_sig_id, PaperTradeModel.state == "OPEN")
                                     )).scalars().first()
                                     if l1_trade:
-                                        new_l1_sl = float(f_state.fib_0_618 or 0.0)
+                                        new_l1_sl = float(f_state.fib_0_500 or 0.0)
                                         if (f_state.direction == "LONG" and new_l1_sl > (l1_trade.stop_loss or 0.0)) or (f_state.direction == "SHORT" and 0.0 < new_l1_sl < (l1_trade.stop_loss or 999999.0)):
                                             l1_trade.stop_loss = new_l1_sl
                                             await db.commit()
-                                            logger.info("[PAPER-AUTO] Smart Shield: L%s TP hit -> immediately trailed L1 SL to Breakeven 0.618 (%.2f)", l_key[-1], new_l1_sl)
+                                            logger.info("[PAPER-AUTO] Smart Shield: L%s TP hit -> trailed L1 SL to 0.500 (%.2f)", l_key[-1], new_l1_sl)
 
         except Exception as exc:  # noqa: BLE001
             logger.warning("[PAPER-SYNC] Fib sync error: %s", exc)

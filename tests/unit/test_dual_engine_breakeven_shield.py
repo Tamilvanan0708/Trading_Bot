@@ -49,19 +49,18 @@ def test_long_breakeven_shield_on_l2_tp():
 
     # L2 must hit TP
     assert setup.layers["L2"]["state"] == "TP_HIT"
-    # L1 SL must be moved directly to 0.618 Breakeven (2061.80)
-    assert setup.layers["L1"]["sl"] == setup.fib_0_618
-    assert setup.sl_price == setup.fib_0_618
-    assert setup.sl_price == 2061.80
+    # L1 SL must be moved to 0.500 Buffer (2050.00)
+    assert setup.layers["L1"]["sl"] == setup.fib_0_500
+    assert setup.sl_price == setup.fib_0_500
+    assert setup.sl_price == 2050.00
 
-    # Next candle wicks down to 2061.00 (<= 2061.80), triggering L1 SL at Breakeven
-    c2 = _candle(1300, 2062.0, 2062.5, 2061.0, 2061.5)
+    # Next candle wicks down to 2049.50 (<= 2050.00), triggering L1 SL at Buffer
+    c2 = _candle(1300, 2052.0, 2052.5, 2049.0, 2049.5)
     engine._track_active_trade(c2)
 
     assert setup.outcome == "SL_HIT"
     assert setup.state == RetracementState.COMPLETED
     assert setup.layers["L1"]["state"] == "SL_HIT"
-    # L1 stopped at 2061.80 (Breakeven - 0 loss), while L2 secured +11.80 pts!
 
 def test_short_breakeven_shield_on_l2_tp():
     engine = DualRetracementEngine(symbol="XAUUSD", timeframe="5m")
@@ -102,7 +101,7 @@ def test_short_breakeven_shield_on_l2_tp():
 
     # L2 must hit TP
     assert setup.layers["L2"]["state"] == "TP_HIT"
-    # L1 SL must be lowered directly to 0.618 Breakeven (2038.20)
-    assert setup.layers["L1"]["sl"] == setup.fib_0_618
-    assert setup.sl_price == setup.fib_0_618
-    assert setup.sl_price == 2038.20
+    # L1 SL must be lowered to 0.500 Buffer (2050.00)
+    assert setup.layers["L1"]["sl"] == setup.fib_0_500
+    assert setup.sl_price == setup.fib_0_500
+    assert setup.sl_price == 2050.00
