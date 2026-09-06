@@ -459,6 +459,14 @@ class StrategyBacktester:
                         lid = (setup.setup_id, l_key)
                         if lid not in resolved_layers and l_data.get("state") in ("TP_HIT", "SL_HIT"):
                             resolved_layers.add(lid)
+                            # Guard: Ignore layers that filled during the warmup window before start_date
+                            filled_at_str = l_data.get("filled_at")
+                            if filled_at_str:
+                                entry_dt = datetime.fromisoformat(filled_at_str)
+                                if entry_dt.tzinfo is None:
+                                    entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                                if entry_dt < start_date:
+                                    continue
                             is_long = setup.direction == "LONG"
                             entry_px = float(l_data["entry_price"])
                             sl_px = float(l_data.get("sl") or setup.sl_price or (entry_px - 8.0 if is_long else entry_px + 8.0))

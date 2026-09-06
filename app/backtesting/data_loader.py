@@ -154,7 +154,9 @@ async def fetch_historical_candles(
                     c_end = c_end.replace(tzinfo=timezone.utc)
 
                 # Check if candidate file contains the entire requested range
-                if c_start <= start_dt and c_end >= end_dt:
+                covers_start = c_start <= start_dt
+                covers_end = (c_end >= end_dt) or (c_end.date() >= end_dt.date())
+                if covers_start and covers_end:
                     entries = raw.get("candles", [])
                     sliced_entries = []
                     for r in entries:
