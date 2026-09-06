@@ -411,6 +411,7 @@ class StrategyBacktester:
         end_date: datetime,
         selected_tf: str = "all",
     ) -> list[BacktestTradeRecord]:
+        selected_tf = (selected_tf or "all").lower().strip()
         allowed = ["5m", "15m", "30m", "1h", "4h"]
         if selected_tf != "all":
             if selected_tf not in allowed:

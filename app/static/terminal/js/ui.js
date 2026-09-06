@@ -207,7 +207,7 @@ const UI = {
       items = [
         { label: "5M BOS Structure Break", status: "VERIFIED", desc: `Full body candle close beyond swing structure (${dir})`, color: "#22c55e" },
         { label: `Retracement Tranche ${layer}`, status: "ARMED", desc: `Execution entry at $${Number(sig?.entry_price || 0).toFixed(2)}`, color: "#00bcd4" },
-        { label: "Smart Shield Stop Loss", status: "PROTECTED", desc: `SL secured at 0.236 ratio ($${Number(sig?.stop_loss || 0).toFixed(2)})`, color: "#ffd54f" },
+        { label: "Smart Shield Stop Loss", status: "PROTECTED", desc: `SL secured at 0.236 ($${Number(sig?.stop_loss || 0).toFixed(2)}), trailed to 0.500 on L2 TP`, color: "#ffd54f" },
         { label: "3-Tranche Escape Policy", status: "ENABLED", desc: "0.01 Lots each (Closes at 0.618 if L2/L3 touched)", color: "#a855f7" },
       ];
     }
