@@ -88,6 +88,9 @@ const API = {
   retracementMulti: (sym = "XAUUSD") => API.get(`/retracement/multi/${sym}`),
   retracementHistory: (sym = "XAUUSD") => API.get(`/retracement/${sym}/history`),
   runRetracement: (sym = "XAUUSD") => API.post(`/retracement/${sym}/run`),
+  // Runtime Execution Settings
+  getExecutionSettings: () => API.get("/settings/execution"),
+  saveExecutionSettings: (settings) => API.post("/settings/execution", settings),
 };
 
 /* Global app state cache (lightweight, updated by polling) */

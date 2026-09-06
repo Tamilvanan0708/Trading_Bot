@@ -158,6 +158,18 @@ def create_app() -> FastAPI:
     app.include_router(overview.router)
     app.include_router(terminal.router)
 
+    @app.get("/settings/execution", tags=["Execution Settings"])
+    async def get_root_execution_settings():
+        from app.config.execution_settings import get_execution_settings
+        return get_execution_settings().model_dump()
+
+    @app.post("/settings/execution", tags=["Execution Settings"])
+    async def save_root_execution_settings(payload: dict):
+        from app.config.execution_settings import ExecutionSettings, save_execution_settings
+        new_settings = ExecutionSettings(**payload)
+        saved = save_execution_settings(new_settings)
+        return {"status": "success", "settings": saved.model_dump()}
+
     return app
 
 

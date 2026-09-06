@@ -4540,6 +4540,7 @@ Routes["/backtest"] = (mount) => {
         <td><span class="badge ${stratBadgeCls}" style="font-size:10px;font-weight:700">${UI.esc(t.strategy)}</span></td>
         <td><b>${UI.esc(t.timeframe)}</b></td>
         <td>${dirBadge}</td>
+        <td class="num" style="font-size:11px;color:#90caf9;font-weight:600">${t.lot_size ? Number(t.lot_size).toFixed(t.lot_size < 0.01 ? 3 : 2) : '0.01'}</td>
         <td class="num" style="color:#ffd54f">$${Number(t.zero_level).toFixed(2)}</td>
         <td class="num" style="font-weight:700">$${Number(t.entry_price).toFixed(2)}</td>
         <td class="num" style="color:#ef5350">$${Number(t.sl_price).toFixed(2)}</td>
@@ -4575,7 +4576,7 @@ Routes["/backtest"] = (mount) => {
               <select id="bt-strategy" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
                 <option value="FIB_GO_WITH_TREND" ${window.__btStrategy === 'FIB_GO_WITH_TREND' ? 'selected' : ''}>Fib Go with Trend (15M, 30M, 1H, 2H, 4H)</option>
                 <option value="SMC_WITH_FIB" ${window.__btStrategy === 'SMC_WITH_FIB' ? 'selected' : ''}>SMC with Fib (5M, 15M, 30M, 1H, 4H)</option>
-                <option value="FIB_WITH_RETRACEMENT" ${window.__btStrategy === 'FIB_WITH_RETRACEMENT' ? 'selected' : ''}>Fib Retracement (5M, 15M, 30M, 1H, 4H)</option>
+                <option value="FIB_WITH_RETRACEMENT" ${window.__btStrategy === 'FIB_WITH_RETRACEMENT' ? 'selected' : ''}>Fib Retracement (5M, 15M, 30M, 1H · 4H Excluded)</option>
                 <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>All 3 Strategies Combined</option>
               </select>
             </div>
@@ -4583,7 +4584,7 @@ Routes["/backtest"] = (mount) => {
             <div style="width:140px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TIMEFRAME</label>
               <select id="bt-timeframe" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
-                <option value="ALL" ${(!window.__btTimeframe || window.__btTimeframe === 'ALL') ? 'selected' : ''}>ALL TIMEFRAMES</option>
+                <option value="ALL" ${(!window.__btTimeframe || window.__btTimeframe === 'ALL') ? 'selected' : ''}>ALL ACTIVE TIMEFRAMES</option>
                 <option value="5m" ${window.__btTimeframe === '5m' ? 'selected' : ''}>5m (5 Minutes)</option>
                 <option value="15m" ${window.__btTimeframe === '15m' ? 'selected' : ''}>15m (15 Minutes)</option>
                 <option value="30m" ${window.__btTimeframe === '30m' ? 'selected' : ''}>30m (30 Minutes)</option>
@@ -4593,23 +4594,37 @@ Routes["/backtest"] = (mount) => {
               </select>
             </div>
 
-            <div style="flex:1;min-width:140px">
+            <div style="width:170px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">POSITION SIZING</label>
+              <select id="bt-sizing-mode" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
+                <option value="broker_risk" ${(!window.__btSizingMode || window.__btSizingMode === 'broker_risk') ? 'selected' : ''}>Option A: Dynamic Broker ($ Risk)</option>
+                <option value="fixed" ${window.__btSizingMode === 'fixed' ? 'selected' : ''}>Baseline: Fixed Lot Size</option>
+                <option value="pure_risk" ${window.__btSizingMode === 'pure_risk' ? 'selected' : ''}>Pure R-Multiple ($ Risk)</option>
+              </select>
+            </div>
+
+            <div style="width:110px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TARGET RISK ($)</label>
+              <input type="number" id="bt-target-risk" class="form-input" value="${window.__btTargetRisk || 10.0}" step="1" min="1" max="500" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+            </div>
+
+            <div style="flex:1;min-width:130px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">FROM DATE</label>
               <input type="date" id="bt-from-date" class="form-input" value="${window.__btFromDate || '2026-07-01'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
-            <div style="flex:1;min-width:140px">
+            <div style="flex:1;min-width:130px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TO DATE</label>
               <input type="date" id="bt-to-date" class="form-input" value="${window.__btToDate || '2026-07-31'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
-            <div style="width:110px">
-              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">LOT SIZE</label>
+            <div style="width:90px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">FIXED LOT</label>
               <input type="number" id="bt-lot-size" class="form-input" value="${window.__btLotSize || 0.01}" step="0.01" min="0.01" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
-            <div style="width:120px">
-              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">START CAPITAL</label>
+            <div style="width:110px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">CAPITAL ($)</label>
               <input type="number" id="bt-capital" class="form-input" value="${window.__btCapital || 1000}" step="100" min="100" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
@@ -4658,6 +4673,7 @@ Routes["/backtest"] = (mount) => {
                   <th>STRATEGY</th>
                   <th>TF</th>
                   <th>DIR</th>
+                  <th class="num">LOT</th>
                   <th class="num" title="Anchor Zero Origin (0.000)">ZERO (P0)</th>
                   <th class="num">ENTRY</th>
                   <th class="num" title="Stop Loss (0.236 Level)">SL</th>
@@ -4670,7 +4686,7 @@ Routes["/backtest"] = (mount) => {
                 </tr>
               </thead>
               <tbody id="bt-trades-tbody">
-                ${tradeRows || `<tr><td colspan="14" class="muted" style="text-align:center;padding:32px">No backtest run yet. Select parameters and click <b>RUN BACKTEST</b>.</td></tr>`}
+                ${tradeRows || `<tr><td colspan="15" class="muted" style="text-align:center;padding:32px">No backtest run yet. Select parameters and click <b>RUN BACKTEST</b>.</td></tr>`}
               </tbody>
             </table>
           </div>
@@ -4688,6 +4704,8 @@ Routes["/backtest"] = (mount) => {
         const tDate = mount.querySelector("#bt-to-date")?.value || "2026-07-31";
         const lot = parseFloat(mount.querySelector("#bt-lot-size")?.value || "0.01");
         const cap = parseFloat(mount.querySelector("#bt-capital")?.value || "1000");
+        const sizingMode = mount.querySelector("#bt-sizing-mode")?.value || "broker_risk";
+        const targetRisk = parseFloat(mount.querySelector("#bt-target-risk")?.value || "10.0");
 
         window.__btStrategy = strat;
         window.__btTimeframe = tf;
@@ -4695,6 +4713,8 @@ Routes["/backtest"] = (mount) => {
         window.__btToDate = tDate;
         window.__btLotSize = lot;
         window.__btCapital = cap;
+        window.__btSizingMode = sizingMode;
+        window.__btTargetRisk = targetRisk;
 
         isLoading = true;
         renderView();
@@ -4710,6 +4730,8 @@ Routes["/backtest"] = (mount) => {
               end_date: tDate,
               lot_size: lot,
               initial_capital: cap,
+              sizing_mode: sizingMode,
+              target_risk_usd: targetRisk,
             }),
           });
 
@@ -4779,45 +4801,204 @@ Routes["/backtest"] = (mount) => {
 };
 
 /* ================= SETTINGS ================= */
-Routes["/settings"] = (mount) => {
-  renderWith(async () => {
-    const [st, tg] = await Promise.allSettled([API.systemStatus(), API.telegramStatus()]);
-    return { st: st.status === "fulfilled" ? st.value : null, tg: tg.status === "fulfilled" ? tg.value : null };
+Routes["/settings"] = async (mount) => {
+  await renderWith(async () => {
+    const [st, tg, exec] = await Promise.allSettled([
+      API.systemStatus(),
+      API.telegramStatus(),
+      API.getExecutionSettings(),
+    ]);
+    return {
+      st: st.status === "fulfilled" ? st.value : null,
+      tg: tg.status === "fulfilled" ? tg.value : null,
+      exec: exec.status === "fulfilled" ? exec.value : {
+        sizing_mode: "broker_risk",
+        target_risk_usd: 10.0,
+        fixed_lot_size: 0.01,
+        fib_retracement_timeframes: ["5m", "15m", "30m", "1h"],
+        smart_shield_enabled: true,
+      },
+    };
   }, (d) => {
     const stRaw = d.st || {};
     const st = stRaw.status || stRaw;
     const tg = d.tg || {};
+    const exec = d.exec || {};
+    const sizingMode = exec.sizing_mode || "broker_risk";
+    const targetRisk = exec.target_risk_usd || 10.0;
+    const fixedLot = exec.fixed_lot_size || 0.01;
+    const activeTfs = exec.fib_retracement_timeframes || ["5m", "15m", "30m", "1h"];
+    const smartShield = exec.smart_shield_enabled !== false;
+
     return `<div class="stack">
-      <div class="section-title">Settings</div>
-      <div class="card">
-        <div class="card-head"><span>Safety (read-only, enforced by backend)</span></div>
+      <div class="row-between">
+        <div>
+          <div class="section-title">⚙️ Strategy Execution & Risk Settings</div>
+          <div class="muted" style="font-size:12px">Control Live Paper Trading position sizing & Backtest defaults with 1-click toggles</div>
+        </div>
+        <div class="toolbar">
+          <span class="badge badge-blue">PERSISTENT SETTINGS</span>
+        </div>
+      </div>
+
+      <!-- EXECUTION & RISK CONFIG CARD -->
+      <div class="card" style="border: 1px solid rgba(41,98,255,0.3)">
+        <div class="card-head" style="background:rgba(41,98,255,0.08);display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;color:#90caf9">🎯 DYNAMIC POSITION SIZING & RISK ENGINE</span>
+          <span class="badge ${sizingMode === 'broker_risk' ? 'badge-green' : (sizingMode === 'fixed' ? 'badge-amber' : 'badge-violet')}">
+            ${sizingMode.toUpperCase()}
+          </span>
+        </div>
         <div class="card-body">
-          <div class="card" style="border-color:rgba(239,68,68,0.5)">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:20px;margin-bottom:16px">
+            <div>
+              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+                Position Sizing Mode
+              </label>
+              <select id="set-sizing-mode" class="form-input" style="width:100%;padding:10px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
+                <option value="broker_risk" ${sizingMode === 'broker_risk' ? 'selected' : ''}>Option A: Dynamic Broker Risk ($ Risk, min 0.01 lot)</option>
+                <option value="fixed" ${sizingMode === 'fixed' ? 'selected' : ''}>Baseline: Fixed Lot Size (0.01)</option>
+                <option value="pure_risk" ${sizingMode === 'pure_risk' ? 'selected' : ''}>Option A (Ideal): Pure R-Multiple Risk ($ Risk)</option>
+              </select>
+              <div class="muted" style="font-size:11px;margin-top:4px">
+                Dynamic Broker Risk automatically scales 5m trades (~0.05 lot) while protecting higher timeframes.
+              </div>
+            </div>
+
+            <div>
+              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+                Target Risk per Trade ($ USD)
+              </label>
+              <input type="number" id="set-target-risk" class="form-input" value="${targetRisk}" step="1.0" min="1.0" max="500.0" style="width:100%;padding:9px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
+              <div class="muted" style="font-size:11px;margin-top:4px">
+                Standard: $10.00 USD (1% risk on $1,000 account). Every trade risk is normalized to this amount.
+              </div>
+            </div>
+
+            <div>
+              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+                Fixed Lot Size (When Fixed Mode Selected)
+              </label>
+              <input type="number" id="set-fixed-lot" class="form-input" value="${fixedLot}" step="0.01" min="0.01" max="10.0" style="width:100%;padding:9px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
+              <div class="muted" style="font-size:11px;margin-top:4px">
+                Default 0.01 lots for fixed mode.
+              </div>
+            </div>
+          </div>
+
+          <!-- FIB RETRACEMENT TIMEFRAMES SELECTOR -->
+          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px">
+            <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:8px">
+              Active Timeframes for Fib Retracement (Option 1A Multi-Slot)
+            </label>
+            <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                <input type="checkbox" id="tf-cb-5m" ${activeTfs.includes('5m') ? 'checked' : ''}> <b style="color:#64b5f6">5M</b> (Scalping · +$8,965 PnL)
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                <input type="checkbox" id="tf-cb-15m" ${activeTfs.includes('15m') ? 'checked' : ''}> <b style="color:#81c784">15M</b> (Intraday · +$2,848 PnL)
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                <input type="checkbox" id="tf-cb-30m" ${activeTfs.includes('30m') ? 'checked' : ''}> <b style="color:#ffb74d">30M</b> (Intraday · +$1,232 PnL)
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                <input type="checkbox" id="tf-cb-1h" ${activeTfs.includes('1h') ? 'checked' : ''}> <b style="color:#ba68c8">1H</b> (Swing · +$2,196 PnL)
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;opacity:0.65">
+                <input type="checkbox" id="tf-cb-4h" ${activeTfs.includes('4h') ? 'checked' : ''}> <span style="color:#ef5350">4H (Excluded · Negative PnL)</span>
+              </label>
+            </div>
+            <div class="muted" style="font-size:11px;margin-top:6px">
+              Unchecking a timeframe stops the bot from taking new entries on that timeframe.
+            </div>
+          </div>
+
+          <!-- SMART SHIELD LOSS PROTECTION -->
+          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+            <div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:700">
+                <input type="checkbox" id="cb-smart-shield" ${smartShield ? 'checked' : ''}> 🛡️ Smart Shield Loss Protection (Auto-Breakeven)
+              </label>
+              <div class="muted" style="font-size:11px;margin-left:22px">
+                When Layer 2 or Layer 3 TP is hit, automatically moves Layer 1 SL to entry 0.500 price to guarantee profit.
+              </div>
+            </div>
+
+            <div>
+              <button id="save-execution-settings-btn" class="btn btn-primary" style="padding:10px 24px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
+                💾 SAVE EXECUTION SETTINGS
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SAFETY & SYSTEM STATUS CARD -->
+      <div class="card">
+        <div class="card-head"><span>Safety & Engine Status (enforced by backend)</span></div>
+        <div class="card-body">
+          <div class="card" style="border-color:rgba(239,68,68,0.5);margin-bottom:12px">
             <div class="card-body" style="display:flex;align-items:center;gap:var(--sp-3)">
               <span class="badge badge-red">REAL MONEY EXECUTION — PERMANENTLY DISABLED</span>
-              <span style="font-size:12px;color:var(--text-dim)">No broker order API exists in this system.</span>
+              <span style="font-size:12px;color:var(--text-dim)">Zero financial risk mode. Real Binance data feed with deterministic paper trade engine.</span>
             </div>
           </div>
           ${UI.kv([
             ["Observation mode", st.observation_mode ? '<span class="badge badge-amber">ACTIVE</span>' : '<span class="badge badge-muted">OFF</span>'],
             ["Paper trading", st.paper_trading_enabled ? '<span class="badge badge-green">ENABLED</span>' : '<span class="badge badge-red">OFF</span>'],
             ["Block on FAILED", st.block_on_failed ? '<span class="badge badge-green">ENABLED</span>' : '<span class="badge badge-muted">DISABLED</span>'],
-            ["Max drawdown", '30%'],
+            ["Max drawdown limit", '30%'],
             ["Telegram", tg.status || "DISABLED"],
             ["Candidate alerts", tg.candidate_alerts ? "enabled" : "disabled"],
             ["Environment", st.environment || "dev"],
-            ["Version", "1.0.0"],
+            ["Version", "2026.09.06.1"],
           ])}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head"><span>Configuration</span></div>
-        <div class="card-body" style="font-size:12px;color:var(--text-dim)">
-          Configuration is managed via <code style="color:var(--text)">.env</code> on the server. No sensitive values (tokens, keys) are exposed to this interface.
         </div>
       </div>
     </div>`;
   }, mount);
+
+  // Wire up Save Button
+  const saveBtn = mount.querySelector("#save-execution-settings-btn");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", async () => {
+      const mode = mount.querySelector("#set-sizing-mode")?.value || "broker_risk";
+      const targetRisk = parseFloat(mount.querySelector("#set-target-risk")?.value || "10.0");
+      const fixedLot = parseFloat(mount.querySelector("#set-fixed-lot")?.value || "0.01");
+      const smartShield = mount.querySelector("#cb-smart-shield")?.checked ?? true;
+
+      const tfs = [];
+      if (mount.querySelector("#tf-cb-5m")?.checked) tfs.push("5m");
+      if (mount.querySelector("#tf-cb-15m")?.checked) tfs.push("15m");
+      if (mount.querySelector("#tf-cb-30m")?.checked) tfs.push("30m");
+      if (mount.querySelector("#tf-cb-1h")?.checked) tfs.push("1h");
+      if (mount.querySelector("#tf-cb-4h")?.checked) tfs.push("4h");
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = "⏳ SAVING...";
+
+      try {
+        const payload = {
+          sizing_mode: mode,
+          target_risk_usd: targetRisk,
+          fixed_lot_size: fixedLot,
+          fib_retracement_timeframes: tfs.length > 0 ? tfs : ["5m", "15m", "30m", "1h"],
+          smart_shield_enabled: smartShield,
+        };
+
+        await API.saveExecutionSettings(payload);
+        window.__btSizingMode = mode;
+        window.__btTargetRisk = targetRisk;
+        window.__btLotSize = fixedLot;
+        showToast("Settings saved successfully! Live trading & Backtest updated.", "info");
+      } catch (err) {
+        showToast(`Failed to save settings: ${err.message}`, "error");
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "💾 SAVE EXECUTION SETTINGS";
+      }
+    });
+  }
 };
 
 /* ===================================================================== */

@@ -96,6 +96,8 @@ class StrategyBacktestRequest(BaseModel):
     symbol: str = Field(default="XAUUSD")
     lot_size: float = Field(default=0.01, ge=0.01, le=10.0)
     initial_capital: float = Field(default=1000.0, ge=100.0)
+    sizing_mode: str = Field(default="broker_risk", description="fixed | broker_risk | pure_risk")
+    target_risk_usd: float = Field(default=10.0, ge=1.0, le=500.0)
 
 
 @router.post("/run-strategy")
@@ -128,6 +130,8 @@ async def run_strategy_backtest(req: StrategyBacktestRequest):
         symbol=req.symbol,
         lot_size=req.lot_size,
         initial_capital=req.initial_capital,
+        sizing_mode=req.sizing_mode,
+        target_risk_usd=req.target_risk_usd,
     )
 
     try:

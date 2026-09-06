@@ -483,6 +483,26 @@ async def get_live_market_data(symbol: str, timeframe: str = "15m", include_form
     }
 
 
+@router.get("/settings/execution")
+async def get_runtime_execution_settings():
+    """Retrieve user-configurable execution & risk sizing settings."""
+    from app.config.execution_settings import get_execution_settings
+    settings = get_execution_settings()
+    return settings.model_dump()
+
+
+@router.post("/settings/execution")
+async def update_runtime_execution_settings(payload: dict):
+    """Save user-configured execution & risk sizing settings."""
+    from app.config.execution_settings import ExecutionSettings, save_execution_settings
+    try:
+        new_settings = ExecutionSettings(**payload)
+        saved = save_execution_settings(new_settings)
+        return {"status": "success", "settings": saved.model_dump()}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid settings: {exc}")
+
+
 @router.get("/{symbol}")
 async def get_market_data(symbol: str, timeframe: str = "15m", limit: int = 100, provider: CsvMarketDataProvider = Depends(get_market_provider)):
     """Retrieves recent OHLCV candle bars for the requested symbol and timeframe."""

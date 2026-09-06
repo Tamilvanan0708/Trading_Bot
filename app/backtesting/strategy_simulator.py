@@ -47,6 +47,7 @@ class BacktestTradeRecord:
     pnl_usd: float
     r_multiple: float
     status: str  # "WIN" | "LOSS" | "OPEN"
+    lot_size: float = 0.01
 
 
 class StrategyBacktester:
@@ -57,10 +58,30 @@ class StrategyBacktester:
         symbol: str = "XAUUSD",
         lot_size: float = 0.01,
         initial_capital: float = 1000.0,
+        sizing_mode: str = "fixed",
+        target_risk_usd: float = 10.0,
     ) -> None:
         self.symbol = symbol
         self.lot_size = lot_size
         self.initial_capital = initial_capital
+        self.sizing_mode = sizing_mode or "fixed"
+        self.target_risk_usd = target_risk_usd or 10.0
+
+    def _calculate_trade_pnl(self, pts: float, entry_px: float, sl_px: float) -> tuple[float, float, float]:
+        """Calculates (trade_lot, pnl_usd, r_mult) based on active sizing_mode."""
+        risk_pts = max(0.2, abs(entry_px - sl_px))
+        r_mult = round(pts / risk_pts, 2)
+        if self.sizing_mode == "broker_risk":
+            raw_lot = self.target_risk_usd / (risk_pts * 100.0)
+            trade_lot = max(0.01, min(5.0, round(raw_lot, 2)))
+            pnl_usd = round(pts * trade_lot * 100.0, 2)
+        elif self.sizing_mode == "pure_risk":
+            trade_lot = max(0.001, min(5.0, round(self.target_risk_usd / (risk_pts * 100.0), 4)))
+            pnl_usd = round(r_mult * self.target_risk_usd, 2)
+        else:
+            trade_lot = self.lot_size
+            pnl_usd = round(pts * trade_lot * 100.0, 2)
+        return trade_lot, pnl_usd, r_mult
 
     async def run(
         self,
@@ -176,9 +197,7 @@ class StrategyBacktester:
 
                 if closed:
                     pts = round((exit_price - active_trade["entry_price"]) if is_long else (active_trade["entry_price"] - exit_price), 2)
-                    pnl_usd = round(pts * self.lot_size * 100.0, 2)
-                    risk_pts = max(0.1, abs(active_trade["entry_price"] - sl))
-                    r_mult = round(pts / risk_pts, 2)
+                    trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, active_trade["entry_price"], sl)
 
                     record = BacktestTradeRecord(
                         trade_id=active_trade["id"],
@@ -197,6 +216,7 @@ class StrategyBacktester:
                         pnl_usd=pnl_usd,
                         r_multiple=r_mult,
                         status="WIN" if pnl_usd > 0 else "LOSS",
+                        lot_size=trade_lot,
                     )
                     trades.append(record)
 
@@ -234,7 +254,7 @@ class StrategyBacktester:
             exit_px = last_c.close if last_c else active_trade["entry_price"]
             is_long = active_trade["direction"] == "LONG"
             pts = round((exit_px - active_trade["entry_price"]) if is_long else (active_trade["entry_price"] - exit_px), 2)
-            pnl_usd = round(pts * self.lot_size * 100.0, 2)
+            trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, active_trade["entry_price"], active_trade["sl_price"])
             trades.append(BacktestTradeRecord(
                 trade_id=active_trade["id"],
                 strategy="Fib Go with Trend",
@@ -250,8 +270,9 @@ class StrategyBacktester:
                 exit_reason="EXPIRED",
                 pnl_pts=pts,
                 pnl_usd=pnl_usd,
-                r_multiple=round(pts / max(0.1, abs(active_trade["entry_price"] - active_trade["sl_price"])), 2),
+                r_multiple=r_mult,
                 status="OPEN",
+                lot_size=trade_lot,
             ))
 
         return trades
@@ -324,9 +345,7 @@ class StrategyBacktester:
 
                 if closed:
                     pts = round((exit_price - active_trade["entry_price"]) if is_long else (active_trade["entry_price"] - exit_price), 2)
-                    pnl_usd = round(pts * self.lot_size * 100.0, 2)
-                    risk_pts = max(0.1, abs(active_trade["entry_price"] - sl))
-                    r_mult = round(pts / risk_pts, 2)
+                    trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, active_trade["entry_price"], sl)
 
                     record = BacktestTradeRecord(
                         trade_id=active_trade["id"],
@@ -345,6 +364,7 @@ class StrategyBacktester:
                         pnl_usd=pnl_usd,
                         r_multiple=r_mult,
                         status="WIN" if pnl_usd > 0 else "LOSS",
+                        lot_size=trade_lot,
                     )
                     trades.append(record)
                     engines[active_trade["timeframe"]]._reset_setup()
@@ -379,7 +399,7 @@ class StrategyBacktester:
             exit_px = last_c.close if last_c else active_trade["entry_price"]
             is_long = active_trade["direction"] == "LONG"
             pts = round((exit_px - active_trade["entry_price"]) if is_long else (active_trade["entry_price"] - exit_px), 2)
-            pnl_usd = round(pts * self.lot_size * 100.0, 2)
+            trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, active_trade["entry_price"], active_trade["sl_price"])
             trades.append(BacktestTradeRecord(
                 trade_id=active_trade["id"],
                 strategy="SMC with Fib",
@@ -395,8 +415,9 @@ class StrategyBacktester:
                 exit_reason="EXPIRED",
                 pnl_pts=pts,
                 pnl_usd=pnl_usd,
-                r_multiple=round(pts / max(0.1, abs(active_trade["entry_price"] - active_trade["sl_price"])), 2),
+                r_multiple=r_mult,
                 status="OPEN",
+                lot_size=trade_lot,
             ))
 
         return trades
@@ -412,7 +433,8 @@ class StrategyBacktester:
         selected_tf: str = "all",
     ) -> list[BacktestTradeRecord]:
         selected_tf = (selected_tf or "all").lower().strip()
-        allowed = ["5m", "15m", "30m", "1h", "4h"]
+        # 4H is excluded from Fib Retracement as 4H underperforms and causes excess drawdown
+        allowed = ["5m", "15m", "30m", "1h"]
         if selected_tf != "all":
             if selected_tf not in allowed:
                 return []
@@ -475,9 +497,7 @@ class StrategyBacktester:
                             exit_px = float(l_data.get("exit_price") or (tp_px if exit_reason == "TP_HIT" else (setup.sl_price or sl_px)))
 
                             pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
-                            pnl_usd = round(pts * self.lot_size * 100.0, 2)
-                            risk_pts = max(0.1, abs(entry_px - sl_px))
-                            r_mult = round(pts / risk_pts, 2)
+                            trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, entry_px, sl_px)
 
                             trades.append(BacktestTradeRecord(
                                 trade_id=f"RETR_{tf.upper()}_{l_key}_{int(ts.timestamp())}",
@@ -496,6 +516,7 @@ class StrategyBacktester:
                                 pnl_usd=pnl_usd,
                                 r_multiple=r_mult,
                                 status="WIN" if pnl_usd > 0 else "LOSS",
+                                lot_size=trade_lot,
                             ))
 
             # 3. Setup completion / invalidation lifecycle
@@ -521,8 +542,8 @@ class StrategyBacktester:
                             entry_px = float(l_data["entry_price"])
                             exit_px = float(last_c.close if last_c else entry_px)
                             pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
-                            pnl_usd = round(pts * self.lot_size * 100.0, 2)
                             sl_px = float(l_data.get("sl") or eng.setup.sl_price or entry_px)
+                            trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, entry_px, sl_px)
                             trades.append(BacktestTradeRecord(
                                 trade_id=f"RETR_{tf.upper()}_{l_key}_{int(timeline[-1][0].timestamp())}",
                                 strategy=f"Fib Retracement [{l_key}]",
@@ -538,8 +559,9 @@ class StrategyBacktester:
                                 exit_reason="EXPIRED",
                                 pnl_pts=pts,
                                 pnl_usd=pnl_usd,
-                                r_multiple=round(pts / max(0.1, abs(entry_px - sl_px)), 2),
+                                r_multiple=r_mult,
                                 status="OPEN",
+                                lot_size=trade_lot,
                             ))
 
         return trades
@@ -592,6 +614,8 @@ class StrategyBacktester:
             "initial_capital": self.initial_capital,
             "final_balance": final_balance,
             "lot_size": self.lot_size,
+            "sizing_mode": self.sizing_mode,
+            "target_risk_usd": self.target_risk_usd,
             "total_trades": total,
             "winning_trades": wins,
             "losing_trades": losses,

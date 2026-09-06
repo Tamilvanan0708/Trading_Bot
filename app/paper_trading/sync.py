@@ -18,6 +18,7 @@ from app.core.logging import logger
 from app.data.live.service import get_live_service
 from app.database.models import PaperTradeModel, SignalModel
 from app.database.repository import Repository
+from app.config.execution_settings import calculate_lot_size, get_execution_settings
 from app.notifications.telegram_service import TelegramService
 from app.retracement.multi_tf import get_retracement_multi_tf_service
 from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
@@ -266,14 +267,22 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 if not ai_approved:
                                     continue
 
+                                exec_cfg = get_execution_settings()
+                                trade_lot = calculate_lot_size(
+                                    entry_px, sl_px,
+                                    sizing_mode=exec_cfg.sizing_mode,
+                                    target_risk_usd=exec_cfg.target_risk_usd,
+                                    fixed_lot_size=exec_cfg.fixed_lot_size
+                                )
+
                                 new_trade = PaperTradeModel(
                                     id=str(uuid.uuid4()),
                                     signal_id=sig_id,
                                     symbol="XAUUSD",
                                     direction=f_state.direction,
                                     state="OPEN",
-                                    lot_size=0.01,
-                                    risk_amount=round(0.01 * abs(entry_px - sl_px) * 100.0, 2),
+                                    lot_size=trade_lot,
+                                    risk_amount=round(trade_lot * abs(entry_px - sl_px) * 100.0, 2),
                                     target_entry=entry_px,
                                     actual_entry=entry_px,
                                     stop_loss=sl_px,
@@ -469,14 +478,22 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             if not ai_approved:
                                 continue
 
+                            exec_cfg = get_execution_settings()
+                            trade_lot = calculate_lot_size(
+                                entry_px, sl_px,
+                                sizing_mode=exec_cfg.sizing_mode,
+                                target_risk_usd=exec_cfg.target_risk_usd,
+                                fixed_lot_size=exec_cfg.fixed_lot_size
+                            )
+
                             new_trade = PaperTradeModel(
                                 id=str(uuid.uuid4()),
                                 signal_id=sig_id,
                                 symbol="XAUUSD",
                                 direction=dir_str,
                                 state="OPEN",
-                                lot_size=0.01,
-                                risk_amount=round(0.01 * abs(entry_px - sl_px) * 100.0, 2),
+                                lot_size=trade_lot,
+                                risk_amount=round(trade_lot * abs(entry_px - sl_px) * 100.0, 2),
                                 target_entry=entry_px,
                                 actual_entry=entry_px,
                                 stop_loss=sl_px,
@@ -600,14 +617,22 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         try:
                             ai_short = "APPROVED (95% Conf)"
                             ai_verdict = f"APPROVED (conf=95%) — Rule 8 breakout confirmed on {tf_key.upper()} with 9/21 EMA alignment"
+                            exec_cfg = get_execution_settings()
+                            trade_lot = calculate_lot_size(
+                                entry_px, sl_px,
+                                sizing_mode=exec_cfg.sizing_mode,
+                                target_risk_usd=exec_cfg.target_risk_usd,
+                                fixed_lot_size=exec_cfg.fixed_lot_size
+                            )
+
                             new_trade = PaperTradeModel(
                                 id=str(uuid.uuid4()),
                                 signal_id=sig_id,
                                 symbol="XAUUSD",
                                 direction=dir_str,
                                 state="OPEN",
-                                lot_size=0.01,
-                                risk_amount=round(0.01 * abs(entry_px - sl_px) * 100.0, 2),
+                                lot_size=trade_lot,
+                                risk_amount=round(trade_lot * abs(entry_px - sl_px) * 100.0, 2),
                                 target_entry=entry_px,
                                 actual_entry=entry_px,
                                 stop_loss=sl_px,
