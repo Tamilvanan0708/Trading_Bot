@@ -463,7 +463,7 @@ class StrategyBacktester:
                             sl_px = float(l_data.get("sl") or setup.sl_price or (entry_px - 8.0 if is_long else entry_px + 8.0))
                             tp_px = float(l_data.get("tp") or (entry_px + 16.0 if is_long else entry_px - 16.0))
                             exit_reason = l_data["state"]
-                            exit_px = tp_px if exit_reason == "TP_HIT" else float(setup.sl_price or sl_px)
+                            exit_px = float(l_data.get("exit_price") or (tp_px if exit_reason == "TP_HIT" else (setup.sl_price or sl_px)))
 
                             pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
                             pnl_usd = round(pts * self.lot_size * 100.0, 2)

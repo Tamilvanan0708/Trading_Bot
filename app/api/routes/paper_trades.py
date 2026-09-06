@@ -246,16 +246,13 @@ async def repair_paper_trades(db: AsyncSession = Depends(get_db_session)):
             l2_trade = next((other for other in trades if other.signal_id == l2_sig), None)
 
             if l2_trade and l2_trade.exit_reason == "TP_HIT":
-                # L2 reached TP! L1's SL should have been trailed to L2's entry price (0.500 level)
-                l2_entry = float(l2_trade.actual_entry or l2_trade.target_entry or 0.0)
+                # L2 reached TP! L1's SL should have been trailed to Breakeven (0.618 level / L1 Entry)
                 l1_entry = float(t.actual_entry or t.target_entry or 0.0)
-                if l2_entry > 0 and l1_entry > 0:
-                    # L1 SL trailed to L2 entry
-                    t.stop_loss = l2_entry
-                    t.exit_price = l2_entry
-                    pts = (l2_entry - l1_entry) if t.direction == "LONG" else (l1_entry - l2_entry)
-                    t.realized_pnl = round(pts * (t.lot_size or 0.01) * 100.0, 2)
-                    t.realized_r = -1.0
+                if l1_entry > 0:
+                    t.stop_loss = l1_entry
+                    t.exit_price = l1_entry
+                    t.realized_pnl = 0.0
+                    t.realized_r = 0.0
                     repaired_count += 1
 
     if repaired_count > 0:
@@ -264,5 +261,5 @@ async def repair_paper_trades(db: AsyncSession = Depends(get_db_session)):
     return {
         "status": "SUCCESS",
         "repaired_trades": repaired_count,
-        "message": f"Successfully repaired {repaired_count} trades with proper 0.500 Smart Shield trailing.",
+        "message": f"Successfully repaired {repaired_count} trades with proper 0.618 Breakeven Smart Shield trailing.",
     }
