@@ -4556,7 +4556,7 @@ Routes["/backtest"] = (mount) => {
       <div class="row-between">
         <div>
           <div class="section-title">🧪 BACKTEST LAB & HISTORICAL VERIFIER</div>
-          <div class="muted" style="font-size:11px">Multi-Timeframe Deterministic Backtesting · Single Active Trade Lock · Real Binance Data</div>
+          <div class="muted" style="font-size:11px">Multi-Timeframe Deterministic Backtesting · Option 1A Multi-Slot Parallel Execution · Real Binance Data</div>
         </div>
         <div class="toolbar">
           <span class="badge badge-blue">OFFLINE SIMULATOR</span>
