@@ -37,10 +37,6 @@ def test_calculate_lot_size():
     lot_1h = calculate_lot_size(entry_px=5000.0, sl_px=4975.0, sizing_mode="broker_risk", target_risk_usd=10.0)
     assert lot_1h == 0.01
 
-    # 3. Pure risk mode: allows precision fractional lot
-    lot_pure = calculate_lot_size(entry_px=5000.0, sl_px=4975.0, sizing_mode="pure_risk", target_risk_usd=10.0)
-    assert lot_pure == 0.004
-
 
 def test_strategy_backtester_sizing_init():
     bt = StrategyBacktester(

@@ -1,7 +1,7 @@
 {
   "sizing_mode": "broker_risk",
-  "target_risk_usd": 10.0,
-  "fixed_lot_size": 0.01,
+  "target_risk_usd": 12.5,
+  "fixed_lot_size": 0.02,
   "fib_retracement_timeframes": [
     "5m",
     "15m",

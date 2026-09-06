@@ -18,9 +18,9 @@ CONFIG_FILE = Path("data/execution_settings.json")
 
 
 class ExecutionSettings(BaseModel):
-    sizing_mode: Literal["fixed", "broker_risk", "pure_risk"] = Field(
+    sizing_mode: Literal["fixed", "broker_risk"] = Field(
         default="broker_risk",
-        description="fixed | broker_risk | pure_risk"
+        description="fixed | broker_risk"
     )
     target_risk_usd: float = Field(
         default=10.0,
@@ -98,13 +98,6 @@ def calculate_lot_size(
     risk_pts = max(0.2, abs(entry_px - sl_px))
     raw_lot = target_risk_usd / (risk_pts * 100.0)
 
-    if mode == "broker_risk":
-        # Round to standard broker lot step 0.01 with minimum lot floor
-        broker_lot = round(raw_lot, 2)
-        broker_lot = max(min_lot, min(max_lot, broker_lot))
-        return broker_lot
-    elif mode == "pure_risk":
-        # Precision lot size (e.g. 0.004)
-        return max(0.001, min(max_lot, round(raw_lot, 4)))
-
-    return max(min_lot, round(fixed_lot_size, 2))
+    # broker_risk: Round to standard broker lot step 0.01 with minimum lot floor
+    broker_lot = round(raw_lot, 2)
+    return max(min_lot, min(max_lot, broker_lot))

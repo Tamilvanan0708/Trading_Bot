@@ -4599,7 +4599,6 @@ Routes["/backtest"] = (mount) => {
               <select id="bt-sizing-mode" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
                 <option value="broker_risk" ${(!window.__btSizingMode || window.__btSizingMode === 'broker_risk') ? 'selected' : ''}>Dynamic Risk ($10 Risk)</option>
                 <option value="fixed" ${window.__btSizingMode === 'fixed' ? 'selected' : ''}>Fixed Lot (0.01)</option>
-                <option value="pure_risk" ${window.__btSizingMode === 'pure_risk' ? 'selected' : ''}>Pure Math Risk</option>
               </select>
             </div>
 
@@ -4845,8 +4844,8 @@ Routes["/settings"] = async (mount) => {
       <div class="card" style="border: 1px solid rgba(41,98,255,0.3)">
         <div class="card-head" style="background:rgba(41,98,255,0.08);display:flex;justify-content:space-between;align-items:center">
           <span style="font-weight:700;color:#90caf9">🎯 POSITION SIZING & RISK ENGINE</span>
-          <span id="set-mode-badge" class="badge ${sizingMode === 'broker_risk' ? 'badge-green' : (sizingMode === 'fixed' ? 'badge-amber' : 'badge-violet')}">
-            ${sizingMode === 'broker_risk' ? 'DYNAMIC RISK' : (sizingMode === 'fixed' ? 'FIXED LOT' : 'PURE MATH RISK')}
+          <span id="set-mode-badge" class="badge ${sizingMode === 'fixed' ? 'badge-amber' : 'badge-green'}">
+            ${sizingMode === 'fixed' ? 'FIXED LOT' : 'DYNAMIC RISK'}
           </span>
         </div>
         <div class="card-body">
@@ -4858,7 +4857,6 @@ Routes["/settings"] = async (mount) => {
               <select id="set-sizing-mode" class="form-input" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
                 <option value="broker_risk" ${sizingMode === 'broker_risk' ? 'selected' : ''}>Dynamic Risk ($10 Risk) — Recommended</option>
                 <option value="fixed" ${sizingMode === 'fixed' ? 'selected' : ''}>Fixed Lot (0.01)</option>
-                <option value="pure_risk" ${sizingMode === 'pure_risk' ? 'selected' : ''}>Pure Math Risk</option>
               </select>
             </div>
 
@@ -4959,13 +4957,6 @@ Routes["/settings"] = async (mount) => {
         if (badge) {
           badge.className = "badge badge-amber";
           badge.textContent = "FIXED LOT";
-        }
-      } else if (val === "pure_risk") {
-        if (riskBox) riskBox.style.opacity = "1";
-        if (lotBox) lotBox.style.opacity = "0.35";
-        if (badge) {
-          badge.className = "badge badge-violet";
-          badge.textContent = "PURE MATH RISK";
         }
       } else {
         if (riskBox) riskBox.style.opacity = "1";
