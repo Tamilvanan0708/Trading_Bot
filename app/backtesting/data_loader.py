@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import glob
 import json
 import os
 from typing import List
@@ -23,9 +24,7 @@ CACHE_DIR = os.path.join(ROOT_DIR, "data", "research")
 
 BINANCE_REST_BASE_URLS = [
     "https://fapi.binance.com",
-    "https://fapi1.binance.com",
-    "https://fapi2.binance.com",
-    "https://fapi3.binance.com",
+    "https://api.binance.com",
 ]
 
 TF_INTERVAL_MAP = {
@@ -39,6 +38,56 @@ TF_INTERVAL_MAP = {
 }
 
 
+def _parse_candles(entries: list[dict]) -> list[Candle]:
+    """Parse a list of raw candle dicts into sorted Candle models."""
+    candles: list[Candle] = []
+    for r in entries:
+        try:
+            ts = datetime.fromisoformat(str(r["timestamp"]))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            candles.append(Candle(
+                timestamp=ts,
+                open=float(r["open"]),
+                high=float(r["high"]),
+                low=float(r["low"]),
+                close=float(r["close"]),
+                volume=float(r.get("volume", 0.0) or 0.0),
+            ))
+        except Exception:
+            continue
+    candles.sort(key=lambda c: c.timestamp)
+    return candles
+
+
+def _save_cache(cache_path: str, symbol: str, tf_str: str, start_dt: datetime, end_dt: datetime, candles: list[Candle]) -> None:
+    """Save Candle list to a JSON cache file."""
+    try:
+        cache_payload = {
+            "symbol": symbol,
+            "timeframe": tf_str,
+            "start_dt": start_dt.isoformat(),
+            "end_dt": end_dt.isoformat(),
+            "count": len(candles),
+            "candles": [
+                {
+                    "timestamp": c.timestamp.isoformat(),
+                    "open": c.open,
+                    "high": c.high,
+                    "low": c.low,
+                    "close": c.close,
+                    "volume": c.volume,
+                }
+                for c in candles
+            ],
+        }
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(cache_payload, f)
+        logger.info("[DATA-LOADER] Cached %d candles to %s", len(candles), cache_path)
+    except Exception as save_err:  # noqa: BLE001
+        logger.warning("[DATA-LOADER] Failed to write cache: %s", save_err)
+
+
 async def fetch_historical_candles(
     symbol: str,
     timeframe: str,
@@ -48,7 +97,9 @@ async def fetch_historical_candles(
 ) -> list[Candle]:
     """Fetch historical candles for symbol and timeframe between start_dt and end_dt.
 
-    Results are cached to disk so subsequent runs for the same range return instantaneously.
+    1. Checks for exact cache match.
+    2. Searches for wider/master cache files covering [start_dt, end_dt] and slices candles.
+    3. Falls back to resilient Binance REST API pagination with retry & rate-limit backoff.
     """
     os.makedirs(CACHE_DIR, exist_ok=True)
     tf_str = timeframe.lower()
@@ -65,34 +116,67 @@ async def fetch_historical_candles(
     end_str = end_dt.strftime("%Y%m%d_%H%M")
     cache_path = os.path.join(CACHE_DIR, f"cache_{binance_symbol.lower()}_{tf_str}_{start_str}_{end_str}.json")
 
-    # 1. Check local cache
+    # 1. Exact local cache match
     if use_cache and os.path.exists(cache_path):
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
             entries = raw.get("candles", raw)
-            candles = []
-            for r in entries:
-                ts = datetime.fromisoformat(str(r["timestamp"]))
-                candles.append(Candle(
-                    timestamp=ts,
-                    open=float(r["open"]),
-                    high=float(r["high"]),
-                    low=float(r["low"]),
-                    close=float(r["close"]),
-                    volume=float(r.get("volume", 0.0) or 0.0),
-                ))
-            candles.sort(key=lambda c: c.timestamp)
+            candles = _parse_candles(entries)
             if candles:
                 logger.info(
-                    "[DATA-LOADER] Loaded %d candles from cache for %s [%s] (%s to %s)",
+                    "[DATA-LOADER] Loaded %d candles from exact cache for %s [%s] (%s to %s)",
                     len(candles), symbol, tf_str, start_str, end_str
                 )
                 return candles
         except Exception as cache_err:  # noqa: BLE001
-            logger.warning("[DATA-LOADER] Cache read failed: %s, fetching fresh data", cache_err)
+            logger.warning("[DATA-LOADER] Cache read failed: %s, checking master candidates", cache_err)
 
-    # 2. Fetch from Binance REST API with pagination
+    # 2. Master / Range-sliced cache candidate lookup
+    if use_cache:
+        pattern = os.path.join(CACHE_DIR, f"cache_{binance_symbol.lower()}_{tf_str}_*.json")
+        candidates = sorted(glob.glob(pattern), key=lambda p: os.path.getsize(p), reverse=True)
+        for c_path in candidates:
+            if c_path == cache_path:
+                continue
+            try:
+                with open(c_path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                c_start_str = raw.get("start_dt")
+                c_end_str = raw.get("end_dt")
+                if not c_start_str or not c_end_str:
+                    continue
+                c_start = datetime.fromisoformat(c_start_str)
+                c_end = datetime.fromisoformat(c_end_str)
+                if c_start.tzinfo is None:
+                    c_start = c_start.replace(tzinfo=timezone.utc)
+                if c_end.tzinfo is None:
+                    c_end = c_end.replace(tzinfo=timezone.utc)
+
+                # Check if candidate file contains the entire requested range
+                if c_start <= start_dt and c_end >= end_dt:
+                    entries = raw.get("candles", [])
+                    sliced_entries = []
+                    for r in entries:
+                        ts = datetime.fromisoformat(str(r["timestamp"]))
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if start_dt <= ts <= end_dt:
+                            sliced_entries.append(r)
+
+                    sliced_candles = _parse_candles(sliced_entries)
+                    if sliced_candles:
+                        logger.info(
+                            "[DATA-LOADER] Sliced %d candles from master cache %s for %s [%s] (%s to %s)",
+                            len(sliced_candles), os.path.basename(c_path), symbol, tf_str, start_str, end_str
+                        )
+                        _save_cache(cache_path, symbol, tf_str, start_dt, end_dt, sliced_candles)
+                        return sliced_candles
+            except Exception as slice_err:  # noqa: BLE001
+                logger.debug("[DATA-LOADER] Skipping candidate %s: %s", c_path, slice_err)
+                continue
+
+    # 3. Fetch from Binance REST API with pagination and retry backoff
     start_ms = int(start_dt.timestamp() * 1000)
     end_ms = int(end_dt.timestamp() * 1000)
     current_start = start_ms
@@ -102,14 +186,14 @@ async def fetch_historical_candles(
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         "Accept": "application/json",
     }
-    timeout = httpx.Timeout(10.0, connect=5.0)
+    timeout = httpx.Timeout(20.0, connect=10.0)
 
     logger.info(
         "[DATA-LOADER] Fetching %s %s candles from Binance API from %s to %s",
         symbol, tf_str, start_dt.isoformat(), end_dt.isoformat()
     )
 
-    async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=False) as client:
         while current_start < end_ms:
             params = {
                 "symbol": binance_symbol,
@@ -121,30 +205,49 @@ async def fetch_historical_candles(
 
             resp = None
             for url in BINANCE_REST_BASE_URLS:
-                try:
-                    resp = await client.get(f"{url}/fapi/v1/klines", params=params)
-                    if resp.status_code == 200:
-                        break
-                except Exception:
-                    continue
+                endpoint = f"{url}/fapi/v1/klines" if "fapi" in url else f"{url}/api/v3/klines"
+                for attempt in range(3):
+                    try:
+                        resp = await client.get(endpoint, params=params)
+                        if resp.status_code == 200:
+                            break
+                        elif resp.status_code == 429:
+                            # Rate limit hit: sleep and retry
+                            wait_s = 1.5 * (attempt + 1)
+                            logger.warning("[DATA-LOADER] Binance rate-limit 429 encountered, waiting %.1fs", wait_s)
+                            await asyncio.sleep(wait_s)
+                        else:
+                            break
+                    except Exception as req_err:
+                        logger.debug("[DATA-LOADER] Request attempt %d failed on %s: %s", attempt + 1, endpoint, req_err)
+                        await asyncio.sleep(0.5 * (attempt + 1))
+                if resp is not None and resp.status_code == 200:
+                    break
 
             if resp is None or resp.status_code != 200:
                 logger.error("[DATA-LOADER] Failed to fetch klines from Binance for %s: %s", symbol, getattr(resp, "status_code", "ERROR"))
                 break
 
-            klines = resp.json()
+            try:
+                klines = resp.json()
+            except Exception as json_err:
+                logger.error("[DATA-LOADER] Failed to parse JSON response: %s", json_err)
+                break
+
             if not klines or not isinstance(klines, list):
                 break
 
             all_raw_klines.extend(klines)
 
             last_open_time = int(klines[-1][0])
-            if last_open_time <= current_start or len(klines) < 1500:
+            if last_open_time <= current_start:
                 break
             current_start = last_open_time + 1
+            if len(klines) < 1500:
+                break
             await asyncio.sleep(0.05)  # cooperative throttle
 
-    # 3. Deduplicate and parse into Candle objects
+    # 4. Deduplicate and parse into Candle objects
     seen_ts = set()
     candles: list[Candle] = []
 
@@ -180,31 +283,9 @@ async def fetch_historical_candles(
 
     candles.sort(key=lambda c: c.timestamp)
 
-    # 4. Save to local cache
+    # 5. Save to local cache
     if candles and use_cache:
-        try:
-            cache_payload = {
-                "symbol": symbol,
-                "timeframe": tf_str,
-                "start_dt": start_dt.isoformat(),
-                "end_dt": end_dt.isoformat(),
-                "count": len(candles),
-                "candles": [
-                    {
-                        "timestamp": c.timestamp.isoformat(),
-                        "open": c.open,
-                        "high": c.high,
-                        "low": c.low,
-                        "close": c.close,
-                        "volume": c.volume,
-                    }
-                    for c in candles
-                ],
-            }
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(cache_payload, f)
-            logger.info("[DATA-LOADER] Cached %d candles to %s", len(candles), cache_path)
-        except Exception as save_err:  # noqa: BLE001
-            logger.warning("[DATA-LOADER] Failed to write cache: %s", save_err)
+        _save_cache(cache_path, symbol, tf_str, start_dt, end_dt, candles)
 
     return candles
+
