@@ -4452,6 +4452,309 @@ Routes["/fib-trend"] = (mount) => {
   );
 };
 
+/* ================= BACKTEST LAB ================= */
+Routes["/backtest"] = (mount) => {
+  let backtestData = window.__lastBacktestData || null;
+  let isLoading = false;
+  let activeFilter = "ALL";
+  let searchQuery = "";
+
+  function renderView() {
+    const summary = backtestData?.summary || null;
+    const allTrades = backtestData?.trades || [];
+
+    // Filter trades
+    const filteredTrades = allTrades.filter(t => {
+      if (activeFilter === "WIN" && t.status !== "WIN") return false;
+      if (activeFilter === "LOSS" && t.status !== "LOSS") return false;
+      if (activeFilter === "OPEN" && t.status !== "OPEN") return false;
+      if (searchQuery) {
+        const str = `${t.trade_id} ${t.strategy} ${t.timeframe} ${t.direction} ${t.entry_price} ${t.exit_reason}`.toLowerCase();
+        if (!str.includes(searchQuery)) return false;
+      }
+      return true;
+    });
+
+    let summaryHtml = "";
+    if (summary) {
+      const pnlCls = summary.net_profit_usd >= 0 ? "up" : "down";
+      const pnlSign = summary.net_profit_usd >= 0 ? "+" : "";
+      summaryHtml = `
+        <div class="grid grid-4" style="margin-bottom:var(--sp-3)">
+          <div class="metric">
+            <div class="metric-label">WIN RATE</div>
+            <div class="metric-value ${summary.win_rate >= 50 ? 'up' : 'down'}">${summary.win_rate}%</div>
+            <div class="muted" style="font-size:11px">${summary.winning_trades} Wins · ${summary.losing_trades} Losses</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">NET PROFIT (USD)</div>
+            <div class="metric-value ${pnlCls}">${pnlSign}$${Number(summary.net_profit_usd).toFixed(2)}</div>
+            <div class="muted" style="font-size:11px">${pnlSign}${summary.total_pts} PTS (0.01 Lots)</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">PROFIT FACTOR</div>
+            <div class="metric-value">${summary.profit_factor}</div>
+            <div class="muted" style="font-size:11px">Gross Win / Gross Loss</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">MAX DRAWDOWN</div>
+            <div class="metric-value down">-$${Number(summary.max_drawdown_usd).toFixed(2)}</div>
+            <div class="muted" style="font-size:11px">Max DD: ${summary.max_drawdown_pct}%</div>
+          </div>
+        </div>
+
+        <div class="card" style="padding:10px 16px;margin-bottom:var(--sp-3);background:rgba(41,98,255,0.06);border-color:rgba(41,98,255,0.2)">
+          <div class="row-between">
+            <div style="font-size:12px;color:var(--text)">
+              📅 <b>Simulation Window:</b> ${summary.start_date} to ${summary.end_date} · <b>Total Trades:</b> ${summary.total_trades}
+            </div>
+            <div style="font-size:12px">
+              <b>Capital:</b> $${summary.initial_capital} ➜ <b style="color:${summary.net_profit_usd >= 0 ? '#00e676' : '#ef5350'}">$${Number(summary.final_balance).toFixed(2)}</b>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    const tradeRows = filteredTrades.map((t, i) => {
+      const isWin = t.status === "WIN";
+      const isLoss = t.status === "LOSS";
+      const statusBadge = isWin
+        ? `<span class="badge badge-green">WIN</span>`
+        : (isLoss ? `<span class="badge badge-red">LOSS</span>` : `<span class="badge badge-yellow">OPEN</span>`);
+
+      const pnlColor = t.pnl_usd > 0 ? "color:#00e676" : (t.pnl_usd < 0 ? "color:#ef5350" : "color:var(--text-muted)");
+      const pnlSign = t.pnl_usd > 0 ? "+" : "";
+      const dirBadge = t.direction === "LONG" ? `<span class="badge badge-green" style="font-size:10px">BUY ▲</span>` : `<span class="badge badge-red" style="font-size:10px">SELL ▼</span>`;
+
+      return `<tr>
+        <td class="muted">${i + 1}</td>
+        <td><b>${t.entry_time ? t.entry_time.replace("T", " ").replace("+00:00", "") : "—"}</b></td>
+        <td><span class="badge badge-blue" style="font-size:10px">${UI.esc(t.strategy)}</span></td>
+        <td><b>${UI.esc(t.timeframe)}</b></td>
+        <td>${dirBadge}</td>
+        <td class="num" style="color:#ffd54f">$${Number(t.zero_level).toFixed(2)}</td>
+        <td class="num" style="font-weight:700">$${Number(t.entry_price).toFixed(2)}</td>
+        <td class="num" style="color:#ef5350">$${Number(t.sl_price).toFixed(2)}</td>
+        <td class="num" style="color:#00e676">$${Number(t.tp_price).toFixed(2)}</td>
+        <td class="num">$${Number(t.exit_price).toFixed(2)}</td>
+        <td><span class="badge ${t.exit_reason === 'TP_HIT' ? 'badge-green' : (t.exit_reason === 'SL_HIT' ? 'badge-red' : 'badge-yellow')}">${UI.esc(t.exit_reason)}</span></td>
+        <td class="num" style="${pnlColor}">${pnlSign}${Number(t.pnl_pts).toFixed(2)}</td>
+        <td class="num" style="${pnlColor};font-weight:700">${pnlSign}$${Number(t.pnl_usd).toFixed(2)}</td>
+        <td>${statusBadge}</td>
+      </tr>`;
+    }).join("");
+
+    mount.innerHTML = `<div class="stack">
+      <div class="row-between">
+        <div>
+          <div class="section-title">🧪 BACKTEST LAB & HISTORICAL VERIFIER</div>
+          <div class="muted" style="font-size:11px">Multi-Timeframe Deterministic Backtesting · Single Active Trade Lock · Real Binance Data</div>
+        </div>
+        <div class="toolbar">
+          <span class="badge badge-blue">OFFLINE SIMULATOR</span>
+          <span class="badge badge-green">REAL BINANCE CANDLES</span>
+          <span class="badge badge-red">NO REAL MONEY</span>
+        </div>
+      </div>
+
+      <!-- CONFIG CARD -->
+      <div class="card">
+        <div class="card-head"><span>BACKTEST PARAMETERS</span></div>
+        <div class="card-body">
+          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">
+            <div style="flex:1;min-width:200px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">STRATEGY</label>
+              <select id="bt-strategy" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
+                <option value="FIB_GO_WITH_TREND" ${window.__btStrategy === 'FIB_GO_WITH_TREND' ? 'selected' : ''}>Fib Go with Trend (15M, 30M, 1H, 2H, 4H)</option>
+                <option value="SMC_WITH_FIB" ${window.__btStrategy === 'SMC_WITH_FIB' ? 'selected' : ''}>SMC with Fib (5M, 15M, 30M, 1H, 4H)</option>
+                <option value="FIB_WITH_RETRACEMENT" ${window.__btStrategy === 'FIB_WITH_RETRACEMENT' ? 'selected' : ''}>Fib Retracement (5M, 15M, 30M, 1H, 4H)</option>
+                <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>All 3 Strategies Combined</option>
+              </select>
+            </div>
+
+            <div style="flex:1;min-width:140px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">FROM DATE</label>
+              <input type="date" id="bt-from-date" class="form-input" value="${window.__btFromDate || '2026-07-01'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+            </div>
+
+            <div style="flex:1;min-width:140px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TO DATE</label>
+              <input type="date" id="bt-to-date" class="form-input" value="${window.__btToDate || '2026-07-31'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+            </div>
+
+            <div style="width:110px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">LOT SIZE</label>
+              <input type="number" id="bt-lot-size" class="form-input" value="${window.__btLotSize || 0.01}" step="0.01" min="0.01" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+            </div>
+
+            <div style="width:120px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">START CAPITAL</label>
+              <input type="number" id="bt-capital" class="form-input" value="${window.__btCapital || 1000}" step="100" min="100" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+            </div>
+
+            <div>
+              <button id="bt-run-btn" class="btn btn-primary" style="padding:8px 20px;font-weight:700;font-size:12px;display:flex;align-items:center;gap:6px" ${isLoading ? 'disabled' : ''}>
+                ${isLoading ? '⏳ RUNNING SIMULATION…' : '🚀 RUN BACKTEST'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RESULTS SUMMARY -->
+      ${summaryHtml}
+
+      <!-- TABLE & EXPORT CARD -->
+      <div class="card">
+        <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span>DETAILED TRADE LOGS</span>
+            <span class="badge badge-blue">${filteredTrades.length} Trades Shown</span>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="search" id="bt-search" placeholder="Search trades..." value="${searchQuery}" style="padding:4px 8px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:4px;font-size:11px;width:160px">
+
+            <div class="btn-group" style="display:inline-flex;gap:4px">
+              <button class="btn btn-xs ${activeFilter === 'ALL' ? 'btn-primary' : 'btn-outline'}" data-filter="ALL">ALL</button>
+              <button class="btn btn-xs ${activeFilter === 'WIN' ? 'btn-primary' : 'btn-outline'}" data-filter="WIN">WINS</button>
+              <button class="btn btn-xs ${activeFilter === 'LOSS' ? 'btn-primary' : 'btn-outline'}" data-filter="LOSS">LOSSES</button>
+            </div>
+
+            <button id="bt-export-csv-btn" class="btn btn-xs btn-secondary" style="padding:4px 10px;font-size:11px;font-weight:700;display:flex;align-items:center;gap:4px" ${allTrades.length === 0 ? 'disabled' : ''}>
+              📥 EXPORT TO CSV
+            </button>
+          </div>
+        </div>
+
+        <div class="card-body flush">
+          <div class="table-wrap" style="max-height:600px;overflow-y:auto">
+            <table class="term">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>ENTRY TIME (UTC)</th>
+                  <th>STRATEGY</th>
+                  <th>TF</th>
+                  <th>DIR</th>
+                  <th class="num" title="Anchor Zero Origin (0.000)">ZERO (P0)</th>
+                  <th class="num">ENTRY</th>
+                  <th class="num" title="Stop Loss (0.236 Level)">SL</th>
+                  <th class="num" title="Take Profit (1.618 Target)">TP</th>
+                  <th class="num">EXIT</th>
+                  <th>REASON</th>
+                  <th class="num">PTS</th>
+                  <th class="num">PNL ($)</th>
+                  <th>STATUS</th>
+                </tr>
+              </thead>
+              <tbody id="bt-trades-tbody">
+                ${tradeRows || `<tr><td colspan="14" class="muted" style="text-align:center;padding:32px">No backtest run yet. Select parameters and click <b>RUN BACKTEST</b>.</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    // Wire up Run Button
+    const runBtn = mount.querySelector("#bt-run-btn");
+    if (runBtn) {
+      runBtn.addEventListener("click", async () => {
+        const strat = mount.querySelector("#bt-strategy")?.value || "FIB_GO_WITH_TREND";
+        const fDate = mount.querySelector("#bt-from-date")?.value || "2026-07-01";
+        const tDate = mount.querySelector("#bt-to-date")?.value || "2026-07-31";
+        const lot = parseFloat(mount.querySelector("#bt-lot-size")?.value || "0.01");
+        const cap = parseFloat(mount.querySelector("#bt-capital")?.value || "1000");
+
+        window.__btStrategy = strat;
+        window.__btFromDate = fDate;
+        window.__btToDate = tDate;
+        window.__btLotSize = lot;
+        window.__btCapital = cap;
+
+        isLoading = true;
+        renderView();
+
+        try {
+          const resp = await fetch("/backtest/run-strategy", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              strategy: strat,
+              start_date: fDate,
+              end_date: tDate,
+              lot_size: lot,
+              initial_capital: cap,
+            }),
+          });
+
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `Server returned ${resp.status}`);
+          }
+
+          const resData = await resp.json();
+          backtestData = resData;
+          window.__lastBacktestData = resData;
+          showToast(`Backtest completed: ${resData.summary?.total_trades || 0} trades evaluated`, "info");
+        } catch (err) {
+          showToast(`Backtest failed: ${err.message}`, "error");
+        } finally {
+          isLoading = false;
+          renderView();
+        }
+      });
+    }
+
+    // Wire up Filters
+    mount.querySelectorAll("[data-filter]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        activeFilter = btn.dataset.filter;
+        renderView();
+      });
+    });
+
+    // Wire up Search
+    const sInput = mount.querySelector("#bt-search");
+    if (sInput) {
+      sInput.addEventListener("input", (e) => {
+        searchQuery = e.target.value.trim().toLowerCase();
+        renderView();
+      });
+    }
+
+    // Wire up CSV Export
+    const csvBtn = mount.querySelector("#bt-export-csv-btn");
+    if (csvBtn) {
+      csvBtn.addEventListener("click", () => {
+        if (!allTrades || allTrades.length === 0) return;
+        const headers = [
+          "Trade_ID", "Entry_Time", "Strategy", "Timeframe", "Direction",
+          "Zero_Level_P0", "Entry_Price", "Stop_Loss", "Take_Profit",
+          "Exit_Time", "Exit_Price", "Exit_Reason", "Pts", "PnL_USD", "R_Multiple", "Status"
+        ];
+        const rows = allTrades.map(t => [
+          t.trade_id, t.entry_time, t.strategy, t.timeframe, t.direction,
+          t.zero_level, t.entry_price, t.sl_price, t.tp_price,
+          t.exit_time, t.exit_price, t.exit_reason, t.pnl_pts, t.pnl_usd, t.r_multiple, t.status
+        ]);
+        const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `backtest_${window.__btStrategy || 'all'}_${window.__btFromDate || 'start'}_to_${window.__btToDate || 'end'}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      });
+    }
+  }
+
+  renderView();
+};
+
 /* ================= SETTINGS ================= */
 Routes["/settings"] = (mount) => {
   renderWith(async () => {

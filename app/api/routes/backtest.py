@@ -86,3 +86,52 @@ async def get_backtest(id: str, db: AsyncSession = Depends(get_db_session)):
         "strategy_metrics": run.strategy_metrics,
         "trades_log": run.trades_log,
     }
+
+
+class StrategyBacktestRequest(BaseModel):
+    strategy: str = Field(default="FIB_GO_WITH_TREND", description="FIB_GO_WITH_TREND | SMC_WITH_FIB | FIB_WITH_RETRACEMENT | ALL")
+    start_date: str = Field(default="2026-07-01", description="YYYY-MM-DD")
+    end_date: str = Field(default="2026-07-31", description="YYYY-MM-DD")
+    symbol: str = Field(default="XAUUSD")
+    lot_size: float = Field(default=0.01, ge=0.01, le=10.0)
+    initial_capital: float = Field(default=1000.0, ge=100.0)
+
+
+@router.post("/run-strategy")
+async def run_strategy_backtest(req: StrategyBacktestRequest):
+    """Executes multi-timeframe strategy backtest with single active trade lock."""
+    from datetime import datetime, timezone
+    from app.backtesting.strategy_simulator import StrategyBacktester
+
+    def _parse_dt(d_str: str, is_end: bool = False) -> datetime:
+        cleaned = d_str.strip().split("T")[0]
+        dt = datetime.strptime(cleaned, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        if is_end:
+            dt = dt.replace(hour=23, minute=59, second=59)
+        return dt
+
+    try:
+        s_dt = _parse_dt(req.start_date, is_end=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid start_date format, expected YYYY-MM-DD or ISO date")
+
+    try:
+        e_dt = _parse_dt(req.end_date, is_end=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid end_date format, expected YYYY-MM-DD or ISO date")
+
+    if s_dt >= e_dt:
+        raise HTTPException(status_code=400, detail="start_date must be before end_date")
+
+    backtester = StrategyBacktester(
+        symbol=req.symbol,
+        lot_size=req.lot_size,
+        initial_capital=req.initial_capital,
+    )
+
+    try:
+        result = await backtester.run(req.strategy, s_dt, e_dt)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Backtest execution failed: {exc}")
+
