@@ -111,21 +111,22 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
             fib_svc = get_retracement_multi_tf_service("XAUUSD")
             fib_states = await fib_svc.advance(db)
 
-            # Check if any open trade already exists for FIB_WITH_RETRACEMENT across any timeframe
-            existing_open_retr = (await db.execute(
+            # Option 1A: Multi-Slot Parallel Execution — track open trades per timeframe slot
+            existing_open_trades = (await db.execute(
                 select(PaperTradeModel).where(
                     PaperTradeModel.state == "OPEN",
                     PaperTradeModel.signal_id.like("FIB_RETR_%"),
                 )
-            )).scalars().first()
+            )).scalars().all()
 
-            active_retr_tf = None
-            if existing_open_retr and existing_open_retr.signal_id:
-                parts = existing_open_retr.signal_id.split("_")
-                for p in parts:
-                    if p.lower() in fib_svc.timeframes:
-                        active_retr_tf = p.lower()
-                        break
+            # Map active timeframe -> base_anchor of the active setup
+            active_setup_by_tf: dict[str, str] = {}
+            for ot in existing_open_trades:
+                if ot.signal_id:
+                    # format: FIB_RETR_{TF}_{LAYER}_{ANCHOR}
+                    parts = ot.signal_id.split("_")
+                    if len(parts) >= 5 and parts[2].lower() in fib_svc.timeframes:
+                        active_setup_by_tf[parts[2].lower()] = parts[4]
 
             for tf_key in fib_svc.timeframes:
                 f_state = fib_states.get(tf_key)
@@ -192,9 +193,12 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         if sig_id in _in_flight_signals:
                             continue
 
-                        # Single Active Trade Rule:
-                        # If an open trade exists on another timeframe, lock this timeframe out!
-                        if existing_open_retr and active_retr_tf and active_retr_tf != tf_key:
+                        # Option 1A: Multi-Slot Parallel Execution
+                        # Timeframe isolation: an active trade on another timeframe does NOT block tf_key!
+                        # Within the same timeframe slot, if a trade with a DIFFERENT anchor is still open, wait.
+                        current_anchor = str(int(f_state.point_2_price))
+                        tf_active_anchor = active_setup_by_tf.get(tf_key)
+                        if tf_active_anchor and tf_active_anchor != current_anchor:
                             continue
 
                         existing = (await db.execute(
@@ -283,8 +287,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 )
                                 db.add(new_trade)
                                 await db.commit()
-                                existing_open_retr = new_trade
-                                active_retr_tf = tf_key
+                                active_setup_by_tf[tf_key] = current_anchor
                                 logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (Fib Retr %s %s) @ %.2f", sig_id, tf_key.upper(), l_key, entry_px)
 
                                 # Telegram: Dispatch Trade Opened Alert

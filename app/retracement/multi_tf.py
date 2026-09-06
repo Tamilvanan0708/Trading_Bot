@@ -161,10 +161,10 @@ class RetracementMultiTFMonitor:
     # ------------------------------------------------------------------
 
     async def advance(self, db) -> dict[str, RetracementSetup | None]:
-        """Process newly-closed candles on all timeframes with Winner-Takes-All Policy:
-        - If ANY timeframe triggers an entry touch, it instantly becomes the MASTER ACTIVE TRADE.
-        - All other timeframe setups are immediately PURGED / RESET to prevent multi-trade clutter.
-        - When the master active trade completes (TP/SL hit), scanning resumes across all timeframes.
+        """Process newly-closed candles on all timeframes with Option 1A Multi-Slot Parallel Execution:
+        - Every timeframe (5m, 15m, 30m, 1h, 4h) maintains its own independent trading slot.
+        - An entry touch on 30m/1h does NOT purge or freeze other timeframes.
+        - All timeframe engines co-exist and execute concurrently with zero cross-timeframe lockout.
         """
         async with self._lock:
             snap = await self._snapshot()
@@ -172,9 +172,15 @@ class RetracementMultiTFMonitor:
 
             # Check if any engine has already been seeded
             engines_seeded = any(slot.last_processed_ts is not None for slot in self.slots.values())
+            has_snap_candles = bool(
+                snap and hasattr(snap, "get_series") and any(
+                    len(list(snap.get_series(TF_MAP[tf]))) > 0
+                    for tf in self.timeframes if tf in TF_MAP
+                )
+            )
 
-            # Bootstrap from real Binance historical candles ONLY when engines have never been seeded
-            needs_bootstrap = not engines_seeded
+            # Bootstrap from real Binance historical candles ONLY when engines have never been seeded and snapshot has no candles
+            needs_bootstrap = (not engines_seeded) and (not has_snap_candles)
 
             hist_candles: dict[str, list] = {}
             if needs_bootstrap:
@@ -186,9 +192,9 @@ class RetracementMultiTFMonitor:
             for tf in self.timeframes:
                 slot = self.slots[tf]
                 candles: list = []
-                # Priority 1: Use live snapshot candles if we have enough
+                # Priority 1: Use live snapshot candles if available
                 snap_candles = list(snap.get_series(TF_MAP[tf])) if snap is not None else []
-                if snap_candles and (engines_seeded or len(snap_candles) >= 50):
+                if snap_candles and (engines_seeded or len(snap_candles) >= 50 or not needs_bootstrap):
                     candles = snap_candles
                     slot.live_price = snap.current_price
                     slot.data_status = "HEALTHY"
@@ -216,44 +222,8 @@ class RetracementMultiTFMonitor:
                     slot.has_live_data = False
                 raw_results[tf] = self._advance_slot(slot, candles)
 
-            # --- WINNER-TAKES-ALL EXECUTION ENGINE ---
-            # 1. Check if any timeframe has triggered an ACTIVE ENTRY TOUCH
-            winner_tf: str | None = None
-            earliest_touch_ts = None
-
-            for tf in self.timeframes:
-                setup = raw_results.get(tf)
-                if setup and getattr(setup, "entry_touched", False) and not getattr(setup, "outcome", None):
-                    # Found an active trade
-                    touch_ts = getattr(setup, "entry_timestamp", None) or getattr(setup, "created_at", None)
-                    if winner_tf is None or (touch_ts and earliest_touch_ts and touch_ts < earliest_touch_ts):
-                        winner_tf = tf
-                        earliest_touch_ts = touch_ts
-
-            # 2. If a Winner Active Trade exists, PURGE / RESET all other timeframes immediately!
-            results: dict[str, RetracementSetup | None] = {}
-            if winner_tf is not None:
-                for tf in self.timeframes:
-                    if tf == winner_tf:
-                        results[tf] = raw_results[tf]
-                    else:
-                        slot = self.slots[tf]
-                        had_completed = slot.last_completed is not None
-                        # Reset the non-winner slot engine (full slot reset) so it
-                        # holds NO active trade or pending setup.
-                        slot.reset()
-                        # Finalize the losing timeframe's DB row: any persisted
-                        # active setup here is superseded by the winner.
-                        if had_completed:
-                            repo = RetracementRepository(db)
-                            persisted = await repo.load_latest_active(
-                                self.symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
-                            if persisted is not None:
-                                await self._finalize_stale(repo, tf, persisted)
-                        results[tf] = None
-            else:
-                # No active trade running yet -> Keep scanning setups on all timeframes
-                results = raw_results
+            # Option 1A: Multi-Slot Parallel Execution — each timeframe maintains its own active slot
+            results = raw_results
 
             await self._persist(db)
             return results

@@ -421,8 +421,14 @@ class DualRetracementEngine:
             if setup.layers:
                 setup.entry_touched = True
                 setup.entry_timestamp = candle.timestamp
-                if len(setup.layers) >= 3 or not new_fills:
-                    setup.state = RetracementState.TRADE_ACTIVE
+                if "L1" in setup.layers and not setup.tp_locked:
+                    l1 = setup.layers["L1"]
+                    if not l1.get("locked_tp"):
+                        l1["locked_tp"] = l1["tp"]
+                    setup.tp_before_freeze = setup.dynamic_tp
+                    setup.locked_tp = l1["tp"]
+                    setup.tp_locked = True
+                setup.state = RetracementState.TRADE_ACTIVE
         else:
             # 1. Check if a fresh micro-BOS formed while waiting for entry
             if not setup.layers:
@@ -469,11 +475,14 @@ class DualRetracementEngine:
             if setup.layers:
                 setup.entry_touched = True
                 setup.entry_timestamp = candle.timestamp
-                # Keep state as TP_DYNAMIC so deeper layers can fill on the next candle.
-                # state will transition to TRADE_ACTIVE only after all 3 layers fill
-                # or the candle has no new fills.
-                if len(setup.layers) >= 3 or not new_fills:
-                    setup.state = RetracementState.TRADE_ACTIVE
+                if "L1" in setup.layers and not setup.tp_locked:
+                    l1 = setup.layers["L1"]
+                    if not l1.get("locked_tp"):
+                        l1["locked_tp"] = l1["tp"]
+                    setup.tp_before_freeze = setup.dynamic_tp
+                    setup.locked_tp = l1["tp"]
+                    setup.tp_locked = True
+                setup.state = RetracementState.TRADE_ACTIVE
                 # Same-candle TP check: if a layer was just filled and the same candle
                 # also reaches the layer's TP, mark it TP_HIT immediately.
                 for layer in setup.layers.values():

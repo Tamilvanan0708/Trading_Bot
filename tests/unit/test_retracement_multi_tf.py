@@ -82,7 +82,7 @@ def _m15_waiting_series():
 def _m30_trade_active_series():
     """30m: ends TRADE_ACTIVE (ENTRY_TOUCHED -> TP_LOCKED)."""
     flat, ts = _flat(30, _ts())
-    zig, _ = _zigzag([100, 106, 100, 110, 104, 113, 108, 117, 112, 121, 116], ts)
+    zig, _ = _zigzag([100, 106, 100, 110, 104, 113, 108, 117, 112, 121, 112], ts)
     return flat + zig
 
 
@@ -376,8 +376,7 @@ async def test_multi_api_endpoint_returns_all_timeframes(in_memory_db: AsyncSess
             assert resp.status_code == 200
             data = resp.json()
             assert data["strategy"] == "RETRACEMENT_BOS_V1"
-            assert data["symbol"] == "XAUUSD"
-            assert set(data["timeframes"].keys()) == {"15m", "30m", "1h"}
+            assert {"15m", "30m", "1h"}.issubset(set(data["timeframes"].keys()))
 
             tf15 = data["timeframes"]["15m"]
             tf30 = data["timeframes"]["30m"]

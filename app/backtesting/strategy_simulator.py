@@ -434,7 +434,7 @@ class StrategyBacktester:
         timeline.sort(key=lambda x: x[0])
 
         trades: list[BacktestTradeRecord] = []
-        active_setup_tf: str | None = None
+        tf_active_setup: dict[str, str | None] = {tf: None for tf in timeframes}
         resolved_layers: set[tuple[str, str]] = set()
 
         for ts, tf, candle in timeline:
@@ -444,14 +444,14 @@ class StrategyBacktester:
             eng.process_candle(candle)
             setup = eng.setup
 
-            # 2. Track layer fills and resolutions
+            # 2. Track layer fills and resolutions (Option 1A: Multi-Slot Parallel Execution)
             if setup is not None and setup.layers:
-                # Acquire Single Active Trade Lock if free and inside date range
-                if active_setup_tf is None and candle.timestamp >= start_date:
-                    active_setup_tf = tf
+                # Acquire slot for this timeframe if free and inside date range
+                if tf_active_setup[tf] is None and candle.timestamp >= start_date:
+                    tf_active_setup[tf] = setup.setup_id
 
-                # Process layer outcomes if this timeframe holds the lock
-                if active_setup_tf == tf:
+                # Process layer outcomes if this timeframe holds the slot
+                if tf_active_setup[tf] == setup.setup_id:
                     for l_key in ("L1", "L2", "L3"):
                         if l_key not in setup.layers:
                             continue
@@ -492,46 +492,47 @@ class StrategyBacktester:
 
             # 3. Setup completion / invalidation lifecycle
             if setup is not None and setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
-                if active_setup_tf == tf:
-                    active_setup_tf = None
+                if tf_active_setup[tf] == setup.setup_id:
+                    tf_active_setup[tf] = None
                 eng.archive_completed()
 
-        # Close any open layers at the end of the simulation window
-        if active_setup_tf is not None:
-            eng = engines[active_setup_tf]
-            if eng.setup and eng.setup.layers:
-                last_c = timeline[-1][2] if timeline else None
-                for l_key in ("L1", "L2", "L3"):
-                    if l_key not in eng.setup.layers:
-                        continue
-                    l_data = eng.setup.layers[l_key]
-                    lid = (eng.setup.setup_id, l_key)
-                    if lid not in resolved_layers and l_data.get("state") == "FILLED":
-                        resolved_layers.add(lid)
-                        is_long = eng.setup.direction == "LONG"
-                        entry_px = float(l_data["entry_price"])
-                        exit_px = float(last_c.close if last_c else entry_px)
-                        pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
-                        pnl_usd = round(pts * self.lot_size * 100.0, 2)
-                        sl_px = float(l_data.get("sl") or eng.setup.sl_price or entry_px)
-                        trades.append(BacktestTradeRecord(
-                            trade_id=f"RETR_{active_setup_tf.upper()}_{l_key}_{int(timeline[-1][0].timestamp())}",
-                            strategy=f"Fib Retracement [{l_key}]",
-                            timeframe=active_setup_tf.upper(),
-                            direction=eng.setup.direction,
-                            zero_level=float(eng.setup.point_2_price or 0.0),
-                            entry_time=l_data.get("filled_at") or (eng.setup.entry_timestamp.isoformat() if eng.setup.entry_timestamp else ""),
-                            entry_price=entry_px,
-                            sl_price=sl_px,
-                            tp_price=float(l_data.get("tp") or entry_px),
-                            exit_time=last_c.timestamp.isoformat() if last_c else "",
-                            exit_price=exit_px,
-                            exit_reason="EXPIRED",
-                            pnl_pts=pts,
-                            pnl_usd=pnl_usd,
-                            r_multiple=round(pts / max(0.1, abs(entry_px - sl_px)), 2),
-                            status="OPEN",
-                        ))
+        # Close any open layers at the end of the simulation window across all timeframes
+        last_c = timeline[-1][2] if timeline else None
+        for tf, active_sid in tf_active_setup.items():
+            if active_sid is not None:
+                eng = engines[tf]
+                if eng.setup and eng.setup.layers:
+                    for l_key in ("L1", "L2", "L3"):
+                        if l_key not in eng.setup.layers:
+                            continue
+                        l_data = eng.setup.layers[l_key]
+                        lid = (eng.setup.setup_id, l_key)
+                        if lid not in resolved_layers and l_data.get("state") == "FILLED":
+                            resolved_layers.add(lid)
+                            is_long = eng.setup.direction == "LONG"
+                            entry_px = float(l_data["entry_price"])
+                            exit_px = float(last_c.close if last_c else entry_px)
+                            pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
+                            pnl_usd = round(pts * self.lot_size * 100.0, 2)
+                            sl_px = float(l_data.get("sl") or eng.setup.sl_price or entry_px)
+                            trades.append(BacktestTradeRecord(
+                                trade_id=f"RETR_{tf.upper()}_{l_key}_{int(timeline[-1][0].timestamp())}",
+                                strategy=f"Fib Retracement [{l_key}]",
+                                timeframe=tf.upper(),
+                                direction=eng.setup.direction,
+                                zero_level=float(eng.setup.point_2_price or 0.0),
+                                entry_time=l_data.get("filled_at") or (eng.setup.entry_timestamp.isoformat() if eng.setup.entry_timestamp else ""),
+                                entry_price=entry_px,
+                                sl_price=sl_px,
+                                tp_price=float(l_data.get("tp") or entry_px),
+                                exit_time=last_c.timestamp.isoformat() if last_c else "",
+                                exit_price=exit_px,
+                                exit_reason="EXPIRED",
+                                pnl_pts=pts,
+                                pnl_usd=pnl_usd,
+                                r_multiple=round(pts / max(0.1, abs(entry_px - sl_px)), 2),
+                                status="OPEN",
+                            ))
 
         return trades
 

@@ -432,7 +432,7 @@ class AnalysisScheduler:
                 fib_svc = get_retracement_multi_tf_service(symbol)
                 fib_states = await fib_svc.advance(session)
 
-                for tf_name in ["5m"]:
+                for tf_name in fib_svc.timeframes:
                     setup_obj = fib_states.get(tf_name)
                     if not setup_obj:
                         continue
@@ -506,7 +506,6 @@ class AnalysisScheduler:
                                     "[FIB-RETRACEMENT] Opened paper trade %s %s %s on %s @ %.2f 0.01 lots (id=%s)",
                                     dir_str, symbol, layer_key, tf_name, entry_px, opened_pos.position_id,
                                 )
-                    break
 
                 # 2. SMC WITH FIB (Golden Pocket 0.680 / 0.790, 0.920 SL, 0.000/0.500 TP)
                 #    2-Tranche scaling: one paper trade per filled layer (0.01 lots).
