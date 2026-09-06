@@ -19,6 +19,7 @@ _TF_MINUTES = {
     TimeFrame.M15: 15,
     TimeFrame.M30: 30,
     TimeFrame.H1: 60,
+    TimeFrame.H2: 120,
     TimeFrame.H4: 240,
     TimeFrame.D1: 1440,
 }

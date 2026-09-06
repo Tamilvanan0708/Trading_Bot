@@ -141,6 +141,7 @@ class MultiTimeframeSnapshot(BaseModel):
     m15: list[Candle] = Field(default_factory=list)
     m30: list[Candle] = Field(default_factory=list)
     h1: list[Candle] = Field(default_factory=list)
+    h2: list[Candle] = Field(default_factory=list)
     h4: list[Candle] = Field(default_factory=list)
 
     def get_series(self, tf: TimeFrame) -> list[Candle]:
@@ -153,6 +154,8 @@ class MultiTimeframeSnapshot(BaseModel):
             return self.m30
         if tf == TimeFrame.H1:
             return self.h1
+        if tf == TimeFrame.H2:
+            return self.h2
         if tf == TimeFrame.H4:
             return self.h4
         return []

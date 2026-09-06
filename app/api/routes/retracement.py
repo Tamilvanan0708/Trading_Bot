@@ -425,10 +425,10 @@ async def advance_forward(symbol: str = "XAUUSD", timeframe: str = "15m"):
 
 def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict,
                                slots: dict, strategy_label: str) -> dict:
-    """Build the unified strategy dashboard payload for either strategy panel with Strict 1-Trade Cascading Lock."""
-    TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h"] if strategy_label == "FIB_WITH_RETRACEMENT" else ["5m", "15m", "30m", "1h", "4h"]
+    """Build the unified strategy dashboard payload for either strategy panel with Strict 1-Trade Active Lock."""
+    TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h", "4h"]
     raw_cards = {}
-    cascading_active_tf = None
+    active_trade_tf = None
 
     # Step 1: First find if ANY timeframe has an ACTIVE TRADE
     for tf in TIMEFRAMES_ORDER:
@@ -448,23 +448,16 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
         s["has_live_data"] = slot.has_live_data if slot else False
         raw_cards[tf] = s
 
-        if cascading_active_tf is None and is_trade_active:
-            cascading_active_tf = tf
+        if active_trade_tf is None and is_trade_active:
+            active_trade_tf = tf
 
-    # Step 2: If no active trade, find first timeframe waiting for entry
-    if cascading_active_tf is None:
-        for tf in TIMEFRAMES_ORDER:
-            if raw_cards[tf].get("is_entry_ready"):
-                cascading_active_tf = tf
-                break
-
-    # Step 3: Apply Master Lock to non-active timeframes ONLY when a trade is actively running
+    # Step 2: Apply Master Lock to non-active timeframes ONLY when a trade is actively running
     tf_cards = {}
     for tf in TIMEFRAMES_ORDER:
         card = raw_cards[tf]
-        if cascading_active_tf is not None:
+        if active_trade_tf is not None:
             # A trade is active -> Lock other timeframes
-            if cascading_active_tf == tf:
+            if active_trade_tf == tf:
                 card["is_locked_by_cascade"] = False
                 card["cascade_status"] = "ACTIVE"
                 tf_cards[tf] = card
@@ -481,7 +474,7 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
                     "is_entry_touched": False,
                     "is_trade_active": False,
                     "is_locked_by_cascade": True,
-                    "cascade_status": f"STANDBY (Locked by {cascading_active_tf.upper()})",
+                    "cascade_status": f"STANDBY (Locked by {active_trade_tf.upper()})",
                     "entry": None,
                     "sl": None,
                     "tp": {"dynamic": None, "locked": None, "is_locked": False},
@@ -514,7 +507,8 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
         "live_price": live_price,
         "data_status": data_status,
         "timeframes_order": TIMEFRAMES_ORDER,
-        "cascading_active_tf": cascading_active_tf,
+        "active_trade_tf": active_trade_tf,
+        "cascading_active_tf": active_trade_tf,
         "timeframes": tf_cards,
     }
 
@@ -571,9 +565,8 @@ async def get_smc_fib_dashboard(
 
     Runs exact SMC + Fibonacci State Machine with Strict Cascading & 1-Active-Trade Policy:
     - Cascading Scan: 5M -> 15M -> 30M -> 1H -> 4H.
-    - If lower TF has an active trade (e.g. 5M), it locks as the primary active trade.
-    - Higher timeframes remain on STANDBY until the active trade completes.
-    - Replicates exact Retracement BOS state machine for accurate timeline & metrics.
+    - If any TF triggers an active trade, it locks as the primary active trade.
+    - Other timeframes remain on STANDBY until the active trade completes.
     """
     live_price = None
     data_status = "NO_DATA"
@@ -594,31 +587,23 @@ async def get_smc_fib_dashboard(
         logger.warning("[SMC-FIB] multi-tf advance timeout/error: %s", exc)
         states = {tf: smc_multi.slots[tf].engine.to_dict(live_price) for tf in TIMEFRAMES_ORDER}
 
-    cascading_active_tf = None
-    # 1. First find if ANY timeframe already has a running active trade (Priority: 5m -> 15m -> 30m -> 1h -> 4h)
+    active_trade_tf = None
+    # 1. First find if ANY timeframe already has a running active trade
     for tf in TIMEFRAMES_ORDER:
         card = states.get(tf) or {}
         if card.get("is_trade_active"):
-            cascading_active_tf = tf
+            active_trade_tf = tf
             break
 
-    # 2. If no active trade, find the first timeframe that is ready for entry
-    if cascading_active_tf is None:
-        for tf in TIMEFRAMES_ORDER:
-            card = states.get(tf) or {}
-            if card.get("is_entry_ready"):
-                cascading_active_tf = tf
-                break
-
-    # 3. Enforce 1-Trade Policy: If an active trade is running, put other timeframes on STANDBY
+    # 2. Enforce 1-Trade Policy: If an active trade is running, put other timeframes on STANDBY
     for tf in TIMEFRAMES_ORDER:
         card = states.get(tf)
         if card:
-            card["is_locked_by_cascade"] = (cascading_active_tf is not None and cascading_active_tf != tf)
+            card["is_locked_by_cascade"] = (active_trade_tf is not None and active_trade_tf != tf)
             if card.get("is_locked_by_cascade") and not card.get("is_trade_active"):
-                card["cascade_status"] = f"STANDBY (Locked by {cascading_active_tf.upper()})"
+                card["cascade_status"] = f"STANDBY (Locked by {active_trade_tf.upper()})"
             else:
-                card["cascade_status"] = "ACTIVE"
+                card["cascade_status"] = "ACTIVE" if active_trade_tf else "SCANNING"
 
     return {
         "strategy": "SMC_WITH_FIB",
@@ -626,7 +611,8 @@ async def get_smc_fib_dashboard(
         "live_price": live_price,
         "data_status": data_status,
         "timeframes_order": TIMEFRAMES_ORDER,
-        "cascading_active_tf": cascading_active_tf,
+        "active_trade_tf": active_trade_tf,
+        "cascading_active_tf": active_trade_tf,
         "timeframes": states,
     }
 
@@ -678,8 +664,8 @@ async def get_fib_trend_dashboard(
             "entry_price": eng.entry_price or eng.trigger_breakout_price,
             "sl_price": eng.sl_price or eng.fib_0_236,
             "tp_price": eng.tp_price or eng.fib_1_618,
-            "tp1_price": eng.fib_1_000,
-            "tp1_hit": getattr(eng, "tp1_hit", False),
+            "tp1_price": eng.fib_1_618,
+            "tp1_hit": False,
             "tp2_price": eng.fib_1_618,
             "entry_touched": eng.entry_touched,
             "ema_9": eng.current_ema_9,
@@ -687,14 +673,15 @@ async def get_fib_trend_dashboard(
             "outcome": eng.outcome,
             "completion_reason": eng.completion_reason,
             "invalidation_reason": eng.invalidation_reason,
+            "is_locked_standby": getattr(trend_slot := trend_multi.slots.get(tf_str), "is_locked_standby", False),
             "levels": [
-                {"ratio": "1.618", "price": eng.fib_1_618, "meaning": "Target TP2 (1.618 Extension)", "color": "#00e676"},
-                {"ratio": "1.000", "price": eng.fib_1_000, "meaning": "Target TP1 (Swing 1 Peak / Breakeven Lock)", "color": "#ffd54f"},
-                {"ratio": "0.618", "price": eng.fib_0_618, "meaning": "Golden Pocket Touch", "color": "#ffb74d"},
+                {"ratio": "1.618", "price": eng.fib_1_618, "meaning": "Take Profit (1.618 Target)", "color": "#00e676"},
+                {"ratio": "1.000", "price": eng.fib_1_000, "meaning": "Swing 1 Peak / Valley", "color": "#ffd54f"},
+                {"ratio": "0.618", "price": eng.fib_0_618, "meaning": "0.618 Retracement Touch", "color": "#ffb74d"},
                 {"ratio": "0.500", "price": eng.fib_0_500, "meaning": "Equilibrium", "color": "#42a5f5"},
                 {"ratio": "0.382", "price": eng.fib_0_382, "meaning": "Retracement Depth", "color": "#90caf9"},
-                {"ratio": "0.236", "price": eng.fib_0_236, "meaning": "Stop Loss Level", "color": "#ef5350"},
-                {"ratio": "0.000", "price": eng.fib_0_000, "meaning": "Anchor Origin", "color": "#b388ff"},
+                {"ratio": "0.236", "price": eng.fib_0_236, "meaning": "Stop Loss (0.236 Level)", "color": "#ef5350"},
+                {"ratio": "0.000", "price": eng.fib_0_000, "meaning": "Anchor Origin (P0)", "color": "#b388ff"},
             ] if eng.fib_1_000 else [],
             "is_entry_ready": state_val == FibTrendState.WAITING_FOR_BREAKOUT.value,
             "is_trade_active": state_val == FibTrendState.TRADE_ACTIVE.value,
@@ -705,8 +692,9 @@ async def get_fib_trend_dashboard(
         "symbol": symbol,
         "live_price": live_price,
         "data_status": data_status,
-        "timeframes_order": ["5m"],
-        "cascading_active_tf": "5m",
+        "timeframes_order": ["15m", "30m", "1h", "2h", "4h"],
+        "active_trade_tf": trend_multi.active_trade_tf,
+        "cascading_active_tf": trend_multi.active_trade_tf or "15m",
         "timeframes": tf_cards,
     }
 
@@ -717,7 +705,7 @@ async def get_fib_trend_dashboard(
 
 _TF_TO_SERVICE_TF = {
     "5m": "M5", "15m": "M15", "30m": "M30",
-    "1h": "H1", "4h": "H4",
+    "1h": "H1", "2h": "H2", "4h": "H4",
 }
 
 @router.get("/chart/{symbol}/{timeframe}")

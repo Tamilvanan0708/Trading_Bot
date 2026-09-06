@@ -106,27 +106,46 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         tg = TelegramService()
         validator = get_ai_validator()
 
-        # 1. Fib With Retracement 5M: Check each tranche layer
+        # 1. Fib With Retracement: Multi-Timeframe (5M, 15M, 30M, 1H, 4H) Single Active Trade Sync
         try:
             fib_svc = get_retracement_multi_tf_service("XAUUSD")
             fib_states = await fib_svc.advance(db)
-            f5 = fib_states.get("5m")
-            if f5 and getattr(f5, "layers", None) and getattr(f5, "point_2_price", None):
-                for l_key, layer in f5.layers.items():
+
+            # Check if any open trade already exists for FIB_WITH_RETRACEMENT across any timeframe
+            existing_open_retr = (await db.execute(
+                select(PaperTradeModel).where(
+                    PaperTradeModel.state == "OPEN",
+                    PaperTradeModel.signal_id.like("FIB_RETR_%"),
+                )
+            )).scalars().first()
+
+            active_retr_tf = None
+            if existing_open_retr and existing_open_retr.signal_id:
+                parts = existing_open_retr.signal_id.split("_")
+                for p in parts:
+                    if p.lower() in fib_svc.timeframes:
+                        active_retr_tf = p.lower()
+                        break
+
+            for tf_key in fib_svc.timeframes:
+                f_state = fib_states.get(tf_key)
+                if not f_state or not getattr(f_state, "layers", None) or not getattr(f_state, "point_2_price", None):
+                    continue
+
+                for l_key, layer in f_state.layers.items():
                     ratio_val = 0.618 if l_key == "L1" else (0.500 if l_key == "L2" else 0.382)
                     attr = f"fib_{ratio_val:.3f}".replace(".", "_")
-                    l_entry = getattr(f5, attr, None) or float(layer.get("entry_price") or 0.0)
+                    l_entry = getattr(f_state, attr, None) or float(layer.get("entry_price") or 0.0)
                     if not l_entry:
                         continue
                     l_state = layer.get("state", "PENDING") if layer else "PENDING"
-                    l_tp = float(f5.fib_1_000 if l_key == "L1" else (f5.fib_0_618 or 0.0))
-                    sig_id = f"FIB_RETR_5M_{l_key}_{int(f5.point_2_price)}"
+                    l_tp = float(f_state.fib_1_000 if l_key == "L1" else (f_state.fib_0_618 or 0.0))
+                    sig_id = f"FIB_RETR_{tf_key.upper()}_{l_key}_{int(f_state.point_2_price)}"
 
                     # Determine true Stop Loss:
-                    # Initial invalidation is 0.236 level, but trailed SL (layer_sl) takes priority if tighter!
-                    base_sl = float(f5.fib_0_236 or 0.0)
-                    layer_sl = float(layer.get("sl") or f5.sl_price or base_sl or 0.0)
-                    if f5.direction == "LONG":
+                    base_sl = float(f_state.fib_0_236 or 0.0)
+                    layer_sl = float(layer.get("sl") or f_state.sl_price or base_sl or 0.0)
+                    if f_state.direction == "LONG":
                         candidates = [s for s in (layer_sl, base_sl) if 0 < s < l_entry]
                         sig_sl = max(candidates) if candidates else round(l_entry - 8.19, 2)
                     else:
@@ -142,8 +161,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 "symbol": "XAUUSD",
                                 "strategy": "FIB_WITH_RETRACEMENT",
                                 "strategy_version": f"FIB_RETR_V1:{l_key}",
-                                "direction": f5.direction,
-                                "timeframe": "5m",
+                                "direction": f_state.direction,
+                                "timeframe": tf_key,
                                 "entry_price": float(l_entry),
                                 "stop_loss": sig_sl,
                                 "take_profit_1": float(l_tp or 0),
@@ -152,13 +171,13 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 "risk_reward": round(abs((l_tp or 0) - l_entry) / max(0.1, abs(l_entry - sig_sl)), 2),
                                 "confidence_score": 92.0,
                                 "signal_quality": "VERY_STRONG",
-                                "market_bias": "BULLISH" if f5.direction == "LONG" else "BEARISH",
+                                "market_bias": "BULLISH" if f_state.direction == "LONG" else "BEARISH",
                                 "regime": "TRENDING",
                                 "session": "LONDON",
                                 "outcome": l_state,
                                 "reasons": [
-                                    f"Fib With Retracement {l_key} @ {ratio_val:.3f} on 5M ({f5.direction}), 0.01 lots",
-                                    f"Anchor: ${f5.point_2_price:.2f} | BOS: ${f5.point_1_price:.2f} | Target: ${l_tp:.2f}",
+                                    f"Fib With Retracement {l_key} @ {ratio_val:.3f} on {tf_key.upper()} ({f_state.direction}), 0.01 lots",
+                                    f"Anchor: ${f_state.point_2_price:.2f} | BOS: ${f_state.point_1_price:.2f} | Target: ${l_tp:.2f}",
                                     f"3-Tranche Layer Execution: 0.01 lots each (Escape Plan: close at 0.618)",
                                 ],
                             })
@@ -173,13 +192,18 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         if sig_id in _in_flight_signals:
                             continue
 
+                        # Single Active Trade Rule:
+                        # If an open trade exists on another timeframe, lock this timeframe out!
+                        if existing_open_retr and active_retr_tf and active_retr_tf != tf_key:
+                            continue
+
                         existing = (await db.execute(
                             select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
                         )).scalars().first()
 
                         entry_px = float(layer.get("entry_price") or 0.0)
                         sl_px = sig_sl
-                        tp_px = float(layer.get("tp") or f5.fib_1_000 or 0.0)
+                        tp_px = float(layer.get("tp") or f_state.fib_1_000 or 0.0)
 
                         if not existing and entry_px > 0:
                             _in_flight_signals.add(sig_id)
@@ -191,9 +215,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     val_sig = SignalPayload(
                                         signal_id=sig_id,
                                         instrument="XAUUSD",
-                                        direction=SignalDirection.LONG if f5.direction == "LONG" else SignalDirection.SHORT,
+                                        direction=SignalDirection.LONG if f_state.direction == "LONG" else SignalDirection.SHORT,
                                         strategy=StrategyType.FIBONACCI,
-                                        timeframe="5m",
+                                        timeframe=tf_key,
                                         entry=entry_px,
                                         stop_loss=sl_px,
                                         take_profit_1=tp_px,
@@ -202,25 +226,25 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         risk_reward=round(abs(tp_px - entry_px) / max(0.1, abs(entry_px - sl_px)), 2),
                                         confidence_score=95.0,
                                         signal_quality=SignalQuality.VERY_STRONG,
-                                        market_bias=MarketBias.BULLISH if f5.direction == "LONG" else MarketBias.BEARISH,
+                                        market_bias=MarketBias.BULLISH if f_state.direction == "LONG" else MarketBias.BEARISH,
                                         fibonacci_levels={
-                                            "0.0": float(f5.fib_0 or f5.point_2_price or 0.0),
-                                            "0.236": float(f5.fib_0_236 or f5.sl_price or 0.0),
-                                            "0.382": float(f5.fib_0_382 or 0.0),
-                                            "0.500": float(f5.fib_0_500 or 0.0),
-                                            "0.618": float(f5.fib_0_618 or f5.entry_price or 0.0),
-                                            "1.0": float(f5.fib_1_000 or f5.current_high_price or 0.0),
+                                            "0.0": float(f_state.fib_0 or f_state.point_2_price or 0.0),
+                                            "0.236": float(f_state.fib_0_236 or f_state.sl_price or 0.0),
+                                            "0.382": float(f_state.fib_0_382 or 0.0),
+                                            "0.500": float(f_state.fib_0_500 or 0.0),
+                                            "0.618": float(f_state.fib_0_618 or f_state.entry_price or 0.0),
+                                            "1.0": float(f_state.fib_1_000 or f_state.current_high_price or 0.0),
                                         },
                                         detected_structures={
-                                            "bos_price": float(f5.point_1_price or 0.0),
-                                            "anchor_price": float(f5.point_2_price or 0.0),
-                                            "impulse_peak": float(f5.current_high_price or 0.0),
+                                            "bos_price": float(f_state.point_1_price or 0.0),
+                                            "anchor_price": float(f_state.point_2_price or 0.0),
+                                            "impulse_peak": float(f_state.current_high_price or 0.0),
                                             "layer": l_key,
                                             "bos_confirmation": "FULL_BODY_CLOSE",
                                         },
                                         reasons=[
-                                            f"Clean 5M Bullish BOS confirmed at ${f5.point_1_price:.2f}",
-                                            f"Anchor swing low held at ${f5.point_2_price:.2f}",
+                                            f"Clean {tf_key.upper()} Bullish BOS confirmed at ${f_state.point_1_price:.2f}",
+                                            f"Anchor swing low held at ${f_state.point_2_price:.2f}",
                                             f"Entry touched at {l_key} Fibonacci retracement ${entry_px:.2f}",
                                             f"Stop loss protected at 0.236 ${sl_px:.2f}",
                                         ],
@@ -242,7 +266,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     id=str(uuid.uuid4()),
                                     signal_id=sig_id,
                                     symbol="XAUUSD",
-                                    direction=f5.direction,
+                                    direction=f_state.direction,
                                     state="OPEN",
                                     lot_size=0.01,
                                     risk_amount=round(0.01 * abs(entry_px - sl_px) * 100.0, 2),
@@ -255,25 +279,28 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     opened_at=datetime.now(timezone.utc),
                                     realized_pnl=0.0,
                                     realized_r=0.0,
-                                    state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "layer": l_key, "ai_validation": ai_verdict}],
+                                    state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "layer": l_key, "timeframe": tf_key, "strategy": "FIB_WITH_RETRACEMENT", "ai_validation": ai_verdict}],
                                 )
                                 db.add(new_trade)
                                 await db.commit()
-                                logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (%s %s) @ %.2f", sig_id, f5.direction, l_key, entry_px)
+                                existing_open_retr = new_trade
+                                active_retr_tf = tf_key
+                                logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (Fib Retr %s %s) @ %.2f", sig_id, tf_key.upper(), l_key, entry_px)
 
                                 # Telegram: Dispatch Trade Opened Alert
                                 try:
-                                    dir_badge = "BUY / LONG ▲" if f5.direction == "LONG" else "SELL / SHORT ▼"
+                                    dir_badge = "BUY / LONG ▲" if f_state.direction == "LONG" else "SELL / SHORT ▼"
                                     msg = (
                                         f"🚀 *TRADE OPENED (0.01 Lots)*\n"
                                         f"━━━━━━━━━━━━━━━━━━━━\n"
                                         f"📊 *Strategy:* Fib Retracement ({l_key})\n"
-                                        f"🪙 *Symbol:* XAU/USD (5M)\n"
+                                        f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
                                         f"📈 *Direction:* {dir_badge}\n"
                                         f"💵 *Entry:* ${entry_px:.2f}\n"
                                         f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
                                         f"🎯 *Take Profit:* ${tp_px:.2f}\n"
                                         f"🧠 *AI Verdict:* {ai_short}\n"
+                                        f"🔒 *Lock:* Other timeframes on Standby until trade closes\n"
                                         f"━━━━━━━━━━━━━━━━━━━━"
                                     )
                                     await tg.send_raw_alert(msg)
@@ -281,57 +308,69 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                             finally:
                                 _in_flight_signals.discard(sig_id)
-                    elif existing and existing.state == "OPEN":
-                        # 1. Update Trailing Smart Shield if layer has tighter SL
-                        if layer.get("sl") and layer.get("sl") != existing.stop_loss:
-                            eng_sl = float(layer["sl"])
-                            if (f5.direction == "LONG" and eng_sl > (existing.stop_loss or 0.0)) or (f5.direction == "SHORT" and eng_sl < (existing.stop_loss or 999999.0)):
-                                existing.stop_loss = eng_sl
+                        elif existing and existing.state == "OPEN":
+                            # 1. Update Trailing Smart Shield if layer has tighter SL
+                            if layer.get("sl") and layer.get("sl") != existing.stop_loss:
+                                eng_sl = float(layer["sl"])
+                                if (f_state.direction == "LONG" and eng_sl > (existing.stop_loss or 0.0)) or (f_state.direction == "SHORT" and eng_sl < (existing.stop_loss or 999999.0)):
+                                    existing.stop_loss = eng_sl
+                                    await db.commit()
+                                    logger.info("[PAPER-AUTO] Trailing Smart Shield moved %s SL to %.2f", sig_id, eng_sl)
+
+                            # 2. If layer has completed TP in engine, resolve it
+                            if layer.get("state") == "TP_HIT":
+                                existing.state = "CLOSED"
+                                existing.exit_price = tp_px
+                                existing.exit_reason = "TP_HIT"
+                                existing.closed_at = datetime.now(timezone.utc)
+                                pts = round((tp_px - entry_px) if f_state.direction == "LONG" else (entry_px - tp_px), 2)
+                                existing.realized_pnl = round(pts * (existing.lot_size or 0.01) * 100.0, 2)
+                                existing.realized_r = round(pts / max(0.1, abs(entry_px - (existing.stop_loss or 0.0))), 2)
                                 await db.commit()
-                                logger.info("[PAPER-AUTO] Trailing Smart Shield moved %s SL to %.2f", sig_id, eng_sl)
+                                logger.info("[PAPER-AUTO] Engine TP_HIT closed Retracement %s (%s) @ %.2f (+$%.2f)", sig_id, l_key, tp_px, existing.realized_pnl)
 
-                        # 2. If layer has completed TP in engine, resolve it
-                        if layer.get("state") == "TP_HIT":
-                            existing.state = "CLOSED"
-                            existing.exit_price = tp_px
-                            existing.exit_reason = "TP_HIT"
-                            existing.closed_at = datetime.now(timezone.utc)
-                            pts = round((tp_px - entry_px) if f5.direction == "LONG" else (entry_px - tp_px), 2)
-                            existing.realized_pnl = round(pts * (existing.lot_size or 0.01) * 100.0, 2)
-                            existing.realized_r = round(pts / max(0.1, abs(entry_px - (existing.stop_loss or 0.0))), 2)
-                            await db.commit()
-                            logger.info("[PAPER-AUTO] Engine TP_HIT closed Retracement %s (%s) @ %.2f (+$%.2f)", sig_id, l_key, tp_px, existing.realized_pnl)
-
-                            # 3. Smart Shield Immediate Trigger: When L2 or L3 hits TP, IMMEDIATELY trail L1 SL to 0.500
-                            if l_key in ("L2", "L3"):
-                                l1_sig_id = f"FIB_RETR_5M_L1_{int(f5.point_2_price)}"
-                                l1_trade = (await db.execute(
-                                    select(PaperTradeModel).where(PaperTradeModel.signal_id == l1_sig_id, PaperTradeModel.state == "OPEN")
-                                )).scalars().first()
-                                if l1_trade:
-                                    new_l1_sl = float(f5.fib_0_500 or 0.0)
-                                    if (f5.direction == "LONG" and new_l1_sl > (l1_trade.stop_loss or 0.0)) or (f5.direction == "SHORT" and 0.0 < new_l1_sl < (l1_trade.stop_loss or 999999.0)):
-                                        l1_trade.stop_loss = new_l1_sl
-                                        await db.commit()
-                                        logger.info("[PAPER-AUTO] Smart Shield: L%s TP hit -> immediately trailed L1 SL to %.2f", l_key[-1], new_l1_sl)
+                                # 3. Smart Shield Immediate Trigger: When L2 or L3 hits TP, IMMEDIATELY trail L1 SL to 0.500
+                                if l_key in ("L2", "L3"):
+                                    l1_sig_id = f"FIB_RETR_{tf_key.upper()}_L1_{int(f_state.point_2_price)}"
+                                    l1_trade = (await db.execute(
+                                        select(PaperTradeModel).where(PaperTradeModel.signal_id == l1_sig_id, PaperTradeModel.state == "OPEN")
+                                    )).scalars().first()
+                                    if l1_trade:
+                                        new_l1_sl = float(f_state.fib_0_500 or 0.0)
+                                        if (f_state.direction == "LONG" and new_l1_sl > (l1_trade.stop_loss or 0.0)) or (f_state.direction == "SHORT" and 0.0 < new_l1_sl < (l1_trade.stop_loss or 999999.0)):
+                                            l1_trade.stop_loss = new_l1_sl
+                                            await db.commit()
+                                            logger.info("[PAPER-AUTO] Smart Shield: L%s TP hit -> immediately trailed L1 SL to %.2f", l_key[-1], new_l1_sl)
 
         except Exception as exc:  # noqa: BLE001
             logger.warning("[PAPER-SYNC] Fib sync error: %s", exc)
 
-        # 2. SMC With Fib 5M: Check single institutional entry
+        # 2. SMC With Fib: Multi-Timeframe (5M, 15M, 30M, 1H, 4H) Single Active Trade Sync
         try:
             smc_svc = get_smc_fib_multi_tf_service("XAUUSD")
             smc_states = await smc_svc.advance(db)
-            s5 = smc_states.get("5m") or {}
-            if s5.get("point_2") and s5.get("entry", {}).get("price"):
-                p2 = s5.get("point_2", {}).get("price") or 0.0
-                p1 = s5.get("point_1", {}).get("price") or 0.0
-                dir_str = str(s5.get("direction", "SHORT")).upper()
-                entry_px = float(s5.get("entry", {}).get("price") or 0.0)
-                sl_px = float(s5.get("sl", {}).get("price") or 0.0)
-                tp_px = float(s5.get("tp", {}).get("locked") or s5.get("tp", {}).get("dynamic") or s5.get("tp", {}).get("price") or 0.0)
-                sig_id = f"SMC_FIB_5M_{int(p2)}"
-                sig_state = "FILLED" if s5.get("is_entry_touched") else "PENDING"
+
+            # Check if any open trade already exists for SMC_WITH_FIB across any timeframe
+            existing_open_smc = (await db.execute(
+                select(PaperTradeModel).where(
+                    PaperTradeModel.state == "OPEN",
+                    PaperTradeModel.signal_id.like("SMC_FIB_%"),
+                )
+            )).scalars().first()
+
+            for tf_key in smc_svc.timeframes:
+                s_card = smc_states.get(tf_key) or {}
+                if not s_card.get("point_2") or not s_card.get("entry", {}).get("price"):
+                    continue
+
+                p2 = s_card.get("point_2", {}).get("price") or 0.0
+                p1 = s_card.get("point_1", {}).get("price") or 0.0
+                dir_str = str(s_card.get("direction", "SHORT")).upper()
+                entry_px = float(s_card.get("entry", {}).get("price") or 0.0)
+                sl_px = float(s_card.get("sl", {}).get("price") or 0.0)
+                tp_px = float(s_card.get("tp", {}).get("locked") or s_card.get("tp", {}).get("dynamic") or s_card.get("tp", {}).get("price") or 0.0)
+                sig_id = f"SMC_FIB_{tf_key.upper()}_{int(p2)}"
+                sig_state = "FILLED" if s_card.get("is_entry_touched") else "PENDING"
 
                 # Sync Signal Model
                 try:
@@ -343,7 +382,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             "strategy": "SMC_WITH_FIB",
                             "strategy_version": "SMC_WITH_FIB_V1",
                             "direction": dir_str,
-                            "timeframe": "5m",
+                            "timeframe": tf_key,
                             "entry_price": entry_px,
                             "stop_loss": sl_px,
                             "take_profit_1": tp_px,
@@ -357,7 +396,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             "session": "LONDON",
                             "outcome": sig_state,
                             "reasons": [
-                                f"SMC 0.680 Golden Pocket Single Entry on 5M ({dir_str}), 0.01 lots",
+                                f"SMC 0.680 Golden Pocket Single Entry on {tf_key.upper()} ({dir_str}), 0.01 lots",
                                 f"Anchor (1.000): ${p2:.2f} | BOS: ${p1:.2f} | Target (0.000): ${tp_px:.2f}",
                                 f"Single Trade Execution: 0.01 Lots (No Layer Tranches)",
                             ],
@@ -369,7 +408,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                 except Exception:
                     await db.rollback()
 
-                if s5.get("is_entry_touched") and sig_id not in _in_flight_signals:
+                # Single Active Trade Rule: Only open trade if no open SMC trade exists!
+                if s_card.get("is_entry_touched") and sig_id not in _in_flight_signals and existing_open_smc is None:
                     existing = (await db.execute(
                         select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
                     )).scalars().first()
@@ -386,7 +426,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     instrument="XAUUSD",
                                     direction=SignalDirection.LONG if dir_str == "LONG" else SignalDirection.SHORT,
                                     strategy=StrategyType.SMC,
-                                    timeframe="5m",
+                                    timeframe=tf_key,
                                     entry=entry_px,
                                     stop_loss=sl_px,
                                     take_profit_1=tp_px,
@@ -397,18 +437,18 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     signal_quality=SignalQuality.VERY_STRONG,
                                     market_bias=MarketBias.BULLISH if dir_str == "LONG" else MarketBias.BEARISH,
                                     fibonacci_levels={
-                                        "0.0": float(s5.get("point_2", {}).get("price") or 0.0),
+                                        "0.0": float(s_card.get("point_2", {}).get("price") or 0.0),
                                         "0.680": entry_px,
-                                        "1.0": float(s5.get("point_1", {}).get("price") or 0.0),
+                                        "1.0": float(s_card.get("point_1", {}).get("price") or 0.0),
                                     },
                                     detected_structures={
                                         "golden_pocket": entry_px,
-                                        "choch_price": float(s5.get("point_1", {}).get("price") or 0.0),
-                                        "anchor_price": float(s5.get("point_2", {}).get("price") or 0.0),
+                                        "choch_price": float(s_card.get("point_1", {}).get("price") or 0.0),
+                                        "anchor_price": float(s_card.get("point_2", {}).get("price") or 0.0),
                                         "bos_confirmation": "FULL_BODY_CLOSE",
                                     },
                                     reasons=[
-                                        f"SMC 5M Golden Pocket 0.680 retracement active at ${entry_px:.2f}",
+                                        f"SMC {tf_key.upper()} Golden Pocket 0.680 retracement active at ${entry_px:.2f}",
                                         f"Stop loss protected below swing low at ${sl_px:.2f}",
                                         f"Take profit targeted at ${tp_px:.2f}",
                                     ],
@@ -424,7 +464,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 ai_short = "APPROVED (95% Conf)"
 
                             if not ai_approved:
-                                return
+                                continue
 
                             new_trade = PaperTradeModel(
                                 id=str(uuid.uuid4()),
@@ -443,11 +483,12 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 opened_at=datetime.now(timezone.utc),
                                 realized_pnl=0.0,
                                 realized_r=0.0,
-                                state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "strategy": "SMC_WITH_FIB", "ai_validation": ai_verdict}],
+                                state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "timeframe": tf_key, "strategy": "SMC_WITH_FIB", "ai_validation": ai_verdict}],
                             )
                             db.add(new_trade)
                             await db.commit()
-                            logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (SMC %s) @ %.2f", sig_id, dir_str, entry_px)
+                            existing_open_smc = new_trade
+                            logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (SMC %s %s) @ %.2f", sig_id, tf_key.upper(), dir_str, entry_px)
 
                             # Telegram: Dispatch Trade Opened Alert
                             try:
@@ -456,12 +497,13 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     f"🚀 *TRADE OPENED (0.01 Lots)*\n"
                                     f"━━━━━━━━━━━━━━━━━━━━\n"
                                     f"📊 *Strategy:* SMC With Fib (0.680)\n"
-                                    f"🪙 *Symbol:* XAU/USD (5M)\n"
+                                    f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
                                     f"📈 *Direction:* {dir_badge}\n"
                                     f"💵 *Entry:* ${entry_px:.2f}\n"
                                     f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
                                     f"🎯 *Take Profit:* ${tp_px:.2f}\n"
                                     f"🧠 *AI Verdict:* {ai_short}\n"
+                                    f"🔒 *Lock:* Other timeframes on Standby until trade closes\n"
                                     f"━━━━━━━━━━━━━━━━━━━━"
                                 )
                                 await tg.send_raw_alert(msg)
@@ -473,21 +515,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         except Exception as exc:  # noqa: BLE001
             logger.warning("[PAPER-SYNC] SMC sync error: %s", exc)
 
-        # 3. Fib Go With Trend 5M: Rule 8 Breakout Entry Execution
+        # 3. Fib Go With Trend: Multi-Timeframe (15M, 30M, 1H, 2H, 4H) Single Active Trade Sync
         try:
             from app.retracement.fib_trend_multi_tf import get_fib_trend_multi_tf_service
             from app.retracement.fib_trend_engine import FibTrendState
             trend_svc = get_fib_trend_multi_tf_service("XAUUSD")
             trend_states = await trend_svc.advance(db)
-            t5 = trend_states.get("5m")
-            if t5 and t5.point_0_price and (t5.entry_price or t5.trigger_breakout_price):
-                dir_str = "LONG" if t5.direction == SignalDirection.LONG else "SHORT"
-                sig_id = f"FIB_TREND_5M_{dir_str}_{int(t5.point_0_price or 0)}"
-                t_state = "FILLED" if t5.state in (FibTrendState.TRADE_ACTIVE, FibTrendState.COMPLETED) else "PENDING"
-                t_entry = float(t5.entry_price or t5.trigger_breakout_price or 0.0)
-                t_sl = float(t5.sl_price or t5.fib_0_236 or 0.0)
-                tp1_px = float(t5.fib_1_000 or 0.0)
-                tp2_px = float(t5.tp_price or t5.fib_1_618 or 0.0)
+
+            # Check if any open trade already exists for FIB_GO_WITH_TREND
+            existing_open_trend = (await db.execute(
+                select(PaperTradeModel).where(
+                    PaperTradeModel.state == "OPEN",
+                    PaperTradeModel.signal_id.like("FIB_TREND_%"),
+                )
+            )).scalars().first()
+
+            for tf_key in trend_svc.timeframes:
+                eng = trend_states.get(tf_key)
+                if not eng or not eng.point_0_price or not (eng.entry_price or eng.trigger_breakout_price):
+                    continue
+
+                dir_str = "LONG" if eng.direction == SignalDirection.LONG else "SHORT"
+                sig_id = f"FIB_TREND_{tf_key.upper()}_{dir_str}_{int(eng.point_0_price or 0)}"
+                t_state = "FILLED" if eng.state in (FibTrendState.TRADE_ACTIVE, FibTrendState.COMPLETED) else "PENDING"
+                t_entry = float(eng.entry_price or eng.trigger_breakout_price or 0.0)
+                t_sl = float(eng.sl_price or eng.fib_0_236 or 0.0)
+                tp_target = float(eng.tp_price or eng.fib_1_618 or 0.0)
 
                 # Sync Signal Model
                 try:
@@ -497,25 +550,25 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             "id": sig_id,
                             "symbol": "XAUUSD",
                             "strategy": "FIB_GO_WITH_TREND",
-                            "strategy_version": "FIB_TREND_V1",
+                            "strategy_version": "FIB_TREND_V2",
                             "direction": dir_str,
-                            "timeframe": "5m",
+                            "timeframe": tf_key,
                             "entry_price": t_entry,
                             "stop_loss": t_sl,
-                            "take_profit_1": tp1_px if tp1_px > 0 else tp2_px,
-                            "take_profit_2": tp2_px,
-                            "take_profit_3": tp2_px,
-                            "risk_reward": round(abs(tp2_px - t_entry) / max(0.1, abs(t_entry - t_sl)), 2),
+                            "take_profit_1": tp_target,
+                            "take_profit_2": tp_target,
+                            "take_profit_3": tp_target,
+                            "risk_reward": round(abs(tp_target - t_entry) / max(0.1, abs(t_entry - t_sl)), 2),
                             "confidence_score": 95.0,
                             "signal_quality": "VERY_STRONG",
                             "market_bias": "BULLISH" if dir_str == "LONG" else "BEARISH",
                             "regime": "TRENDING",
-                            "session": "LONDON",
+                            "session": "ACTIVE",
                             "outcome": t_state,
                             "reasons": [
-                                f"Fib Go With Trend 9/21 EMA ({dir_str}), 0.01 lots",
-                                f"Anchor P0: ${t5.point_0_price:.2f} | Peak P1: ${t5.point_1_price:.2f} | TP (1.618): ${tp2_px:.2f}",
-                                f"Rule 8 Breakout Trigger Price: ${t_entry:.2f}",
+                                f"Fib Go With Trend 9/21 EMA ({dir_str}) [{tf_key.upper()}]",
+                                f"Anchor P0: ${eng.point_0_price:.2f} | Peak P1: ${eng.point_1_price:.2f}",
+                                f"Trigger: ${t_entry:.2f} | SL: ${t_sl:.2f} (0.236) | TP: ${tp_target:.2f} (1.618 Target)",
                             ],
                         })
                         await db.commit()
@@ -525,7 +578,13 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                 except Exception:
                     await db.rollback()
 
-                if t5.state in (FibTrendState.TRADE_ACTIVE, FibTrendState.COMPLETED) and t_entry > 0 and sig_id not in _in_flight_signals:
+                # Single Active Trade Rule: Only open trade if no open FIB_TREND trade exists!
+                if (
+                    eng.state in (FibTrendState.TRADE_ACTIVE, FibTrendState.COMPLETED)
+                    and t_entry > 0
+                    and sig_id not in _in_flight_signals
+                    and existing_open_trend is None
+                ):
                     existing = (await db.execute(
                         select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
                     )).scalars().first()
@@ -537,7 +596,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         _in_flight_signals.add(sig_id)
                         try:
                             ai_short = "APPROVED (95% Conf)"
-                            ai_verdict = "APPROVED (conf=95%) — Rule 8 breakout confirmed with 9/21 EMA alignment"
+                            ai_verdict = f"APPROVED (conf=95%) — Rule 8 breakout confirmed on {tf_key.upper()} with 9/21 EMA alignment"
                             new_trade = PaperTradeModel(
                                 id=str(uuid.uuid4()),
                                 signal_id=sig_id,
@@ -549,17 +608,19 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 target_entry=entry_px,
                                 actual_entry=entry_px,
                                 stop_loss=sl_px,
-                                take_profit_1=tp1_px,
-                                take_profit_2=tp2_px,
-                                take_profit_3=tp2_px,
+                                take_profit_1=tp_target,
+                                take_profit_2=tp_target,
+                                take_profit_3=tp_target,
                                 opened_at=datetime.now(timezone.utc),
                                 realized_pnl=0.0,
                                 realized_r=0.0,
-                                state_logs=[{"event": "BREAKOUT_TRIGGERED", "price": entry_px, "strategy": "FIB_GO_WITH_TREND", "ai_validation": ai_verdict}],
+                                state_logs=[{"event": "BREAKOUT_TRIGGERED", "price": entry_px, "timeframe": tf_key, "strategy": "FIB_GO_WITH_TREND", "ai_validation": ai_verdict}],
                             )
                             db.add(new_trade)
                             await db.commit()
-                            logger.info("[PAPER-AUTO] Opened trade %s (FIB_TREND %s) @ %.2f", sig_id, dir_str, entry_px)
+                            existing_open_trend = new_trade
+                            trend_svc.active_trade_tf = tf_key
+                            logger.info("[PAPER-AUTO] Opened trade %s (FIB_TREND %s %s) @ %.2f", sig_id, tf_key.upper(), dir_str, entry_px)
 
                             try:
                                 dir_badge = "BUY / LONG ▲" if dir_str == "LONG" else "SELL / SHORT ▼"
@@ -567,13 +628,13 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     f"🚀 *TRADE OPENED (0.01 Lots)*\n"
                                     f"━━━━━━━━━━━━━━━━━━━━\n"
                                     f"📊 *Strategy:* Fib Go With Trend (9/21 EMA)\n"
-                                    f"🪙 *Symbol:* XAU/USD (5M)\n"
+                                    f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
                                     f"📈 *Direction:* {dir_badge}\n"
                                     f"💵 *Entry:* ${entry_px:.2f}\n"
                                     f"🛑 *Stop Loss (0.236):* ${sl_px:.2f}\n"
-                                    f"🎯 *TP1 (1.000 Peak):* ${tp1_px:.2f}\n"
-                                    f"🏆 *TP2 (1.618 Target):* ${tp2_px:.2f}\n"
+                                    f"🏆 *Target (1.618 Target):* ${tp_target:.2f}\n"
                                     f"🧠 *AI Verdict:* {ai_short}\n"
+                                    f"🔒 *Lock:* Other timeframes on Standby until trade closes\n"
                                     f"━━━━━━━━━━━━━━━━━━━━"
                                 )
                                 await tg.send_raw_alert(msg)
@@ -581,32 +642,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                         finally:
                             _in_flight_signals.discard(sig_id)
-                    elif existing and existing.state == "OPEN" and getattr(t5, "tp1_hit", False) and t5.sl_price:
-                        # Idea B: Update paper trade SL to Breakeven when TP1 hits
-                        if existing.stop_loss != t5.sl_price:
-                            old_sl = existing.stop_loss
-                            existing.stop_loss = t5.sl_price
-                            existing.state_logs.append({
-                                "event": "TP1_HIT_BREAKEVEN_LOCKED",
-                                "price": t5.fib_1_000,
-                                "old_sl": old_sl,
-                                "new_sl": t5.sl_price,
-                            })
-                            await db.commit()
-                            logger.info("[PAPER-AUTO] %s SL locked to Breakeven $%.2f (TP1 Hit)", sig_id, t5.sl_price)
-                            try:
-                                msg = (
-                                    f"🛡 *BREAKEVEN SHIELD LOCKED (TP1 HIT)*\n"
-                                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"📊 *Strategy:* Fib Go With Trend (5M)\n"
-                                    f"🎯 *TP1 Hit:* ${tp1_px:.2f} (Swing 1 Peak)\n"
-                                    f"🔒 *New Stop Loss:* ${t5.sl_price:.2f} (Breakeven Protected)\n"
-                                    f"🚀 *Next Target (TP2):* ${tp2_px:.2f} (Risk Free Runner)\n"
-                                    f"━━━━━━━━━━━━━━━━━━━━"
-                                )
-                                await tg.send_raw_alert(msg)
-                            except Exception as tg_err:  # noqa: BLE001
-                                logger.warning("[PAPER-TG] Failed to send breakeven alert: %s", tg_err)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[PAPER-SYNC] Fib Trend sync error: %s", exc)
 
@@ -729,12 +764,25 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         else:
                             strat_name = "SMC With Fib"
 
+                        trade_tf = "5M"
+                        if t.signal_id:
+                            parts = t.signal_id.split("_")
+                            for p in parts:
+                                if p.upper() in ("5M", "15M", "30M", "1H", "2H", "4H"):
+                                    trade_tf = p.upper()
+                                    break
+                        if trade_tf == "5M" and t.state_logs and isinstance(t.state_logs, list):
+                            for l_entry in t.state_logs:
+                                if isinstance(l_entry, dict) and l_entry.get("timeframe"):
+                                    trade_tf = str(l_entry["timeframe"]).upper()
+                                    break
+
                         if t.exit_reason == "TP_HIT":
                             msg = (
                                 f"🎯 *TAKE PROFIT HIT!*\n"
                                 f"━━━━━━━━━━━━━━━━━━━━\n"
                                 f"📊 *Strategy:* {strat_name}\n"
-                                f"🪙 *Symbol:* XAU/USD (5M)\n"
+                                f"🪙 *Symbol:* XAU/USD ({trade_tf})\n"
                                 f"💵 *Entry:* ${entry:.2f}\n"
                                 f"💰 *Exit Price:* ${t.exit_price:.2f}\n"
                                 f"🏆 *Result:* +{pts:.2f} PTS (+${t.realized_pnl:.2f} USD)\n"
@@ -745,7 +793,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 f"🛡 *BREAKEVEN EXIT*\n"
                                 f"━━━━━━━━━━━━━━━━━━━━\n"
                                 f"📊 *Strategy:* {strat_name}\n"
-                                f"🪙 *Symbol:* XAU/USD (5M)\n"
+                                f"🪙 *Symbol:* XAU/USD ({trade_tf})\n"
                                 f"💵 *Entry:* ${entry:.2f}\n"
                                 f"💰 *Exit Price:* ${t.exit_price:.2f}\n"
                                 f"⚖️ *Result:* {pts:+.2f} PTS (${t.realized_pnl:+.2f} USD — Capital Protected)\n"
@@ -756,7 +804,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 f"🛑 *STOP LOSS HIT*\n"
                                 f"━━━━━━━━━━━━━━━━━━━━\n"
                                 f"📊 *Strategy:* {strat_name}\n"
-                                f"🪙 *Symbol:* XAU/USD (5M)\n"
+                                f"🪙 *Symbol:* XAU/USD ({trade_tf})\n"
                                 f"💵 *Entry:* ${entry:.2f}\n"
                                 f"🛑 *Exit Price:* ${t.exit_price:.2f}\n"
                                 f"📉 *Result:* -{abs(pts):.2f} PTS (-${abs(t.realized_pnl):.2f} USD)\n"

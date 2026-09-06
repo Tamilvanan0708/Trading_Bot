@@ -3534,10 +3534,40 @@ window.setStrategyTf = function(tf) {
   if (fn && mount) fn(mount);
 };
 
+window.__selectedFibTrendTf = "15m";
+window.__selectedTf_FIB_GO_WITH_TREND = "15m";
+window.__selectedTf_SMC_WITH_FIB = "5m";
+window.__selectedTf_FIB_WITH_RETRACEMENT = "5m";
+
+window.__setStrategyTf = function(strat, tf) {
+  if (strat === "FIB_GO_WITH_TREND") {
+    window.__selectedFibTrendTf = tf;
+  }
+  window["__selectedTf_" + strat] = tf;
+  const mount = document.getElementById("view-mount");
+  if (strat === "FIB_GO_WITH_TREND" && Routes["/fib-trend"] && mount) Routes["/fib-trend"](mount);
+  else if (strat === "SMC_WITH_FIB" && Routes["/smc-fib"] && mount) Routes["/smc-fib"](mount);
+  else if (strat === "FIB_WITH_RETRACEMENT" && Routes["/fib-retracement"] && mount) Routes["/fib-retracement"](mount);
+};
+
+window.__setFibTrendTf = function(tf) {
+  window.__setStrategyTf("FIB_GO_WITH_TREND", tf);
+};
+
 function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strategyType) {
-  const TFS = ["5m"];
-  const TF_LABELS = {"5m":"5M"};
-  const selectedTf = "5m";
+  const isFibTrend = strategyType === "FIB_GO_WITH_TREND";
+  const TFS = isFibTrend
+    ? ["15m", "30m", "1h", "2h", "4h"]
+    : ["5m", "15m", "30m", "1h", "4h"];
+  const TF_LABELS = isFibTrend
+    ? {"15m":"15M", "30m":"30M", "1h":"1H", "2h":"2H", "4h":"4H"}
+    : {"5m":"5M", "15m":"15M", "30m":"30M", "1h":"1H", "4h":"4H"};
+  
+  const tfKey = isFibTrend ? "__selectedFibTrendTf" : ("__selectedTf_" + strategyType);
+  if (!window[tfKey] || !TFS.includes(window[tfKey])) {
+    window[tfKey] = TFS[0];
+  }
+  const selectedTf = window[tfKey] || TFS[0];
 
   function renderTimeline(state) {
     if (strategyType === "FIB_GO_WITH_TREND") {
@@ -3627,47 +3657,42 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         ? '<span class="badge badge-green" style="font-size:14px;padding:4px 10px">▲ LONG &nbsp; BULLISH 9/21 TREND</span>'
         : '<span class="badge badge-red" style="font-size:14px;padding:4px 10px">▼ SHORT &nbsp; BEARISH 9/21 TREND</span>';
       const entry = d.entry_price || d.trigger_breakout_price;
-      const sl = d.sl_price;
-      const tp1 = d.tp1_price || d.fib_1_000;
-      const tp2 = d.tp2_price || d.tp_price || d.fib_1_618;
-      const tp1Hit = !!d.tp1_hit;
+      const sl = d.sl_price || d.fib_0_236;
+      const tpTarget = d.tp_price || d.fib_1_618;
       const isTradeActive = state === "TRADE_ACTIVE";
+      const isStandby = !!d.is_locked_standby;
 
       return `<div class="card" style="border-color:rgba(52,211,153,0.35);margin-bottom:var(--sp-3)">
         <div class="card-head">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             ${dirBadge}
-            <span class="badge badge-blue">XAUUSD · 5M FOCUS</span>
-            <span class="badge ${isTradeActive ? 'badge-green' : (isSetup ? 'badge-amber' : 'badge-muted')}">${state}</span>
+            <span class="badge badge-blue">XAUUSD · ${TF_LABELS[tf] || tf.toUpperCase()}</span>
+            <span class="badge ${isTradeActive ? 'badge-green' : (isStandby ? 'badge-muted' : (isSetup ? 'badge-amber' : 'badge-muted'))}">${isStandby ? 'STANDBY (LOCKED)' : state}</span>
             <span class="badge" style="background:rgba(0,229,255,0.15);color:#00e5ff;border:1px solid #00e5ff">EMA: 9 (${d.ema_9 || '—'}) / 21 (${d.ema_21 || '—'})</span>
           </div>
           <div style="display:flex;gap:6px;align-items:center">
-            ${tp1Hit ? '<span class="badge badge-green">🎯 TP1 HIT (BREAKEVEN LOCKED)</span>' : (isTradeActive ? '<span class="badge badge-green">● TRADE ACTIVE</span>' : (d.entry_touched ? '<span class="badge badge-amber">⚡ 0.618 TOUCHED</span>' : '<span class="badge badge-blue">SCANNING</span>'))}
+            ${isTradeActive ? '<span class="badge badge-green">● TRADE ACTIVE (LOCKED)</span>' : (isStandby ? '<span class="badge badge-muted">STANDBY</span>' : (d.entry_touched ? '<span class="badge badge-amber">⚡ 0.618 TOUCHED</span>' : '<span class="badge badge-blue">SCANNING</span>'))}
             <span style="font-size:12px;color:var(--text-dim)">LIVE: <b>$${Number(price || 0).toFixed(2)}</b></span>
           </div>
         </div>
         <div class="card-body">
-          <div class="grid grid-4" style="margin-bottom:var(--sp-3);display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+          <div class="grid grid-3" style="margin-bottom:var(--sp-3);display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
             <div class="metric">
               <div class="metric-label">ENTRY (RULE 8 BREAK)</div>
               <div class="metric-value">${entry != null ? `$${Number(entry).toFixed(2)}` : "—"}</div>
             </div>
             <div class="metric">
-              <div class="metric-label">STOP LOSS ${tp1Hit ? '(🛡 BREAKEVEN)' : '(0.236)'}</div>
+              <div class="metric-label">STOP LOSS (0.236 LEVEL)</div>
               <div class="metric-value down">${sl != null ? `$${Number(sl).toFixed(2)}` : "—"}</div>
             </div>
             <div class="metric">
-              <div class="metric-label">TARGET TP1 (1.000 PEAK)</div>
-              <div class="metric-value" style="color:#ffd54f">${tp1 != null ? `$${Number(tp1).toFixed(2)}` : "—"} ${tp1Hit ? '✅' : ''}</div>
-            </div>
-            <div class="metric">
-              <div class="metric-label">TARGET TP2 (1.618 EXT)</div>
-              <div class="metric-value up">${tp2 != null ? `$${Number(tp2).toFixed(2)}` : "—"}</div>
+              <div class="metric-label">TARGET (1.618 EXTENSION)</div>
+              <div class="metric-value up">${tpTarget != null ? `$${Number(tpTarget).toFixed(2)}` : "—"}</div>
             </div>
           </div>
           <div class="row-between" style="font-size:12px;color:var(--text-dim);border-top:1px solid var(--border);padding-top:8px">
             <div>RULE 8 TRIGGER: <b style="color:#00e5ff">${d.trigger_breakout_price ? `$${Number(d.trigger_breakout_price).toFixed(2)}` : 'ARMING AT 0.618'}</b> &nbsp;·&nbsp; P0 ANCHOR: <b>$${d.point_0_price || '—'}</b> &nbsp;·&nbsp; P1 PEAK: <b>$${d.point_1_price || '—'}</b></div>
-            <div>STATUS: <b style="color:var(--text-bright)">${tp1Hit ? '🛡 Risk-Free Runner to TP2' : (isTradeActive ? 'Active in Progress' : (state === 'WAITING_FOR_BREAKOUT' ? 'Awaiting Next Candle Breakout' : 'Awaiting 0.618 Touch'))}</b></div>
+            <div>STATUS: <b style="color:var(--text-bright)">${isTradeActive ? 'Active Trade Running to 1.618 TP' : (isStandby ? 'Standby — Waiting for Active Trade to Close' : (state === 'WAITING_FOR_BREAKOUT' ? 'Awaiting Next Candle Breakout' : 'Scanning 9/21 EMA & 0.618'))}</b></div>
           </div>
         </div>
       </div>`;
@@ -3820,13 +3845,22 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const tfData = d.timeframes?.[selectedTf] || {};
     const activeCascadeTf = d.cascading_active_tf;
 
-    const tfButtons = `
-      <button class="btn btn-primary" style="padding:6px 14px;font-size:12px;background:#2962ff;border-color:#2962ff;color:#fff;font-weight:700;cursor:default">5M (ACTIVE)</button>
-      <button class="btn btn-secondary" disabled style="padding:6px 12px;font-size:12px;opacity:0.35;cursor:not-allowed" title="5M Focus Mode: 15M Disabled">15M (Disabled)</button>
-      <button class="btn btn-secondary" disabled style="padding:6px 12px;font-size:12px;opacity:0.35;cursor:not-allowed" title="5M Focus Mode: 30M Disabled">30M (Disabled)</button>
-      <button class="btn btn-secondary" disabled style="padding:6px 12px;font-size:12px;opacity:0.35;cursor:not-allowed" title="5M Focus Mode: 1H Disabled">1H (Disabled)</button>
-      ${strategyType !== "FIB_WITH_RETRACEMENT" ? '<button class="btn btn-secondary" disabled style="padding:6px 12px;font-size:12px;opacity:0.35;cursor:not-allowed" title="5M Focus Mode: 4H Disabled">4H (Disabled)</button>' : ''}
-    `;
+    const activeLockTf = d.active_trade_tf || d.cascading_active_tf;
+    const tfButtons = TFS.map(tf => {
+      const isSel = tf === selectedTf;
+      const isLocked = activeLockTf && activeLockTf === tf;
+      const btnClass = isSel ? "btn btn-primary" : "btn btn-secondary";
+      const lockIcon = isLocked ? " 🔒" : "";
+      return `<button class="${btnClass}" onclick="window.__setStrategyTf('${strategyType}', '${tf}')" style="padding:6px 14px;font-size:12px;font-weight:700">${TF_LABELS[tf]}${lockIcon}</button>`;
+    }).join(" ");
+
+    const activeLockMsg = activeLockTf
+      ? `<span class="badge badge-green" style="font-size:12px">🔒 ${TF_LABELS[activeLockTf] || activeLockTf.toUpperCase()} ACTIVE TRADE RUNNING (OTHER TFs STANDBY)</span>`
+      : `<span class="badge badge-blue" style="font-size:12px">⚡ 5 TIMEFRAMES CONCURRENT SCANNING</span>`;
+
+    const scopeText = isFibTrend
+      ? '15M · 30M · 1H · 2H · 4H (Single Active Lock)'
+      : '5M · 15M · 30M · 1H · 4H (Single Active Lock)';
 
     return `<div class="stack">
       <div class="row-between">
@@ -3836,7 +3870,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         </div>
         <div class="toolbar" style="margin:0">
           <span class="badge badge-green" style="display:flex;align-items:center;gap:4px"><span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>LIVE AUTO-REFRESH</span>
-          <span class="badge" style="background:rgba(41,98,255,0.2);color:#2962ff;border:1px solid #2962ff;font-weight:700">⚡ 5M FOCUS MODE</span>
+          ${activeLockMsg}
           <span class="badge badge-blue">SIGNAL ONLY</span>
           <span class="badge badge-red">REAL MONEY DISABLED</span>
         </div>
@@ -3849,7 +3883,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
             <span style="font-size:12px;font-weight:700;color:var(--text-dim)">SELECT TIMEFRAME:</span>
             <div style="display:flex;gap:6px">${tfButtons}</div>
           </div>
-          <div style="font-size:12px;color:var(--text-dim)">Engine Focus: <b style="color:#2962ff">5M Dedicated (Others Disabled)</b></div>
+          <div style="font-size:12px;color:var(--text-dim)">Engine Scope: <b style="color:#2962ff">${scopeText}</b></div>
         </div>
       </div>
 
@@ -3925,8 +3959,8 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         btnTv.className = "btn btn-xs btn-primary";
         btnVis.className = "btn btn-xs btn-outline";
         if (boxVis) boxVis.style.display = "none";
-        if (boxTv) boxTv.style.display = "block";
-        renderStrategyTVChart(tvBoxId, "5");
+        const tvTf = selectedTf === "1h" ? "60" : (selectedTf === "2h" ? "120" : (selectedTf === "4h" ? "240" : (selectedTf === "30m" ? "30" : (selectedTf === "15m" ? "15" : "5"))));
+        renderStrategyTVChart(tvBoxId, tvTf);
       });
     }
 
@@ -4112,47 +4146,32 @@ async function drawFibChart(containerId, tf, strategyKey) {
         if (pl) inst.priceLines.push(pl);
       }
       if (levs.sl) {
-        const isBe = !!levs.tp1_hit;
         const pl = _safeAddPriceLine(inst.candleSeries, {
           price: Number(levs.sl),
-          color: isBe ? "#26c6da" : "#ef5350",
+          color: "#ef5350",
           lineWidth: 2,
           lineStyle: LightweightCharts.LineStyle.Solid,
           axisLabelVisible: true,
-          title: isBe ? `🛡 BREAKEVEN SL: $${Number(levs.sl).toFixed(2)}` : `🛑 STOP LOSS (0.236): $${Number(levs.sl).toFixed(2)}`,
+          title: `🛑 STOP LOSS (0.236): $${Number(levs.sl).toFixed(2)}`,
         });
         if (pl) inst.priceLines.push(pl);
       }
-      if (levs.tp1) {
-        const tp1Hit = !!levs.tp1_hit;
+      if (levs.tp || levs.tp2 || levs.tp1) {
+        const targetPrice = Number(levs.tp || levs.tp2 || levs.tp1);
         const pl = _safeAddPriceLine(inst.candleSeries, {
-          price: Number(levs.tp1),
-          color: tp1Hit ? "#00e676" : "#ffd54f",
-          lineWidth: 2,
-          lineStyle: tp1Hit ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: tp1Hit ? `✅ TP1 HIT (1.000): $${Number(levs.tp1).toFixed(2)}` : `🎯 TP1 (1.000 PEAK): $${Number(levs.tp1).toFixed(2)}`,
-        });
-        if (pl) inst.priceLines.push(pl);
-      }
-      if (levs.tp2 || levs.tp) {
-        const pl = _safeAddPriceLine(inst.candleSeries, {
-          price: Number(levs.tp2 || levs.tp),
+          price: targetPrice,
           color: "#00e676",
           lineWidth: 2,
           lineStyle: LightweightCharts.LineStyle.Solid,
           axisLabelVisible: true,
-          title: `🏆 TP2 (1.618 EXT): $${Number(levs.tp2 || levs.tp).toFixed(2)}`,
+          title: `🏆 TAKE PROFIT (1.618 EXT): $${targetPrice.toFixed(2)}`,
         });
         if (pl) inst.priceLines.push(pl);
       }
 
       if (badgeEl) {
         const st = levs.state || "NO_SETUP";
-        if (levs.tp1_hit) {
-          badgeEl.className = "badge badge-green";
-          badgeEl.textContent = "🎯 TP1 HIT — RUNNING RISK-FREE TO TP2";
-        } else if (st === "TRADE_ACTIVE") {
+        if (st === "TRADE_ACTIVE") {
           badgeEl.className = "badge badge-green";
           badgeEl.textContent = "● TRADE ACTIVE (RULE 8 BREAKOUT TRIGGERED)";
         } else if (st === "WAITING_FOR_BREAKOUT") {
@@ -4411,12 +4430,12 @@ Routes["/smc-fib"] = (mount) => {
   );
 };
 
-/* ================= FIB WITH RETRACEMENT ================= */
+/* ================= FIB RETRACEMENT ================= */
 Routes["/fib-retracement"] = (mount) => {
   buildRichStrategyView(
     mount,
     "/retracement/strategy/fib-retracement/XAUUSD",
-    "🎯 Fib With Retracement",
+    "🎯 Fib Retracement",
     "Multi-Timeframe Cascading BOS Retracement Strategy · RETRACEMENT_BOS_V1",
     "FIB_WITH_RETRACEMENT"
   );

@@ -35,6 +35,7 @@ _INTERVAL_MAP = {
     TimeFrame.M15: "15m",
     TimeFrame.M30: "30m",
     TimeFrame.H1: "1h",
+    TimeFrame.H2: "2h",
     TimeFrame.H4: "4h",
     TimeFrame.D1: "1d",
 }

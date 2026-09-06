@@ -37,6 +37,7 @@ _TF_DURATION_MINUTES = {
     TimeFrame.M15: 15,
     TimeFrame.M30: 30,
     TimeFrame.H1: 60,
+    TimeFrame.H2: 120,
     TimeFrame.H4: 240,
     TimeFrame.D1: 1440,
 }
@@ -717,6 +718,9 @@ class LiveMarketDataService:
         h1 = _complete_timeframe_candles(
             resample_candles(closed, TimeFrame.H1), TimeFrame.H1, last_closed_ts
         )[-150:]
+        h2 = _complete_timeframe_candles(
+            resample_candles(closed, TimeFrame.H2), TimeFrame.H2, last_closed_ts
+        )[-120:]
         h4 = _complete_timeframe_candles(
             resample_candles(closed, TimeFrame.H4), TimeFrame.H4, last_closed_ts
         )[-100:]
@@ -729,6 +733,7 @@ class LiveMarketDataService:
             m15=m15,
             m30=m30,
             h1=h1,
+            h2=h2,
             h4=h4,
         )
 

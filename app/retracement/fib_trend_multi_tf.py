@@ -20,14 +20,14 @@ from app.retracement.fib_trend_engine import FibTrendEngine, FibTrendState
 logger = logging.getLogger("xauusd_agent")
 
 TF_MAP: dict[str, TimeFrame] = {
-    "5m": TimeFrame.M5,
     "15m": TimeFrame.M15,
     "30m": TimeFrame.M30,
     "1h": TimeFrame.H1,
+    "2h": TimeFrame.H2,
     "4h": TimeFrame.H4,
 }
 
-DEFAULT_TIMEFRAMES = ["5m"]
+DEFAULT_TIMEFRAMES = ["15m", "30m", "1h", "2h", "4h"]
 
 _fib_trend_instances: dict[str, FibTrendMultiTFMonitor] = {}
 
@@ -48,16 +48,25 @@ class _FibTrend_TFSlot:
         self.last_processed_ts: datetime | None = None
         self.has_live_data: bool = False
         self.live_price: float | None = None
+        self.is_locked_standby: bool = False
 
     def reset(self) -> None:
         self.engine.reset()
         self.last_processed_ts = None
         self.has_live_data = False
         self.live_price = None
+        self.is_locked_standby = False
 
 
 class FibTrendMultiTFMonitor:
-    """Multi-timeframe monitor for FIB GO WITH TREND."""
+    """Multi-timeframe monitor for FIB GO WITH TREND across [15m, 30m, 1h, 2h, 4h].
+
+    Policy:
+      - Concurrently monitors all 5 timeframes on live candles.
+      - Once ANY timeframe triggers an entry (TRADE_ACTIVE), it locks as the primary active timeframe.
+      - The other 4 timeframes enter STANDBY (is_locked_standby=True) to prevent duplicate trades.
+      - When the active trade finishes (COMPLETED / INVALIDATED), all 5 timeframes resume simultaneous scanning.
+    """
 
     def __init__(self, symbol: str = "XAUUSD", timeframes: list[str] | None = None) -> None:
         self.symbol = symbol
@@ -65,6 +74,7 @@ class FibTrendMultiTFMonitor:
         self.slots: dict[str, _FibTrend_TFSlot] = {
             tf: _FibTrend_TFSlot(symbol, tf) for tf in self.timeframes
         }
+        self.active_trade_tf: str | None = None
         self.live_price: float | None = None
         self.data_status: str = "NO_DATA"
         self._lock = asyncio.Lock()
@@ -72,6 +82,7 @@ class FibTrendMultiTFMonitor:
     def reset(self) -> None:
         for slot in self.slots.values():
             slot.reset()
+        self.active_trade_tf = None
         self.live_price = None
         self.data_status = "NO_DATA"
 
@@ -133,10 +144,26 @@ class FibTrendMultiTFMonitor:
 
             results: dict[str, FibTrendEngine] = {}
 
+            # Check if any slot currently has an active trade running
+            active_tf_candidate = None
+            for tf_str in self.timeframes:
+                slot = self.slots.get(tf_str)
+                if slot and slot.engine.state == FibTrendState.TRADE_ACTIVE:
+                    active_tf_candidate = tf_str
+                    break
+
+            self.active_trade_tf = active_tf_candidate
+
             for tf_str in self.timeframes:
                 slot = self.slots.get(tf_str)
                 if slot is None:
                     continue
+
+                # If another TF has an active trade, this slot is in locked standby mode
+                if self.active_trade_tf is not None and self.active_trade_tf != tf_str:
+                    slot.is_locked_standby = True
+                else:
+                    slot.is_locked_standby = False
 
                 candles_to_feed: list[Candle] = []
 
@@ -160,8 +187,20 @@ class FibTrendMultiTFMonitor:
 
                 latest_c = candles_to_feed[-1]
                 if slot.last_processed_ts is None or latest_c.timestamp > slot.last_processed_ts:
+                    # If this slot is locked standby, don't allow triggering from WAITING_FOR_BREAKOUT -> TRADE_ACTIVE
+                    prev_state = slot.engine.state
                     slot.engine.process_candle(latest_c)
+                    if slot.is_locked_standby and prev_state == FibTrendState.WAITING_FOR_BREAKOUT and slot.engine.state == FibTrendState.TRADE_ACTIVE:
+                        # Revert back to WAITING_FOR_BREAKOUT while standby locked
+                        slot.engine.state = FibTrendState.WAITING_FOR_BREAKOUT
+                        slot.engine.entry_price = None
+                        slot.engine.entry_ts = None
                     slot.last_processed_ts = latest_c.timestamp
+
+                # Check if this slot just became TRADE_ACTIVE and no active TF was locked yet
+                if self.active_trade_tf is None and slot.engine.state == FibTrendState.TRADE_ACTIVE:
+                    self.active_trade_tf = tf_str
+                    logger.info("[FIB-TREND-MULTI] 🔒 Locked Active Trade on %s! Other timeframes switched to STANDBY.", tf_str)
 
                 slot.live_price = self.live_price or latest_c.close
                 results[tf_str] = slot.engine

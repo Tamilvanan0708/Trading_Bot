@@ -10,6 +10,7 @@ class TimeFrame(str, Enum):
     M15 = "15m"
     M30 = "30m"
     H1 = "1h"
+    H2 = "2h"
     H4 = "4h"
     D1 = "1d"
 
