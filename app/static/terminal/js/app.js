@@ -4655,12 +4655,10 @@ Routes["/backtest"] = (mount) => {
                 <option value="15m" ${window.__btTimeframe === '15m' ? 'selected' : ''}>15m (15 Minutes)</option>
                 <option value="30m" ${window.__btTimeframe === '30m' ? 'selected' : ''}>30m (30 Minutes)</option>
                 <option value="1h" ${window.__btTimeframe === '1h' ? 'selected' : ''}>1h (1 Hour)</option>
-                <option value="2h" ${window.__btTimeframe === '2h' ? 'selected' : ''}>2h (2 Hours)</option>
-                <option value="4h" ${window.__btTimeframe === '4h' ? 'selected' : ''}>4h (4 Hours)</option>
               </select>
             </div>
 
-            <div style="width:140px">
+            <div style="width:130px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">CURRENCY</label>
               <select id="bt-currency" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
                 <option value="cent" ${(!window.__btCurrency || window.__btCurrency === 'cent') ? 'selected' : ''}>Cent / ₹ INR</option>
@@ -4668,23 +4666,14 @@ Routes["/backtest"] = (mount) => {
               </select>
             </div>
 
-            <div style="min-width:160px;flex:1">
-              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">SIZING & RISK MODE</label>
-              <select id="bt-sizing-mode" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
-                <option value="percent" ${(!window.__btRiskMode || window.__btRiskMode === 'percent') ? 'selected' : ''}>Dynamic % Risk (Compounding)</option>
-                <option value="fixed_amount" ${window.__btRiskMode === 'fixed_amount' ? 'selected' : ''}>Fixed Amount Risk</option>
-                <option value="fixed" ${window.__btSizingMode === 'fixed' ? 'selected' : ''}>Fixed Lot (0.01)</option>
-              </select>
+            <div style="width:115px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:#69f0ae;display:block;margin-bottom:4px">RISK % (COMPOUND)</label>
+              <input type="number" id="bt-risk-percent" class="form-input" value="${window.__btRiskPercent || 1.0}" step="0.5" min="0.1" max="10.0" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(0,230,118,0.3);color:#69f0ae;border-radius:6px;font-size:12px;font-weight:700">
             </div>
 
-            <div id="bt-risk-pct-box" style="width:95px;${(window.__btSizingMode === 'fixed' || window.__btRiskMode === 'fixed_amount') ? 'display:none;' : ''}">
-              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">RISK %</label>
-              <input type="number" id="bt-risk-percent" class="form-input" value="${window.__btRiskPercent || 1.0}" step="0.5" min="0.1" max="10.0" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
-            </div>
-
-            <div id="bt-target-risk-box" style="width:110px;${(window.__btRiskMode !== 'fixed_amount') ? 'display:none;' : ''}">
-              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TARGET RISK</label>
-              <input type="number" id="bt-target-risk" class="form-input" value="${window.__btTargetRisk || 100.0}" step="1" min="1" max="5000" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+            <div style="width:115px">
+              <label class="input-label" id="bt-capital-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">CAPITAL (${isCent ? '₹' : '$'})</label>
+              <input type="number" id="bt-capital" class="form-input" value="${window.__btCapital || 10000}" step="500" min="100" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div style="flex:1;min-width:120px">
@@ -4695,16 +4684,6 @@ Routes["/backtest"] = (mount) => {
             <div style="flex:1;min-width:120px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TO DATE</label>
               <input type="date" id="bt-to-date" class="form-input" value="${window.__btToDate || '2026-08-31'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
-            </div>
-
-            <div id="bt-fixed-lot-box" style="width:90px;${window.__btSizingMode !== 'fixed' ? 'display:none;' : ''}">
-              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">FIXED LOT</label>
-              <input type="number" id="bt-lot-size" class="form-input" value="${window.__btLotSize || 0.01}" step="0.01" min="0.01" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
-            </div>
-
-            <div style="width:110px">
-              <label class="input-label" id="bt-capital-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">CAPITAL (${isCent ? '₹' : '$'})</label>
-              <input type="number" id="bt-capital" class="form-input" value="${window.__btCapital || 10000}" step="500" min="100" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div>
@@ -4791,36 +4770,6 @@ Routes["/backtest"] = (mount) => {
       });
     }
 
-    // Wire up Sizing Mode change
-    const modeSelect = mount.querySelector("#bt-sizing-mode");
-    if (modeSelect) {
-      modeSelect.addEventListener("change", (e) => {
-        const val = e.target.value;
-        const pctBox = mount.querySelector("#bt-risk-pct-box");
-        const tRiskBox = mount.querySelector("#bt-target-risk-box");
-        const fLotBox = mount.querySelector("#bt-fixed-lot-box");
-        if (val === "percent") {
-          window.__btSizingMode = "broker_risk";
-          window.__btRiskMode = "percent";
-          if (pctBox) pctBox.style.display = "";
-          if (tRiskBox) tRiskBox.style.display = "none";
-          if (fLotBox) fLotBox.style.display = "none";
-        } else if (val === "fixed_amount") {
-          window.__btSizingMode = "broker_risk";
-          window.__btRiskMode = "fixed_amount";
-          if (pctBox) pctBox.style.display = "none";
-          if (tRiskBox) tRiskBox.style.display = "";
-          if (fLotBox) fLotBox.style.display = "none";
-        } else {
-          window.__btSizingMode = "fixed";
-          window.__btRiskMode = "percent";
-          if (pctBox) pctBox.style.display = "none";
-          if (tRiskBox) tRiskBox.style.display = "none";
-          if (fLotBox) fLotBox.style.display = "";
-        }
-      });
-    }
-
     // Wire up Run Button
     const runBtn = mount.querySelector("#bt-run-btn");
     if (runBtn) {
@@ -4828,26 +4777,14 @@ Routes["/backtest"] = (mount) => {
         const strat = mount.querySelector("#bt-strategy")?.value || "FIB_WITH_RETRACEMENT";
         const tf = mount.querySelector("#bt-timeframe")?.value || "ALL";
         const cur = mount.querySelector("#bt-currency")?.value || "cent";
-        const sModeSelect = mount.querySelector("#bt-sizing-mode")?.value || "percent";
         const fDate = mount.querySelector("#bt-from-date")?.value || "2026-08-01";
         const tDate = mount.querySelector("#bt-to-date")?.value || "2026-08-31";
-        const lot = parseFloat(mount.querySelector("#bt-lot-size")?.value || "0.01");
         const cap = parseFloat(mount.querySelector("#bt-capital")?.value || "10000");
         const rPercent = parseFloat(mount.querySelector("#bt-risk-percent")?.value || "1.0");
-        const targetRisk = parseFloat(mount.querySelector("#bt-target-risk")?.value || "100.0");
 
-        let sizingMode = "broker_risk";
-        let riskMode = "percent";
-        if (sModeSelect === "fixed") {
-          sizingMode = "fixed";
-          riskMode = "percent";
-        } else if (sModeSelect === "fixed_amount") {
-          sizingMode = "broker_risk";
-          riskMode = "fixed_amount";
-        } else {
-          sizingMode = "broker_risk";
-          riskMode = "percent";
-        }
+        const sizingMode = "broker_risk";
+        const riskMode = "percent";
+        const lot = 0.01;
 
         window.__btStrategy = strat;
         window.__btTimeframe = tf;
@@ -4859,7 +4796,6 @@ Routes["/backtest"] = (mount) => {
         window.__btSizingMode = sizingMode;
         window.__btRiskMode = riskMode;
         window.__btRiskPercent = rPercent;
-        window.__btTargetRisk = targetRisk;
 
         isLoading = true;
         renderView();
@@ -4876,7 +4812,7 @@ Routes["/backtest"] = (mount) => {
               lot_size: lot,
               initial_capital: cap,
               sizing_mode: sizingMode,
-              target_risk_usd: targetRisk,
+              target_risk_usd: 100.0,
               account_currency: cur,
               risk_mode: riskMode,
               risk_percent: rPercent,
@@ -4977,16 +4913,11 @@ Routes["/settings"] = async (mount) => {
     const st = stRaw.status || stRaw;
     const tg = d.tg || {};
     const exec = d.exec || {};
-    const sizingMode = exec.sizing_mode || "broker_risk";
     const accountCurrency = exec.account_currency || "cent";
-    const riskMode = exec.risk_mode || "percent";
     const riskPercent = exec.risk_percent !== undefined ? exec.risk_percent : 1.0;
     const accountBalance = exec.account_balance !== undefined ? exec.account_balance : 10000.0;
-    const targetRisk = exec.target_risk_usd !== undefined ? exec.target_risk_usd : 100.0;
-    const fixedLot = exec.fixed_lot_size !== undefined ? exec.fixed_lot_size : 0.01;
     const activeTfs = exec.fib_retracement_timeframes || ["5m", "15m", "30m", "1h"];
     const smartShield = exec.smart_shield_enabled !== false;
-    const smartShieldLevel = exec.smart_shield_level || "0.618";
 
     const isCent = accountCurrency === "cent";
     const sym = isCent ? "₹" : "$";
@@ -5007,12 +4938,10 @@ Routes["/settings"] = async (mount) => {
       <div class="card" style="border: 1px solid rgba(41,98,255,0.3)">
         <div class="card-head" style="background:rgba(41,98,255,0.08);display:flex;justify-content:space-between;align-items:center">
           <span style="font-weight:700;color:#90caf9">🎯 POSITION SIZING & RISK ENGINE</span>
-          <span id="set-mode-badge" class="badge ${sizingMode === 'fixed' ? 'badge-amber' : 'badge-green'}">
-            ${sizingMode === 'fixed' ? 'FIXED LOT' : 'DYNAMIC RISK'}
-          </span>
+          <span class="badge badge-green">DYNAMIC % RISK COMPOUNDING</span>
         </div>
         <div class="card-body">
-          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;margin-bottom:16px">
             <!-- ACCOUNT CURRENCY -->
             <div>
               <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
@@ -5021,28 +4950,6 @@ Routes["/settings"] = async (mount) => {
               <select id="set-account-currency" class="form-input" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
                 <option value="cent" ${accountCurrency === 'cent' ? 'selected' : ''}>Cent Account (USC / ₹ INR) — 1 Cent = ₹1</option>
                 <option value="usd" ${accountCurrency === 'usd' ? 'selected' : ''}>Standard Account ($ USD)</option>
-              </select>
-            </div>
-
-            <!-- POSITION SIZING MODE -->
-            <div>
-              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
-                Position Sizing Mode
-              </label>
-              <select id="set-sizing-mode" class="form-input" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
-                <option value="broker_risk" ${sizingMode === 'broker_risk' ? 'selected' : ''}>Dynamic Risk (Auto-Lot Sizing) — Recommended</option>
-                <option value="fixed" ${sizingMode === 'fixed' ? 'selected' : ''}>Fixed Lot Size</option>
-              </select>
-            </div>
-
-            <!-- RISK MODE -->
-            <div id="risk-mode-box" style="${sizingMode === 'fixed' ? 'opacity:0.35;' : ''}transition:opacity 0.2s">
-              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
-                Risk Calculation Mode
-              </label>
-              <select id="set-risk-mode" class="form-input" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
-                <option value="percent" ${riskMode === 'percent' ? 'selected' : ''}>% of Balance (Auto-Compounding)</option>
-                <option value="fixed_amount" ${riskMode === 'fixed_amount' ? 'selected' : ''}>Fixed Amount Risk</option>
               </select>
             </div>
 
@@ -5056,7 +4963,7 @@ Routes["/settings"] = async (mount) => {
           </div>
 
           <!-- DYNAMIC RISK % PRESETS & CONTROLS -->
-          <div id="percent-risk-controls" style="background:#181e29;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px;${(sizingMode === 'fixed' || riskMode === 'fixed_amount') ? 'display:none;' : ''}">
+          <div id="percent-risk-controls" style="background:#181e29;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
               <span style="font-size:12px;font-weight:700;color:#90caf9">⚡ RISK PERCENTAGE PER TRADE (AUTO-COMPOUNDING)</span>
               <span class="muted" style="font-size:11px">Auto-upsizes on profit & auto-downsizes on drawdown</span>
@@ -5076,23 +4983,6 @@ Routes["/settings"] = async (mount) => {
                 <input type="number" id="set-risk-percent" class="form-input" value="${riskPercent}" step="0.1" min="0.1" max="10.0" style="width:80px;padding:6px 8px;background:#10141d;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:4px;font-size:13px;font-weight:700;text-align:center">
                 <span style="font-size:12px;font-weight:700;color:#90caf9">%</span>
               </div>
-            </div>
-          </div>
-
-          <!-- FIXED AMOUNT / FIXED LOT BOXES -->
-          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px">
-            <div id="risk-usd-box" style="${(sizingMode === 'fixed' || riskMode === 'percent') ? 'display:none;' : ''}">
-              <label class="input-label" id="target-risk-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
-                Target Risk per Trade (${sym})
-              </label>
-              <input type="number" id="set-target-risk" class="form-input" value="${targetRisk}" step="10.0" min="1.0" max="5000.0" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
-            </div>
-
-            <div id="fixed-lot-box" style="${sizingMode !== 'fixed' ? 'display:none;' : ''}">
-              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
-                Fixed Lot Size
-              </label>
-              <input type="number" id="set-fixed-lot" class="form-input" value="${fixedLot}" step="0.01" min="0.01" max="10.0" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
             </div>
           </div>
 
@@ -5126,45 +5016,13 @@ Routes["/settings"] = async (mount) => {
             </div>
           </div>
 
-          <!-- SMART SHIELD LEVEL SELECTION -->
-          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);margin:0">
-                🛡️ Smart Shield Loss Protection Target Level
-              </label>
-              <span class="badge badge-green" style="font-size:10px">PROVEN +₹98,182 PROFIT</span>
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:12px;margin-bottom:12px">
-              <label style="display:flex;align-items:flex-start;gap:10px;background:#181e29;border:1px solid ${smartShieldLevel === '0.618' ? 'rgba(0,230,118,0.4)' : 'rgba(255,255,255,0.1)'};border-radius:6px;padding:12px;cursor:pointer">
-                <input type="radio" name="smart-shield-lvl" value="0.618" ${smartShieldLevel === '0.618' ? 'checked' : ''} style="margin-top:3px;cursor:pointer">
-                <div>
-                  <div style="font-size:13px;font-weight:700;color:#69f0ae">0.618 Entry Breakeven (Recommended)</div>
-                  <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
-                    Moves L1 SL to exact 0.618 entry price when L2/L3 hits TP. Completely eliminates losing trades on pullbacks!
-                    <br><b style="color:#00e676">August 2026 Test: +₹98,182.05 net profit · DD: -₹793.53</b>
-                  </div>
-                </div>
-              </label>
-              <label style="display:flex;align-items:flex-start;gap:10px;background:#181e29;border:1px solid ${smartShieldLevel === '0.500' ? 'rgba(0,230,118,0.4)' : 'rgba(255,255,255,0.1)'};border-radius:6px;padding:12px;cursor:pointer">
-                <input type="radio" name="smart-shield-lvl" value="0.500" ${smartShieldLevel === '0.500' ? 'checked' : ''} style="margin-top:3px;cursor:pointer">
-                <div>
-                  <div style="font-size:13px;font-weight:700;color:#ffe082">0.500 Conservative Buffer</div>
-                  <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
-                    Moves L1 SL to 0.500 buffer level when L2/L3 hits TP. Allows wider breathing room but absorbs partial loss if price dips to 0.500.
-                    <br><b style="color:#ffd54f">August 2026 Test: +₹21,496.71 net profit · DD: -₹931.05</b>
-                  </div>
-                </div>
-              </label>
-            </div>
-          </div>
-
           <!-- FIB RETRACEMENT TIMEFRAMES SELECTOR -->
           <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
               <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);margin:0">
                 Active Fib Retracement Timeframes
               </label>
-              <span style="font-size:11px;color:var(--text-dim)">4H excluded to prevent drawdown</span>
+              <span style="font-size:11px;color:var(--text-dim)">Recommended: 5M, 15M, 30M, 1H (4H removed)</span>
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
               <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(100,181,246,0.3);border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#90caf9">
@@ -5178,9 +5036,6 @@ Routes["/settings"] = async (mount) => {
               </label>
               <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(186,104,200,0.3);border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#ce93d8">
                 <input type="checkbox" id="tf-cb-1h" ${activeTfs.includes('1h') ? 'checked' : ''} style="margin:0;cursor:pointer"> 1H
-              </label>
-              <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(239,83,80,0.2);border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;color:#ef9a9a;opacity:0.65">
-                <input type="checkbox" id="tf-cb-4h" ${activeTfs.includes('4h') ? 'checked' : ''} style="margin:0;cursor:pointer"> 4H (Disabled)
               </label>
             </div>
           </div>
@@ -5231,16 +5086,11 @@ Routes["/settings"] = async (mount) => {
     const cur = mount.querySelector("#set-account-currency")?.value || "cent";
     const sym = cur === "cent" ? "₹" : "$";
     const bal = parseFloat(mount.querySelector("#set-account-balance")?.value || "10000");
-    const rMode = mount.querySelector("#set-risk-mode")?.value || "percent";
     const rPct = parseFloat(mount.querySelector("#set-risk-percent")?.value || "1.0");
-    const tRisk = parseFloat(mount.querySelector("#set-target-risk")?.value || "100");
-    const sMode = mount.querySelector("#set-sizing-mode")?.value || "broker_risk";
-    const fLot = parseFloat(mount.querySelector("#set-fixed-lot")?.value || "0.01");
 
-    const effectiveRisk = rMode === "percent" ? Math.max(1.0, bal * (rPct / 100.0)) : Math.max(1.0, tRisk);
+    const effectiveRisk = Math.max(1.0, bal * (rPct / 100.0));
 
     const calcLot = (pts) => {
-      if (sMode === "fixed") return Math.max(0.01, fLot).toFixed(2);
       const raw = effectiveRisk / (pts * 100.0);
       return Math.max(0.01, Math.min(5.0, Math.round(raw * 100) / 100)).toFixed(2);
     };
@@ -5286,76 +5136,12 @@ Routes["/settings"] = async (mount) => {
       const isC = e.target.value === "cent";
       const balInput = mount.querySelector("#set-account-balance");
       const balLabel = mount.querySelector("#balance-label");
-      const tRiskLabel = mount.querySelector("#target-risk-label");
       if (isC) {
         if (balLabel) balLabel.textContent = "Account Balance (₹)";
-        if (tRiskLabel) tRiskLabel.textContent = "Target Risk per Trade (₹)";
         if (balInput && balInput.value === "1000") balInput.value = "10000";
       } else {
         if (balLabel) balLabel.textContent = "Account Balance ($)";
-        if (tRiskLabel) tRiskLabel.textContent = "Target Risk per Trade ($)";
         if (balInput && balInput.value === "10000") balInput.value = "1000";
-      }
-      updateLotPreview();
-    });
-  }
-
-  // Sizing Mode Change interaction
-  const sizingSelect = mount.querySelector("#set-sizing-mode");
-  if (sizingSelect) {
-    sizingSelect.addEventListener("change", (e) => {
-      const val = e.target.value;
-      const rModeBox = mount.querySelector("#risk-mode-box");
-      const pctControls = mount.querySelector("#percent-risk-controls");
-      const riskBox = mount.querySelector("#risk-usd-box");
-      const lotBox = mount.querySelector("#fixed-lot-box");
-      const badge = mount.querySelector("#set-mode-badge");
-      const rMode = mount.querySelector("#set-risk-mode")?.value || "percent";
-
-      if (val === "fixed") {
-        if (rModeBox) rModeBox.style.opacity = "0.35";
-        if (pctControls) pctControls.style.display = "none";
-        if (riskBox) riskBox.style.display = "none";
-        if (lotBox) lotBox.style.display = "";
-        if (badge) {
-          badge.className = "badge badge-amber";
-          badge.textContent = "FIXED LOT";
-        }
-      } else {
-        if (rModeBox) rModeBox.style.opacity = "1";
-        if (rMode === "percent") {
-          if (pctControls) pctControls.style.display = "";
-          if (riskBox) riskBox.style.display = "none";
-        } else {
-          if (pctControls) pctControls.style.display = "none";
-          if (riskBox) riskBox.style.display = "";
-        }
-        if (lotBox) lotBox.style.display = "none";
-        if (badge) {
-          badge.className = "badge badge-green";
-          badge.textContent = "DYNAMIC RISK";
-        }
-      }
-      updateLotPreview();
-    });
-  }
-
-  // Risk Mode Change interaction
-  const rModeSelect = mount.querySelector("#set-risk-mode");
-  if (rModeSelect) {
-    rModeSelect.addEventListener("change", (e) => {
-      const val = e.target.value;
-      const sMode = mount.querySelector("#set-sizing-mode")?.value || "broker_risk";
-      const pctControls = mount.querySelector("#percent-risk-controls");
-      const riskBox = mount.querySelector("#risk-usd-box");
-      if (sMode !== "fixed") {
-        if (val === "percent") {
-          if (pctControls) pctControls.style.display = "";
-          if (riskBox) riskBox.style.display = "none";
-        } else {
-          if (pctControls) pctControls.style.display = "none";
-          if (riskBox) riskBox.style.display = "";
-        }
       }
       updateLotPreview();
     });
@@ -5375,7 +5161,7 @@ Routes["/settings"] = async (mount) => {
   });
 
   // Numeric input change listeners for instant live preview
-  mount.querySelectorAll("#set-account-balance, #set-risk-percent, #set-target-risk, #set-fixed-lot").forEach(input => {
+  mount.querySelectorAll("#set-account-balance, #set-risk-percent").forEach(input => {
     input.addEventListener("input", updateLotPreview);
   });
 
@@ -5387,21 +5173,15 @@ Routes["/settings"] = async (mount) => {
   if (saveBtn) {
     saveBtn.addEventListener("click", async () => {
       const cur = mount.querySelector("#set-account-currency")?.value || "cent";
-      const mode = mount.querySelector("#set-sizing-mode")?.value || "broker_risk";
-      const rMode = mount.querySelector("#set-risk-mode")?.value || "percent";
       const rPct = parseFloat(mount.querySelector("#set-risk-percent")?.value || "1.0");
       const balance = parseFloat(mount.querySelector("#set-account-balance")?.value || "10000.0");
-      const targetRisk = parseFloat(mount.querySelector("#set-target-risk")?.value || "100.0");
-      const fixedLot = parseFloat(mount.querySelector("#set-fixed-lot")?.value || "0.01");
       const smartShield = mount.querySelector("#cb-smart-shield")?.checked ?? true;
-      const shieldLevel = mount.querySelector('input[name="smart-shield-lvl"]:checked')?.value || "0.618";
 
       const tfs = [];
       if (mount.querySelector("#tf-cb-5m")?.checked) tfs.push("5m");
       if (mount.querySelector("#tf-cb-15m")?.checked) tfs.push("15m");
       if (mount.querySelector("#tf-cb-30m")?.checked) tfs.push("30m");
       if (mount.querySelector("#tf-cb-1h")?.checked) tfs.push("1h");
-      if (mount.querySelector("#tf-cb-4h")?.checked) tfs.push("4h");
 
       saveBtn.disabled = true;
       saveBtn.textContent = "⏳ SAVING...";
@@ -5409,25 +5189,23 @@ Routes["/settings"] = async (mount) => {
       try {
         const payload = {
           account_currency: cur,
-          sizing_mode: mode,
-          risk_mode: rMode,
+          sizing_mode: "broker_risk",
+          risk_mode: "percent",
           risk_percent: rPct,
           account_balance: balance,
-          target_risk_usd: targetRisk,
-          fixed_lot_size: fixedLot,
+          target_risk_usd: 100.0,
+          fixed_lot_size: 0.01,
           fib_retracement_timeframes: tfs.length > 0 ? tfs : ["5m", "15m", "30m", "1h"],
           smart_shield_enabled: smartShield,
-          smart_shield_level: shieldLevel,
+          smart_shield_level: "0.618",
         };
 
         await API.saveExecutionSettings(payload);
         window.__btCurrency = cur;
-        window.__btSizingMode = mode;
-        window.__btRiskMode = rMode;
+        window.__btSizingMode = "broker_risk";
+        window.__btRiskMode = "percent";
         window.__btRiskPercent = rPct;
         window.__btCapital = balance;
-        window.__btTargetRisk = targetRisk;
-        window.__btLotSize = fixedLot;
         showToast("Execution settings saved successfully! Live trading & Backtest updated.", "info");
       } catch (err) {
         showToast(`Failed to save settings: ${err.message}`, "error");
