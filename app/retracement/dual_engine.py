@@ -39,6 +39,7 @@ from app.core.constants import SignalDirection
 from app.core.logging import logger
 from app.data.models import Candle
 from app.indicators.swings import SwingPoint, detect_swings
+from app.config.execution_settings import get_execution_settings
 from app.retracement.models import (
     RetracementEvent,
     RetracementEventType,
@@ -52,13 +53,21 @@ from app.retracement.models import (
 class DualRetracementEngine:
     """Exact deterministic dual-direction (Bullish/Bearish) Retracement BOS Engine."""
 
-    def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int | None = None, right_bars: int | None = None):
+    def __init__(
+        self,
+        symbol: str = "XAUUSD",
+        timeframe: str = "15m",
+        left_bars: int | None = None,
+        right_bars: int | None = None,
+        smart_shield_level: str | None = None,
+    ):
         self.symbol = symbol
         self.timeframe = timeframe
         # 3-bar fractal swings (7-bar window) capture true structural swing highs and lows
         default_bars = 3
         self.left_bars = left_bars if left_bars is not None else default_bars
         self.right_bars = right_bars if right_bars is not None else default_bars
+        self.smart_shield_level = smart_shield_level
         self.setup: RetracementSetup | None = None
         self._candles: list[Candle] = []
         self._events: list[RetracementEvent] = []
@@ -630,19 +639,24 @@ class DualRetracementEngine:
                 if candle.high >= layer["tp"]:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = layer["tp"]
-                    # ── SMART SHIELD: 0.500 BUFFER SHIELD ─────────────────────────────
-                    # When L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382):
-                    #   → Move L1 Stop Loss to 0.500 (L2 entry price).
-                    #     Gives L1 breathing room so market noise at 0.618 doesn't stop it out early!
+                    # ── SMART SHIELD: 0.618 ENTRY BREAKEVEN / 0.500 BUFFER SHIELD ─────
+                    # When L2 or L3 hit TP (bounced back to 0.618):
+                    #   → Move L1 Stop Loss to 0.618 (Entry Breakeven) or 0.500 (Buffer)
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
-                        l2_level = setup.fib_0_500
-                        if l2_level is not None and setup.sl_price < l2_level:
-                            setup.layers["L1"]["sl"] = round(l2_level, 2)
-                            setup.sl_price = l2_level
+                        shield_lvl = self.smart_shield_level
+                        if not shield_lvl:
+                            try:
+                                shield_lvl = getattr(get_execution_settings(), "smart_shield_level", "0.618")
+                            except Exception:
+                                shield_lvl = "0.618"
+                        target_level = setup.fib_0_618 if shield_lvl == "0.618" else setup.fib_0_500
+                        if target_level is not None and setup.sl_price < target_level:
+                            setup.layers["L1"]["sl"] = round(target_level, 2)
+                            setup.sl_price = target_level
                             setup.layers["L1"]["shield_stage"] = 1
                             logger.info(
-                                "[SMART SHIELD] L%s TP hit → L1 SL raised to 0.500 ($%.2f)",
-                                layer["layer"][-1], l2_level,
+                                "[SMART SHIELD] L%s TP hit → L1 SL raised to %s ($%.2f)",
+                                layer["layer"][-1], shield_lvl, target_level,
                             )
 
         else:  # SHORT
@@ -652,19 +666,24 @@ class DualRetracementEngine:
                 if candle.low <= layer["tp"]:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = layer["tp"]
-                    # ── SMART SHIELD: 0.500 BUFFER SHIELD ─────────────────────────────
-                    # When L2 or L3 hit TP (bounced back to 0.618 from 0.500/0.382):
-                    #   → Move L1 Stop Loss to 0.500 (L2 entry price).
-                    #     Gives L1 breathing room so market noise at 0.618 doesn't stop it out early!
+                    # ── SMART SHIELD: 0.618 ENTRY BREAKEVEN / 0.500 BUFFER SHIELD ─────
+                    # When L2 or L3 hit TP (bounced back to 0.618):
+                    #   → Move L1 Stop Loss to 0.618 (Entry Breakeven) or 0.500 (Buffer)
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
-                        l2_level = setup.fib_0_500
-                        if l2_level is not None and setup.sl_price > l2_level:
-                            setup.layers["L1"]["sl"] = round(l2_level, 2)
-                            setup.sl_price = l2_level
+                        shield_lvl = self.smart_shield_level
+                        if not shield_lvl:
+                            try:
+                                shield_lvl = getattr(get_execution_settings(), "smart_shield_level", "0.618")
+                            except Exception:
+                                shield_lvl = "0.618"
+                        target_level = setup.fib_0_618 if shield_lvl == "0.618" else setup.fib_0_500
+                        if target_level is not None and setup.sl_price > target_level:
+                            setup.layers["L1"]["sl"] = round(target_level, 2)
+                            setup.sl_price = target_level
                             setup.layers["L1"]["shield_stage"] = 1
                             logger.info(
-                                "[SMART SHIELD] L%s TP hit → L1 SL lowered to 0.500 ($%.2f)",
-                                layer["layer"][-1], l2_level,
+                                "[SMART SHIELD] L%s TP hit → L1 SL lowered to %s ($%.2f)",
+                                layer["layer"][-1], shield_lvl, target_level,
                             )
 
         # Setup completes only when EVERY filled layer has resolved (TP/SL/escape).

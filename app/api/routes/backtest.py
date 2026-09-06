@@ -95,9 +95,12 @@ class StrategyBacktestRequest(BaseModel):
     end_date: str = Field(default="2026-07-31", description="YYYY-MM-DD")
     symbol: str = Field(default="XAUUSD")
     lot_size: float = Field(default=0.01, ge=0.01, le=10.0)
-    initial_capital: float = Field(default=1000.0, ge=100.0)
-    sizing_mode: str = Field(default="broker_risk", description="fixed | broker_risk | pure_risk")
-    target_risk_usd: float = Field(default=10.0, ge=1.0, le=500.0)
+    initial_capital: float = Field(default=10000.0, ge=100.0)
+    sizing_mode: str = Field(default="broker_risk", description="fixed | broker_risk")
+    target_risk_usd: float = Field(default=100.0, ge=1.0, le=5000.0)
+    account_currency: str = Field(default="cent", description="cent | usd")
+    risk_mode: str = Field(default="percent", description="percent | fixed_amount")
+    risk_percent: float = Field(default=1.0, ge=0.1, le=10.0)
 
 
 @router.post("/run-strategy")
@@ -132,6 +135,9 @@ async def run_strategy_backtest(req: StrategyBacktestRequest):
         initial_capital=req.initial_capital,
         sizing_mode=req.sizing_mode,
         target_risk_usd=req.target_risk_usd,
+        account_currency=req.account_currency,
+        risk_mode=req.risk_mode,
+        risk_percent=req.risk_percent,
     )
 
     try:

@@ -22,11 +22,31 @@ class ExecutionSettings(BaseModel):
         default="broker_risk",
         description="fixed | broker_risk"
     )
+    account_currency: Literal["cent", "usd"] = Field(
+        default="cent",
+        description="cent (USC / ₹ INR) | usd ($ USD)"
+    )
+    risk_mode: Literal["percent", "fixed_amount"] = Field(
+        default="percent",
+        description="percent of balance | fixed_amount"
+    )
+    risk_percent: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=10.0,
+        description="Risk percentage of account balance per trade (e.g. 1.0 = 1%)"
+    )
+    account_balance: float = Field(
+        default=10000.0,
+        ge=10.0,
+        le=10000000.0,
+        description="Base capital / balance for risk sizing (₹10,000 in cent mode)"
+    )
     target_risk_usd: float = Field(
-        default=10.0,
+        default=100.0,
         ge=1.0,
-        le=500.0,
-        description="Target dollar risk per trade in USD"
+        le=5000.0,
+        description="Target dollar/cent risk when risk_mode is fixed_amount"
     )
     fixed_lot_size: float = Field(
         default=0.01,
@@ -40,7 +60,11 @@ class ExecutionSettings(BaseModel):
     )
     smart_shield_enabled: bool = Field(
         default=True,
-        description="Auto-raise L1 SL to entry 0.500 when L2/L3 TP hits"
+        description="Auto-move L1 SL when L2/L3 TP hits"
+    )
+    smart_shield_level: Literal["0.618", "0.500"] = Field(
+        default="0.618",
+        description="Smart shield L1 SL target: 0.618 (Entry Breakeven) or 0.500 (Buffer)"
     )
 
 
@@ -80,23 +104,33 @@ def calculate_lot_size(
     entry_px: float,
     sl_px: float,
     sizing_mode: str = "broker_risk",
-    target_risk_usd: float = 10.0,
+    target_risk_usd: float = 100.0,
     fixed_lot_size: float = 0.01,
     min_lot: float = 0.01,
     max_lot: float = 5.0,
+    risk_mode: str = "percent",
+    risk_percent: float = 1.0,
+    account_balance: float = 10000.0,
+    account_currency: str = "cent",
 ) -> float:
     """
     Calculate lot size based on configured sizing mode:
     - 'fixed': Returns fixed_lot_size (e.g. 0.01).
     - 'broker_risk': Dynamic sizing respecting broker limits (lot step 0.01, min 0.01).
-    - 'pure_risk': Exact mathematical fractional lot size.
+      If risk_mode == 'percent', scales dynamically with account_balance * (risk_percent / 100.0).
     """
     mode = (sizing_mode or "broker_risk").lower().strip()
     if mode == "fixed":
         return max(min_lot, round(fixed_lot_size, 2))
 
+    # Calculate effective risk amount in base units (₹ / $ / Cents)
+    if risk_mode == "percent":
+        effective_risk = max(1.0, account_balance * (risk_percent / 100.0))
+    else:
+        effective_risk = max(1.0, target_risk_usd)
+
     risk_pts = max(0.2, abs(entry_px - sl_px))
-    raw_lot = target_risk_usd / (risk_pts * 100.0)
+    raw_lot = effective_risk / (risk_pts * 100.0)
 
     # broker_risk: Round to standard broker lot step 0.01 with minimum lot floor
     broker_lot = round(raw_lot, 2)

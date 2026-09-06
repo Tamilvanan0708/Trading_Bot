@@ -57,30 +57,39 @@ class StrategyBacktester:
         self,
         symbol: str = "XAUUSD",
         lot_size: float = 0.01,
-        initial_capital: float = 1000.0,
-        sizing_mode: str = "fixed",
-        target_risk_usd: float = 10.0,
+        initial_capital: float = 10000.0,
+        sizing_mode: str = "broker_risk",
+        target_risk_usd: float = 100.0,
+        account_currency: str = "cent",
+        risk_mode: str = "percent",
+        risk_percent: float = 1.0,
     ) -> None:
         self.symbol = symbol
         self.lot_size = lot_size
         self.initial_capital = initial_capital
-        self.sizing_mode = sizing_mode or "fixed"
-        self.target_risk_usd = target_risk_usd or 10.0
+        self.sizing_mode = sizing_mode or "broker_risk"
+        self.target_risk_usd = target_risk_usd or 100.0
+        self.account_currency = account_currency or "cent"
+        self.risk_mode = risk_mode or "percent"
+        self.risk_percent = risk_percent or 1.0
+        self.current_balance = initial_capital
 
     def _calculate_trade_pnl(self, pts: float, entry_px: float, sl_px: float) -> tuple[float, float, float]:
-        """Calculates (trade_lot, pnl_usd, r_mult) based on active sizing_mode."""
+        """Calculates (trade_lot, pnl_usd, r_mult) based on active sizing_mode and dynamic risk percent."""
         risk_pts = max(0.2, abs(entry_px - sl_px))
         r_mult = round(pts / risk_pts, 2)
         if self.sizing_mode == "broker_risk":
-            raw_lot = self.target_risk_usd / (risk_pts * 100.0)
+            if self.risk_mode == "percent":
+                effective_risk = max(1.0, self.current_balance * (self.risk_percent / 100.0))
+            else:
+                effective_risk = max(1.0, self.target_risk_usd)
+            raw_lot = effective_risk / (risk_pts * 100.0)
             trade_lot = max(0.01, min(5.0, round(raw_lot, 2)))
             pnl_usd = round(pts * trade_lot * 100.0, 2)
-        elif self.sizing_mode == "pure_risk":
-            trade_lot = max(0.001, min(5.0, round(self.target_risk_usd / (risk_pts * 100.0), 4)))
-            pnl_usd = round(r_mult * self.target_risk_usd, 2)
         else:
             trade_lot = self.lot_size
             pnl_usd = round(pts * trade_lot * 100.0, 2)
+        self.current_balance = max(10.0, round(self.current_balance + pnl_usd, 2))
         return trade_lot, pnl_usd, r_mult
 
     async def run(
@@ -604,6 +613,33 @@ class StrategyBacktester:
                 max_dd_usd = dd
                 max_dd_pct = round((dd / peak) * 100.0, 2) if peak > 0 else 0.0
 
+        # Daily progression breakdown
+        daily_map: dict[str, dict[str, Any]] = {}
+        running_equity = self.initial_capital
+        for t in sorted(closed_trades, key=lambda x: x.exit_time):
+            day_str = t.exit_time[:10]  # "YYYY-MM-DD"
+            if day_str not in daily_map:
+                daily_map[day_str] = {
+                    "date": day_str,
+                    "trades": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "daily_pnl": 0.0,
+                    "end_balance": running_equity,
+                    "return_pct": 0.0,
+                }
+            d = daily_map[day_str]
+            d["trades"] += 1
+            if t.status == "WIN":
+                d["wins"] += 1
+            else:
+                d["losses"] += 1
+            d["daily_pnl"] = round(d["daily_pnl"] + t.pnl_usd, 2)
+            running_equity = round(running_equity + t.pnl_usd, 2)
+            d["end_balance"] = running_equity
+            d["return_pct"] = round(((running_equity - self.initial_capital) / self.initial_capital) * 100.0, 2)
+
+        daily_breakdown = list(daily_map.values())
         final_balance = round(self.initial_capital + net_profit_usd, 2)
 
         return {
@@ -616,6 +652,9 @@ class StrategyBacktester:
             "lot_size": self.lot_size,
             "sizing_mode": self.sizing_mode,
             "target_risk_usd": self.target_risk_usd,
+            "account_currency": self.account_currency,
+            "risk_mode": self.risk_mode,
+            "risk_percent": self.risk_percent,
             "total_trades": total,
             "winning_trades": wins,
             "losing_trades": losses,
@@ -625,4 +664,5 @@ class StrategyBacktester:
             "profit_factor": profit_factor,
             "max_drawdown_usd": round(max_dd_usd, 2),
             "max_drawdown_pct": max_dd_pct,
+            "daily_breakdown": daily_breakdown,
         }

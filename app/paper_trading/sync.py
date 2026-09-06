@@ -272,7 +272,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     entry_px, sl_px,
                                     sizing_mode=exec_cfg.sizing_mode,
                                     target_risk_usd=exec_cfg.target_risk_usd,
-                                    fixed_lot_size=exec_cfg.fixed_lot_size
+                                    fixed_lot_size=exec_cfg.fixed_lot_size,
+                                    risk_mode=exec_cfg.risk_mode,
+                                    risk_percent=exec_cfg.risk_percent,
+                                    account_balance=exec_cfg.account_balance,
+                                    account_currency=exec_cfg.account_currency,
                                 )
 
                                 new_trade = PaperTradeModel(
@@ -483,7 +487,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 entry_px, sl_px,
                                 sizing_mode=exec_cfg.sizing_mode,
                                 target_risk_usd=exec_cfg.target_risk_usd,
-                                fixed_lot_size=exec_cfg.fixed_lot_size
+                                fixed_lot_size=exec_cfg.fixed_lot_size,
+                                risk_mode=exec_cfg.risk_mode,
+                                risk_percent=exec_cfg.risk_percent,
+                                account_balance=exec_cfg.account_balance,
+                                account_currency=exec_cfg.account_currency,
                             )
 
                             new_trade = PaperTradeModel(
@@ -622,7 +630,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 entry_px, sl_px,
                                 sizing_mode=exec_cfg.sizing_mode,
                                 target_risk_usd=exec_cfg.target_risk_usd,
-                                fixed_lot_size=exec_cfg.fixed_lot_size
+                                fixed_lot_size=exec_cfg.fixed_lot_size,
+                                risk_mode=exec_cfg.risk_mode,
+                                risk_percent=exec_cfg.risk_percent,
+                                account_balance=exec_cfg.account_balance,
+                                account_currency=exec_cfg.account_currency,
                             )
 
                             new_trade = PaperTradeModel(
