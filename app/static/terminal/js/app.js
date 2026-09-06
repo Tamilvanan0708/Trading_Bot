@@ -4594,12 +4594,12 @@ Routes["/backtest"] = (mount) => {
               </select>
             </div>
 
-            <div style="width:170px">
+            <div style="min-width:180px;flex:1">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">POSITION SIZING</label>
               <select id="bt-sizing-mode" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
-                <option value="broker_risk" ${(!window.__btSizingMode || window.__btSizingMode === 'broker_risk') ? 'selected' : ''}>Option A: Dynamic Broker ($ Risk)</option>
-                <option value="fixed" ${window.__btSizingMode === 'fixed' ? 'selected' : ''}>Baseline: Fixed Lot Size</option>
-                <option value="pure_risk" ${window.__btSizingMode === 'pure_risk' ? 'selected' : ''}>Pure R-Multiple ($ Risk)</option>
+                <option value="broker_risk" ${(!window.__btSizingMode || window.__btSizingMode === 'broker_risk') ? 'selected' : ''}>Dynamic Risk ($10 Risk)</option>
+                <option value="fixed" ${window.__btSizingMode === 'fixed' ? 'selected' : ''}>Fixed Lot (0.01)</option>
+                <option value="pure_risk" ${window.__btSizingMode === 'pure_risk' ? 'selected' : ''}>Pure Math Risk</option>
               </select>
             </div>
 
@@ -4844,119 +4844,139 @@ Routes["/settings"] = async (mount) => {
       <!-- EXECUTION & RISK CONFIG CARD -->
       <div class="card" style="border: 1px solid rgba(41,98,255,0.3)">
         <div class="card-head" style="background:rgba(41,98,255,0.08);display:flex;justify-content:space-between;align-items:center">
-          <span style="font-weight:700;color:#90caf9">🎯 DYNAMIC POSITION SIZING & RISK ENGINE</span>
-          <span class="badge ${sizingMode === 'broker_risk' ? 'badge-green' : (sizingMode === 'fixed' ? 'badge-amber' : 'badge-violet')}">
-            ${sizingMode.toUpperCase()}
+          <span style="font-weight:700;color:#90caf9">🎯 POSITION SIZING & RISK ENGINE</span>
+          <span id="set-mode-badge" class="badge ${sizingMode === 'broker_risk' ? 'badge-green' : (sizingMode === 'fixed' ? 'badge-amber' : 'badge-violet')}">
+            ${sizingMode === 'broker_risk' ? 'DYNAMIC RISK' : (sizingMode === 'fixed' ? 'FIXED LOT' : 'PURE MATH RISK')}
           </span>
         </div>
         <div class="card-body">
-          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:20px;margin-bottom:16px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:16px;margin-bottom:16px">
             <div>
               <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
                 Position Sizing Mode
               </label>
-              <select id="set-sizing-mode" class="form-input" style="width:100%;padding:10px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
-                <option value="broker_risk" ${sizingMode === 'broker_risk' ? 'selected' : ''}>Option A: Dynamic Broker Risk ($ Risk, min 0.01 lot)</option>
-                <option value="fixed" ${sizingMode === 'fixed' ? 'selected' : ''}>Baseline: Fixed Lot Size (0.01)</option>
-                <option value="pure_risk" ${sizingMode === 'pure_risk' ? 'selected' : ''}>Option A (Ideal): Pure R-Multiple Risk ($ Risk)</option>
+              <select id="set-sizing-mode" class="form-input" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
+                <option value="broker_risk" ${sizingMode === 'broker_risk' ? 'selected' : ''}>Dynamic Risk ($10 Risk) — Recommended</option>
+                <option value="fixed" ${sizingMode === 'fixed' ? 'selected' : ''}>Fixed Lot (0.01)</option>
+                <option value="pure_risk" ${sizingMode === 'pure_risk' ? 'selected' : ''}>Pure Math Risk</option>
               </select>
-              <div class="muted" style="font-size:11px;margin-top:4px">
-                Dynamic Broker Risk automatically scales 5m trades (~0.05 lot) while protecting higher timeframes.
-              </div>
             </div>
 
-            <div>
+            <div id="risk-usd-box" style="${sizingMode === 'fixed' ? 'opacity:0.35;' : ''}transition:opacity 0.2s">
               <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
                 Target Risk per Trade ($ USD)
               </label>
-              <input type="number" id="set-target-risk" class="form-input" value="${targetRisk}" step="1.0" min="1.0" max="500.0" style="width:100%;padding:9px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
-              <div class="muted" style="font-size:11px;margin-top:4px">
-                Standard: $10.00 USD (1% risk on $1,000 account). Every trade risk is normalized to this amount.
-              </div>
+              <input type="number" id="set-target-risk" class="form-input" value="${targetRisk}" step="1.0" min="1.0" max="500.0" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
             </div>
 
-            <div>
+            <div id="fixed-lot-box" style="${sizingMode !== 'fixed' ? 'opacity:0.35;' : ''}transition:opacity 0.2s">
               <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
-                Fixed Lot Size (When Fixed Mode Selected)
+                Fixed Lot Size
               </label>
-              <input type="number" id="set-fixed-lot" class="form-input" value="${fixedLot}" step="0.01" min="0.01" max="10.0" style="width:100%;padding:9px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
-              <div class="muted" style="font-size:11px;margin-top:4px">
-                Default 0.01 lots for fixed mode.
-              </div>
+              <input type="number" id="set-fixed-lot" class="form-input" value="${fixedLot}" step="0.01" min="0.01" max="10.0" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
             </div>
           </div>
 
           <!-- FIB RETRACEMENT TIMEFRAMES SELECTOR -->
           <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px">
-            <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:8px">
-              Active Timeframes for Fib Retracement (Option 1A Multi-Slot)
-            </label>
-            <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center">
-              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-                <input type="checkbox" id="tf-cb-5m" ${activeTfs.includes('5m') ? 'checked' : ''}> <b style="color:#64b5f6">5M</b> (Scalping · +$8,965 PnL)
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);margin:0">
+                Active Fib Retracement Timeframes
               </label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-                <input type="checkbox" id="tf-cb-15m" ${activeTfs.includes('15m') ? 'checked' : ''}> <b style="color:#81c784">15M</b> (Intraday · +$2,848 PnL)
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-                <input type="checkbox" id="tf-cb-30m" ${activeTfs.includes('30m') ? 'checked' : ''}> <b style="color:#ffb74d">30M</b> (Intraday · +$1,232 PnL)
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-                <input type="checkbox" id="tf-cb-1h" ${activeTfs.includes('1h') ? 'checked' : ''}> <b style="color:#ba68c8">1H</b> (Swing · +$2,196 PnL)
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;opacity:0.65">
-                <input type="checkbox" id="tf-cb-4h" ${activeTfs.includes('4h') ? 'checked' : ''}> <span style="color:#ef5350">4H (Excluded · Negative PnL)</span>
-              </label>
+              <span style="font-size:11px;color:var(--text-dim)">4H excluded to prevent drawdown</span>
             </div>
-            <div class="muted" style="font-size:11px;margin-top:6px">
-              Unchecking a timeframe stops the bot from taking new entries on that timeframe.
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+              <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(100,181,246,0.3);border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#90caf9">
+                <input type="checkbox" id="tf-cb-5m" ${activeTfs.includes('5m') ? 'checked' : ''} style="margin:0;cursor:pointer"> 5M
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(129,199,132,0.3);border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#a5d6a7">
+                <input type="checkbox" id="tf-cb-15m" ${activeTfs.includes('15m') ? 'checked' : ''} style="margin:0;cursor:pointer"> 15M
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(255,183,77,0.3);border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#ffe082">
+                <input type="checkbox" id="tf-cb-30m" ${activeTfs.includes('30m') ? 'checked' : ''} style="margin:0;cursor:pointer"> 30M
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(186,104,200,0.3);border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#ce93d8">
+                <input type="checkbox" id="tf-cb-1h" ${activeTfs.includes('1h') ? 'checked' : ''} style="margin:0;cursor:pointer"> 1H
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(239,83,80,0.2);border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;color:#ef9a9a;opacity:0.65">
+                <input type="checkbox" id="tf-cb-4h" ${activeTfs.includes('4h') ? 'checked' : ''} style="margin:0;cursor:pointer"> 4H (Disabled)
+              </label>
             </div>
           </div>
 
-          <!-- SMART SHIELD LOSS PROTECTION -->
+          <!-- SMART SHIELD & SAVE -->
           <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-            <div>
-              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:700">
-                <input type="checkbox" id="cb-smart-shield" ${smartShield ? 'checked' : ''}> 🛡️ Smart Shield Loss Protection (Auto-Breakeven)
-              </label>
-              <div class="muted" style="font-size:11px;margin-left:22px">
-                When Layer 2 or Layer 3 TP is hit, automatically moves Layer 1 SL to entry 0.500 price to guarantee profit.
-              </div>
-            </div>
-
-            <div>
-              <button id="save-execution-settings-btn" class="btn btn-primary" style="padding:10px 24px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
-                💾 SAVE EXECUTION SETTINGS
-              </button>
-            </div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:600">
+              <input type="checkbox" id="cb-smart-shield" ${smartShield ? 'checked' : ''}> 🛡️ Smart Shield Protection (Auto-Breakeven on TP)
+            </label>
+            <button id="save-execution-settings-btn" class="btn btn-primary" style="padding:9px 24px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
+              💾 SAVE SETTINGS
+            </button>
           </div>
         </div>
       </div>
 
       <!-- SAFETY & SYSTEM STATUS CARD -->
       <div class="card">
-        <div class="card-head"><span>Safety & Engine Status (enforced by backend)</span></div>
+        <div class="card-head"><span>🛡️ Safety & Engine Status</span></div>
         <div class="card-body">
-          <div class="card" style="border-color:rgba(239,68,68,0.5);margin-bottom:12px">
-            <div class="card-body" style="display:flex;align-items:center;gap:var(--sp-3)">
-              <span class="badge badge-red">REAL MONEY EXECUTION — PERMANENTLY DISABLED</span>
-              <span style="font-size:12px;color:var(--text-dim)">Zero financial risk mode. Real Binance data feed with deterministic paper trade engine.</span>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:14px">
+            <div style="background:#181e29;padding:14px 16px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
+              <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:4px">EXECUTION ENGINE</div>
+              <div style="font-size:14px;font-weight:700;color:#66bb6a">Paper Trading (Simulation)</div>
+            </div>
+            <div style="background:#181e29;padding:14px 16px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
+              <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:4px">MAX DRAWDOWN LIMIT</div>
+              <div style="font-size:14px;font-weight:700;color:#ffb74d">30% Safety Limit</div>
+            </div>
+            <div style="background:#181e29;padding:14px 16px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
+              <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:4px">TELEGRAM ALERTS</div>
+              <div style="font-size:14px;font-weight:700;color:${tg.status === 'CONNECTED' ? '#66bb6a' : '#9e9e9e'}">
+                ${tg.status || 'DISABLED'}
+              </div>
+            </div>
+            <div style="background:#181e29;padding:14px 16px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
+              <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:4px">REAL CAPITAL RISK</div>
+              <div style="font-size:14px;font-weight:700;color:#42a5f5">0% (Zero Risk Mode)</div>
             </div>
           </div>
-          ${UI.kv([
-            ["Observation mode", st.observation_mode ? '<span class="badge badge-amber">ACTIVE</span>' : '<span class="badge badge-muted">OFF</span>'],
-            ["Paper trading", st.paper_trading_enabled ? '<span class="badge badge-green">ENABLED</span>' : '<span class="badge badge-red">OFF</span>'],
-            ["Block on FAILED", st.block_on_failed ? '<span class="badge badge-green">ENABLED</span>' : '<span class="badge badge-muted">DISABLED</span>'],
-            ["Max drawdown limit", '30%'],
-            ["Telegram", tg.status || "DISABLED"],
-            ["Candidate alerts", tg.candidate_alerts ? "enabled" : "disabled"],
-            ["Environment", st.environment || "dev"],
-            ["Version", "2026.09.06.1"],
-          ])}
         </div>
       </div>
     </div>`;
   }, mount);
+
+  // Wire up Mode change interaction
+  const sizingSelect = mount.querySelector("#set-sizing-mode");
+  if (sizingSelect) {
+    sizingSelect.addEventListener("change", (e) => {
+      const val = e.target.value;
+      const riskBox = mount.querySelector("#risk-usd-box");
+      const lotBox = mount.querySelector("#fixed-lot-box");
+      const badge = mount.querySelector("#set-mode-badge");
+      if (val === "fixed") {
+        if (riskBox) riskBox.style.opacity = "0.35";
+        if (lotBox) lotBox.style.opacity = "1";
+        if (badge) {
+          badge.className = "badge badge-amber";
+          badge.textContent = "FIXED LOT";
+        }
+      } else if (val === "pure_risk") {
+        if (riskBox) riskBox.style.opacity = "1";
+        if (lotBox) lotBox.style.opacity = "0.35";
+        if (badge) {
+          badge.className = "badge badge-violet";
+          badge.textContent = "PURE MATH RISK";
+        }
+      } else {
+        if (riskBox) riskBox.style.opacity = "1";
+        if (lotBox) lotBox.style.opacity = "0.35";
+        if (badge) {
+          badge.className = "badge badge-green";
+          badge.textContent = "DYNAMIC RISK";
+        }
+      }
+    });
+  }
 
   // Wire up Save Button
   const saveBtn = mount.querySelector("#save-execution-settings-btn");
@@ -4995,7 +5015,7 @@ Routes["/settings"] = async (mount) => {
         showToast(`Failed to save settings: ${err.message}`, "error");
       } finally {
         saveBtn.disabled = false;
-        saveBtn.textContent = "💾 SAVE EXECUTION SETTINGS";
+        saveBtn.textContent = "💾 SAVE SETTINGS";
       }
     });
   }
