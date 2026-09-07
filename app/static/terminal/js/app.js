@@ -3600,6 +3600,10 @@ window.__setStrategyTf = function(strat, tf) {
     window.__selectedFibTrendTf = tf;
   }
   window["__selectedTf_" + strat] = tf;
+  if (typeof window.__viewCleanup === "function") {
+    try { window.__viewCleanup(); } catch(_) {}
+    window.__viewCleanup = null;
+  }
   const mount = document.getElementById("view-mount");
   if (strat === "FIB_GO_WITH_TREND" && Routes["/fib-trend"] && mount) Routes["/fib-trend"](mount);
   else if (strat === "SMC_WITH_FIB" && Routes["/smc-fib"] && mount) Routes["/smc-fib"](mount);
@@ -3755,7 +3759,24 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     }
 
     const state = String(d.state || "NO_SETUP").toUpperCase();
-    const isSetup = state !== "NO_SETUP";
+    const isSetup = state !== "NO_SETUP" && state !== "COMPLETED" && state !== "INVALIDATED" && !!d.direction;
+
+    if (!isSetup) {
+      return `<div class="card" style="border-color:rgba(255,255,255,0.08);margin-bottom:var(--sp-3);background:rgba(255,255,255,0.02)">
+        <div class="card-head">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="badge badge-blue">XAUUSD · ${TF_LABELS[tf] || tf.toUpperCase()}</span>
+            <span class="badge badge-muted">NO ACTIVE SETUP</span>
+            <span class="badge badge-blue">SCANNING FOR NEW BOS BREAK</span>
+          </div>
+          <span style="font-size:12px;color:var(--text-dim)">LIVE: <b>$${Number(price || 0).toFixed(2)}</b></span>
+        </div>
+        <div class="card-body" style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px">
+          🔍 Currently scanning <b>${TF_LABELS[tf] || tf.toUpperCase()}</b> closed candles for a new valid Break of Structure (BOS). No active retracement trade on this timeframe.
+        </div>
+      </div>`;
+    }
+
     const dir = d.direction || "LONG";
     const dirBadge = dir === "LONG"
       ? '<span class="badge badge-green" style="font-size:14px;padding:4px 10px">▲ LONG &nbsp; BULLISH RETRACEMENT</span>'
