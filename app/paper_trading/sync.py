@@ -331,7 +331,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             "strategy": "Fib Retracement",
                                             "layer": l_key,
                                             "direction": f_state.direction,
-                                            "symbol": "XAUUSD",
+                                            "symbol": exec_cfg.mt5_symbol or "XAUUSD",
                                             "lot_size": trade_lot,
                                             "entry_price": entry_px,
                                             "stop_loss": sl_px,
