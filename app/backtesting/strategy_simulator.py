@@ -158,11 +158,12 @@ class StrategyBacktester:
 
         engines = {tf: FibTrendEngine(symbol=self.symbol, timeframe=tf) for tf in timeframes}
 
-        # Fetch candles for each timeframe
-        tf_candles: dict[str, list[Candle]] = {}
-        for tf in timeframes:
-            candles = await fetch_historical_candles(self.symbol, tf, warmup_start, end_date)
-            tf_candles[tf] = candles
+        # Fetch candles for each timeframe in parallel
+        candle_results = await asyncio.gather(*[
+            fetch_historical_candles(self.symbol, tf, warmup_start, end_date)
+            for tf in timeframes
+        ])
+        tf_candles: dict[str, list[Candle]] = dict(zip(timeframes, candle_results))
 
         # Interleave all candles chronologically: (timestamp, tf, candle)
         timeline: list[tuple[datetime, str, Candle]] = []
@@ -300,7 +301,7 @@ class StrategyBacktester:
         end_date: datetime,
         selected_tf: str = "all",
     ) -> list[BacktestTradeRecord]:
-        allowed = ["5m", "15m", "30m", "1h", "4h"]
+        allowed = ["5m", "15m", "30m", "1h"]
         if selected_tf != "all":
             if selected_tf not in allowed:
                 return []
@@ -310,10 +311,12 @@ class StrategyBacktester:
 
         engines = {tf: SMCFibEngine(symbol=self.symbol, timeframe=tf) for tf in timeframes}
 
-        tf_candles: dict[str, list[Candle]] = {}
-        for tf in timeframes:
-            candles = await fetch_historical_candles(self.symbol, tf, warmup_start, end_date)
-            tf_candles[tf] = candles
+        # Fetch candles for each timeframe in parallel
+        candle_results = await asyncio.gather(*[
+            fetch_historical_candles(self.symbol, tf, warmup_start, end_date)
+            for tf in timeframes
+        ])
+        tf_candles: dict[str, list[Candle]] = dict(zip(timeframes, candle_results))
 
         timeline: list[tuple[datetime, str, Candle]] = []
         for tf, clist in tf_candles.items():
@@ -457,10 +460,12 @@ class StrategyBacktester:
 
         engines = {tf: DualRetracementEngine(symbol=self.symbol, timeframe=tf) for tf in timeframes}
 
-        tf_candles: dict[str, list[Candle]] = {}
-        for tf in timeframes:
-            candles = await fetch_historical_candles(self.symbol, tf, warmup_start, end_date)
-            tf_candles[tf] = candles
+        # Fetch candles for each timeframe in parallel
+        candle_results = await asyncio.gather(*[
+            fetch_historical_candles(self.symbol, tf, warmup_start, end_date)
+            for tf in timeframes
+        ])
+        tf_candles: dict[str, list[Candle]] = dict(zip(timeframes, candle_results))
 
         timeline: list[tuple[datetime, str, Candle]] = []
         for tf, clist in tf_candles.items():

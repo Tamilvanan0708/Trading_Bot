@@ -32,7 +32,7 @@ class WebSocketMarketFeed(ABC):
         url: str,
         symbols: list[str],
         capacity: int = 10_000,
-        reconnect_delay: float = 5.0,
+        reconnect_delay: float = 1.0,
         max_reconnect_attempts: int = 0,
         buffers: dict[str, TickRingBuffer] | None = None,
     ) -> None:
@@ -200,7 +200,12 @@ class WebSocketMarketFeed(ABC):
         logger.info("Feed %s stopped.", self._url)
 
     async def _listen_loop(self) -> None:
-        async with websockets.asyncio.client.connect(self._url) as ws:
+        async with websockets.asyncio.client.connect(
+            self._url,
+            ping_interval=20,
+            ping_timeout=10,
+            close_timeout=5,
+        ) as ws:
             self._connected = True
             # Fire reconnect callback only on RECONNECTS (not the initial connect)
             if self._ever_connected and self._on_reconnect_callback is not None:

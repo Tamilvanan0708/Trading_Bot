@@ -40,7 +40,7 @@ from app.retracement.dual_engine import DualRetracementEngine
 from app.retracement.models import RetracementSetup, RetracementState
 from app.retracement.repository import RetracementRepository
 
-DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h"]
+DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h"]
 TF_MAP: dict[str, TimeFrame] = {
     "5m": TimeFrame.M5,
     "15m": TimeFrame.M15,
@@ -167,11 +167,19 @@ class RetracementMultiTFMonitor:
 
     async def advance(self, db) -> dict[str, RetracementSetup | None]:
         """Process newly-closed candles on all timeframes with Multi-Slot Parallel Execution:
-        - Every timeframe (5m, 15m, 30m, 1h, 4h) maintains its own independent trading slot.
+        - Every timeframe (5m, 15m, 30m, 1h) maintains its own independent trading slot.
         - All timeframe engines co-exist and execute concurrently with zero cross-timeframe lockout.
         """
         async with self._lock:
             snap = await self._snapshot()
+            snap_key = (
+                snap.timestamp if snap else None,
+                len(snap.m15) if (snap and hasattr(snap, "m15")) else 0,
+                snap.current_price if snap else None,
+            )
+            if snap is not None and getattr(self, "_last_snap_key", None) == snap_key and getattr(self, "_last_advance_results", None) is not None:
+                return self._last_advance_results
+
             raw_results: dict[str, RetracementSetup | None] = {}
 
             # Check if any slot has fewer than 50 candles
@@ -223,6 +231,8 @@ class RetracementMultiTFMonitor:
             results = raw_results
 
             await self._persist(db)
+            self._last_snap_key = snap_key
+            self._last_advance_results = results
             return results
 
     def _advance_slot(self, slot: _TFSlot, candles: list) -> RetracementSetup | None:

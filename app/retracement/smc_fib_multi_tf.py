@@ -20,7 +20,7 @@ from app.core.logging import logger
 from app.data.live.service import get_live_service
 from app.retracement.smc_fib_engine import SMCFibEngine
 
-DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h"]
+DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h"]
 TF_MAP: dict[str, TimeFrame] = {
     "5m": TimeFrame.M5,
     "15m": TimeFrame.M15,
@@ -118,6 +118,14 @@ class SMCFibMultiTFMonitor:
     async def advance(self, db) -> dict[str, Any]:
         async with self._lock:
             snap = await self._snapshot()
+            snap_key = (
+                snap.timestamp if snap else None,
+                len(snap.m15) if (snap and hasattr(snap, "m15")) else 0,
+                snap.current_price if snap else None,
+            )
+            if snap is not None and getattr(self, "_last_snap_key", None) == snap_key and getattr(self, "_last_advance_results", None) is not None:
+                return self._last_advance_results
+
             raw_results: dict[str, Any] = {}
 
             # Check if any engine has already been seeded
@@ -229,5 +237,7 @@ class SMCFibMultiTFMonitor:
                     card["cascade_status"] = "SCANNING"
                     final_results[tf] = card
 
+            self._last_snap_key = snap_key
+            self._last_advance_results = final_results
             return final_results
 

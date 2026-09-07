@@ -167,32 +167,49 @@ function setConn(id, ok) {
   dot.className = "dot " + (ok ? "dot-green" : "dot-red");
 }
 
+let _feedOfflineCount = 0;
+
 function updateTopbar(st, feed, dq, tg) {
+  const isFeedLive = !!(feed && feed.connected);
+  if (isFeedLive) {
+    _feedOfflineCount = 0;
+  } else {
+    _feedOfflineCount++;
+  }
+  // Require 2 consecutive failed polls before flipping UI to red/offline, preventing transient 1s reconnect flicker
+  const showFeedOnline = isFeedLive || (_feedOfflineCount < 2);
+
   // Connection indicators
-  setConn("conn-binance", !!(feed && feed.connected));
+  setConn("conn-binance", showFeedOnline);
   setConn("conn-db", true); // DB verified at startup / per request
   setConn("conn-sched", !!(st && (st.scheduler_running || st.started_at)));
   setConn("conn-tg", !!(tg && (tg.configured || tg.enabled || tg.status === "CONFIGURED")));
-  setConn("conn-dq", !!(feed && feed.connected) && !(dq && dq.degraded && !dq.candle_count && !dq.connected));
+  setConn("conn-dq", showFeedOnline && !(dq && dq.degraded && !dq.candle_count && !dq.connected));
   // Live pill
   const livePill = document.getElementById("live-pill");
-  livePill.className = "live-pill";
-  livePill.innerHTML = (feed && feed.connected)
-    ? '<span class="dot dot-green"></span>LIVE'
-    : '<span class="dot dot-red"></span>DEGRADED';
+  if (livePill) {
+    livePill.className = "live-pill";
+    livePill.innerHTML = showFeedOnline
+      ? '<span class="dot dot-green"></span>LIVE'
+      : '<span class="dot dot-red"></span>DEGRADED';
+  }
   // Chips
   const reg = (st && (st.market_regime || st.regime)) || "—";
   const sess = (st && st.session) || "—";
   const candle = (st && st.last_closed_candle_ts) ? UI.fmtTs(st.last_closed_candle_ts) : "—";
-  document.getElementById("chip-regime").textContent = "REGIME " + reg;
-  document.getElementById("chip-session").textContent = "SESSION " + sess;
-  document.getElementById("chip-candle").textContent = "CANDLE " + candle;
+  const chipReg = document.getElementById("chip-regime");
+  if (chipReg) chipReg.textContent = "REGIME " + reg;
+  const chipSess = document.getElementById("chip-session");
+  if (chipSess) chipSess.textContent = "SESSION " + sess;
+  const chipCandle = document.getElementById("chip-candle");
+  if (chipCandle) chipCandle.textContent = "CANDLE " + candle;
   // Sidebar footer
-  const overall = (feed && feed.connected);
+  const overall = showFeedOnline;
   const sb = document.getElementById("sidebar-sys");
-  sb.className = "dot " + (overall ? "dot-green" : "dot-red");
-  document.getElementById("sidebar-sys-label").textContent = overall ? "SYSTEM HEALTHY" : "FEED OFFLINE";
-  AppState.set({ regime: reg, session: sess, candleTs: st && st.last_closed_candle_ts, feedConnected: !!(feed && feed.connected), dataDegraded: !!(dq && dq.degraded), schedulerRunning: !!(st && st.scheduler_running) });
+  if (sb) sb.className = "dot " + (overall ? "dot-green" : "dot-red");
+  const sbLabel = document.getElementById("sidebar-sys-label");
+  if (sbLabel) sbLabel.textContent = overall ? "SYSTEM HEALTHY" : "FEED OFFLINE";
+  AppState.set({ regime: reg, session: sess, candleTs: st && st.last_closed_candle_ts, feedConnected: showFeedOnline, dataDegraded: !!(dq && dq.degraded), schedulerRunning: !!(st && st.scheduler_running) });
 }
 
 async function pollTopbar() {
@@ -3628,10 +3645,10 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   const isFibTrend = strategyType === "FIB_GO_WITH_TREND";
   const TFS = isFibTrend
     ? ["15m", "30m", "1h", "2h", "4h"]
-    : ["5m", "15m", "30m", "1h", "4h"];
+    : ["5m", "15m", "30m", "1h"];
   const TF_LABELS = isFibTrend
     ? {"15m":"15M", "30m":"30M", "1h":"1H", "2h":"2H", "4h":"4H"}
-    : {"5m":"5M", "15m":"15M", "30m":"30M", "1h":"1H", "4h":"4H"};
+    : {"5m":"5M", "15m":"15M", "30m":"30M", "1h":"1H"};
   
   const tfKey = isFibTrend ? "__selectedFibTrendTf" : ("__selectedTf_" + strategyType);
   if (!window[tfKey] || !TFS.includes(window[tfKey])) {
