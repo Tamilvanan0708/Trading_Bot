@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection import get_db_session
 from app.database.repository import Repository
+from app.config.execution_settings import calculate_lot_size, get_execution_settings
 
 router = APIRouter(prefix="/signals", tags=["Trading Signals"])
 
@@ -31,6 +32,7 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
             if s.strategy in ("SMC_WITH_FIB", "FIB_WITH_RETRACEMENT", "RETRACEMENT", "FIB_GO_WITH_TREND")
         ][:limit]
 
+        exec_cfg = get_execution_settings()
         output = []
         for s in signals:
             ai_data = None
@@ -53,6 +55,20 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
                 except Exception:
                     created_iso = str(s.created_at)
 
+            entry_val = float(s.entry_price or 0.0)
+            sl_val = float(s.stop_loss or 0.0)
+            calc_lot = calculate_lot_size(
+                entry_val,
+                sl_val,
+                sizing_mode=exec_cfg.sizing_mode,
+                target_risk_usd=exec_cfg.target_risk_usd,
+                fixed_lot_size=exec_cfg.fixed_lot_size,
+                risk_mode=exec_cfg.risk_mode,
+                risk_percent=exec_cfg.risk_percent,
+                account_balance=exec_cfg.account_balance,
+                account_currency=exec_cfg.account_currency,
+            ) if (entry_val > 0 and sl_val > 0) else 0.01
+
             output.append({
                 "id": s.id,
                 "created_at": created_iso,
@@ -60,6 +76,7 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
                 "direction": s.direction,
                 "strategy": s.strategy,
                 "strategy_version": s.strategy_version,
+                "lot_size": round(calc_lot, 2),
                 "entry_price": s.entry_price,
                 "stop_loss": s.stop_loss,
                 "take_profit_1": s.take_profit_1,
@@ -92,6 +109,21 @@ async def get_signal_detail(signal_id: str, db: AsyncSession = Depends(get_db_se
     if not signal:
         raise HTTPException(status_code=404, detail="Signal not found.")
 
+    exec_cfg = get_execution_settings()
+    entry_val = float(signal.entry_price or 0.0)
+    sl_val = float(signal.stop_loss or 0.0)
+    calc_lot = calculate_lot_size(
+        entry_val,
+        sl_val,
+        sizing_mode=exec_cfg.sizing_mode,
+        target_risk_usd=exec_cfg.target_risk_usd,
+        fixed_lot_size=exec_cfg.fixed_lot_size,
+        risk_mode=exec_cfg.risk_mode,
+        risk_percent=exec_cfg.risk_percent,
+        account_balance=exec_cfg.account_balance,
+        account_currency=exec_cfg.account_currency,
+    ) if (entry_val > 0 and sl_val > 0) else 0.01
+
     return {
         "id": signal.id,
         "created_at": signal.created_at,
@@ -99,6 +131,7 @@ async def get_signal_detail(signal_id: str, db: AsyncSession = Depends(get_db_se
         "direction": signal.direction,
         "strategy": signal.strategy,
         "strategy_version": signal.strategy_version,
+        "lot_size": round(calc_lot, 2),
         "entry_price": signal.entry_price,
         "stop_loss": signal.stop_loss,
         "take_profit_1": signal.take_profit_1,

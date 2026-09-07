@@ -1051,12 +1051,14 @@ Routes["/signals"] = (mount, query) => {
         </div>
       `;
 
+      const sigLots = s.lot_size != null ? Number(s.lot_size).toFixed(2) : "0.09";
+
       return `<tr class="clickable ${trancheClass}" data-id="${s.id}">
         <td>${UI.fmtTs(s.created_at)}</td>
         <td><strong>${UI.esc(s.symbol)}</strong> <span style="font-size:10px;color:var(--text-muted)">${UI.esc(s.timeframe || "5M")}</span></td>
         <td>${stratBadge}</td>
         <td>${layerBadge}</td>
-        <td class="num font-mono" style="font-weight:600">0.01</td>
+        <td class="num font-mono" style="font-weight:600">${sigLots}</td>
         <td>${UI.dirBadge(s.direction)}</td>
         <td class="num font-mono" style="font-weight:700">${UI.fmt(s.entry_price)}</td>
         <td class="num down font-mono">${UI.fmt(s.stop_loss)}</td>
@@ -1108,9 +1110,10 @@ Routes["/signals"] = (mount, query) => {
       const isSMC = String(s.strategy || "").toUpperCase().includes("SMC");
       const isTrend = String(s.strategy || "").toUpperCase().includes("TREND");
       const strat = isSMC ? "SMC With Fib" : isTrend ? "Fib Go With Trend" : "Fib With Retracement";
+      const sigLot = s.lot_size != null ? Number(s.lot_size).toFixed(2) : "0.09";
       const text = [
         `🚨 XAU/USD SIGNAL — ${strat}`,
-        `Direction: ${dir === "LONG" ? "BUY / LONG ▲" : "SELL / SHORT ▼"} (0.01 Lots)`,
+        `Direction: ${dir === "LONG" ? "BUY / LONG ▲" : "SELL / SHORT ▼"} (${sigLot} Lots)`,
         `Entry: ${s.entry_price || "-"}`,
         `SL: ${s.stop_loss || "-"}`,
         `TP: ${s.take_profit_1 || s.take_profit || "-"}`,
@@ -1139,6 +1142,7 @@ Routes["/signals"] = (mount, query) => {
         const ver = String(s.strategy_version || "");
         let layer = isSMC ? "Single_0.680" : isTrend ? "Breakout_0.618" : ver.includes("L2") ? "L2_0.500" : ver.includes("L3") ? "L3_0.382" : "L1_0.618";
         const strat = isSMC ? "SMC_WITH_FIB" : isTrend ? "FIB_GO_WITH_TREND" : "FIB_WITH_RETRACEMENT";
+        const rowLot = s.lot_size != null ? Number(s.lot_size).toFixed(2) : "0.09";
         const line = [
           s.id,
           `"${s.created_at || ""}"`,
@@ -1146,7 +1150,7 @@ Routes["/signals"] = (mount, query) => {
           s.timeframe || "5M",
           strat,
           layer,
-          "0.01",
+          rowLot,
           s.direction || "LONG",
           s.entry_price || "",
           s.stop_loss || "",
@@ -1296,7 +1300,7 @@ Routes["/signals"] = (mount, query) => {
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Average Risk:Reward</span><span>💰</span></div>
           <div class="kpi-val" style="color:var(--gold)">1:${avgRR}</div>
-          <div class="kpi-sub"><span class="badge badge-dim" style="padding:1px 6px">0.01 Lots</span> Fixed 1 oz gold sizing</div>
+          <div class="kpi-sub"><span class="badge badge-dim" style="padding:1px 6px">Dynamic Lots</span> Risk-Sized (Solution A+B)</div>
         </div>
       </div>
 
@@ -1395,11 +1399,12 @@ async function openSignalDrawer(id) {
     else progressPct = Math.max(0, Math.min(100, Math.round(((entry - livePrice) / totalRange) * 100)));
   }
 
-  // 0.01 Lots Dollar calculations
+  // Dynamic Lots Dollar calculations (Solution A+B: 1 Lot = 100 oz)
+  const sigLots = Number(sig.lot_size != null ? sig.lot_size : 0.09);
   const riskPts = Math.abs(entry - sl).toFixed(2);
   const rewardPts = Math.abs(tp - entry).toFixed(2);
-  const dollarRisk = (Number(riskPts) * 1.0).toFixed(2);
-  const dollarReward = (Number(rewardPts) * 1.0).toFixed(2);
+  const dollarRisk = (Number(riskPts) * sigLots * 100.0).toFixed(2);
+  const dollarReward = (Number(rewardPts) * sigLots * 100.0).toFixed(2);
 
   // Strategy detection & routing
   const stratStr = String(sig.strategy || "").toUpperCase();
@@ -1434,7 +1439,7 @@ async function openSignalDrawer(id) {
 
       <div class="signal-hero ${dir === "LONG" ? "buy" : dir === "SHORT" ? "sell" : "flat"}">
         <div class="signal-direction">${dir === "LONG" ? "BUY / LONG ▲" : dir === "SHORT" ? "SELL / SHORT ▼" : "NO TRADE"}</div>
-        <div class="signal-reason">${UI.fmtTsFull(sig.created_at)} · 5M Standard Execution (0.01 Lots)</div>
+        <div class="signal-reason">${UI.fmtTsFull(sig.created_at)} · Dynamic Sizing (${sigLots.toFixed(2)} Lots)</div>
       </div>
 
       <!-- VISUAL LIVE PRICE TRACKING GAUGE -->
@@ -1462,12 +1467,12 @@ async function openSignalDrawer(id) {
       <!-- PRICE LEVELS -->
       ${UI.levels(sig.entry_price, sig.stop_loss, sig.take_profit_1, sig.take_profit_2, sig.take_profit_3, sig.risk_reward)}
 
-      <!-- 0.01 LOT DOLLAR METRICS -->
+      <!-- DYNAMIC LOT DOLLAR METRICS -->
       <div class="grid grid-3" style="gap:var(--sp-2)">
         <div class="metric" style="padding:8px 12px">
           <div class="metric-label">LOT SIZE</div>
-          <div class="metric-value font-mono" style="font-size:16px">0.01 Lots</div>
-          <div class="muted" style="font-size:10px">1 oz Gold standard</div>
+          <div class="metric-value font-mono" style="font-size:16px">${sigLots.toFixed(2)} Lots</div>
+          <div class="muted" style="font-size:10px">Dynamic Risk-Sized</div>
         </div>
         <div class="metric" style="padding:8px 12px">
           <div class="metric-label">DOLLAR RISK</div>
@@ -3890,19 +3895,19 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const activeLockTf = d.active_trade_tf || d.cascading_active_tf;
     const tfButtons = TFS.map(tf => {
       const isSel = tf === selectedTf;
-      const isLocked = activeLockTf && activeLockTf === tf;
+      const isTradeActiveOnTf = d.timeframes?.[tf]?.is_trade_active;
       const btnClass = isSel ? "btn btn-primary" : "btn btn-secondary";
-      const lockIcon = isLocked ? " 🔒" : "";
-      return `<button class="${btnClass}" onclick="window.__setStrategyTf('${strategyType}', '${tf}')" style="padding:6px 14px;font-size:12px;font-weight:700">${TF_LABELS[tf]}${lockIcon}</button>`;
+      const activeDot = isTradeActiveOnTf ? " ●" : "";
+      return `<button class="${btnClass}" onclick="window.__setStrategyTf('${strategyType}', '${tf}')" style="padding:6px 14px;font-size:12px;font-weight:700">${TF_LABELS[tf]}${activeDot}</button>`;
     }).join(" ");
 
     const activeLockMsg = activeLockTf
-      ? `<span class="badge badge-green" style="font-size:12px">🔒 ${TF_LABELS[activeLockTf] || activeLockTf.toUpperCase()} ACTIVE TRADE RUNNING (OTHER TFs STANDBY)</span>`
-      : `<span class="badge badge-blue" style="font-size:12px">⚡ 5 TIMEFRAMES CONCURRENT SCANNING</span>`;
+      ? `<span class="badge badge-green" style="font-size:12px">⚡ MULTI-SLOT: ${TF_LABELS[activeLockTf] || activeLockTf.toUpperCase()} ACTIVE · CONCURRENT SCANNING</span>`
+      : `<span class="badge badge-blue" style="font-size:12px">⚡ MULTI-SLOT: 5M · 15M · 30M · 1H CONCURRENT SCANNING</span>`;
 
     const scopeText = isFibTrend
-      ? '15M · 30M · 1H · 2H · 4H (Single Active Lock)'
-      : '5M · 15M · 30M · 1H · 4H (Single Active Lock)';
+      ? '15M · 30M · 1H · 2H · 4H (Multi-Slot Parallel Execution)'
+      : '5M · 15M · 30M · 1H (Multi-Slot Parallel Execution)';
 
     return `<div class="stack">
       <div class="row-between">
@@ -3972,7 +3977,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
               ["FVG Imbalances", tfData.smc?.active_fvgs_count != null ? `<b>${tfData.smc.active_fvgs_count} Active</b>` : "—"],
               ["SMC Zone", tfData.smc?.zone ? `<span class="badge ${tfData.smc.zone === "DISCOUNT" ? "badge-green" : "badge-red"}">${tfData.smc.zone} ZONE</span>` : "—"],
               ["50% Equilibrium", tfData.smc?.equilibrium_50 ? `$${Number(tfData.smc.equilibrium_50).toFixed(2)}` : "—"],
-              ["Cascading Priority", activeCascadeTf === selectedTf ? '<span class="badge badge-green">★ LOCKED ACTIVE TF</span>' : '<span class="badge badge-muted">STANDBY</span>'],
+              ["Execution Mode", tfData.is_trade_active ? '<span class="badge badge-green">⚡ ACTIVE TRADE RUNNING</span>' : '<span class="badge badge-blue">MULTI-SLOT SCANNING</span>'],
             ])}
           </div>
         </div>

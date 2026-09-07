@@ -10,7 +10,7 @@ def test_execution_settings_defaults():
     cfg = ExecutionSettings()
     assert cfg.account_leverage == 500
     assert cfg.strategy_fib_retracement is True
-    assert cfg.strategy_smc_fib is False
+    assert cfg.strategy_smc_fib is True
     assert cfg.strategy_fib_trend is False
     assert cfg.smart_shield_enabled is True
     assert cfg.smart_shield_level == "0.618"
@@ -92,4 +92,42 @@ def test_lot_size_tight_sl_clamp_and_max_ceiling():
         account_balance=10000.0,
     )
     assert lot_zero == 0.50
+
+
+def test_fib_retracement_multi_slot_parallel_response():
+    """Verify that Fib Retracement endpoint returns multi-slot timeframes without locking standby blanking."""
+    from fastapi.testclient import TestClient
+    from app.api.app import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        res = client.get("/retracement/strategy/fib-retracement/XAUUSD")
+        assert res.status_code == 200
+        data = res.json()
+        assert "timeframes" in data
+        assert "active_trade_tfs" in data
+        tfs = data["timeframes"]
+        for tf in ["5m", "15m", "30m", "1h"]:
+            assert tf in tfs
+            card = tfs[tf]
+            # No timeframe should have locked by cascade set to true
+            assert card.get("is_locked_by_cascade") is False
+            assert "STANDBY" not in str(card.get("cascade_status", ""))
+
+
+def test_signals_endpoint_dynamic_lots():
+    """Verify that /signals returns lot_size for signals."""
+    from fastapi.testclient import TestClient
+    from app.api.app import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        res = client.get("/signals")
+        assert res.status_code == 200
+        sigs = res.json()
+        assert isinstance(sigs, list)
+        for s in sigs:
+            assert "lot_size" in s
+            assert float(s["lot_size"]) > 0
+
 
