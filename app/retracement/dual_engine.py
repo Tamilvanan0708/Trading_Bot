@@ -347,6 +347,123 @@ class DualRetracementEngine:
 
         return []
 
+    def _max_expiry_bars(self) -> int:
+        tf = str(self.timeframe).lower()
+        if tf == "1m":
+            return 30
+        if tf == "3m":
+            return 30
+        if tf == "5m":
+            return 36
+        if tf == "15m":
+            return 48
+        return 80
+
+    def _detect_opposite_bos(self, candle: Candle) -> list[RetracementEvent]:
+        """Detect if market structure shifted in the opposite direction while waiting for entry.
+
+        If waiting for SHORT entry and a Bullish BOS occurs, or waiting for LONG entry
+        and a Bearish BOS occurs, the stale setup is invalidated and superseded immediately.
+        """
+        setup = self.setup
+        if setup is None or setup.layers:
+            return []
+
+        swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
+        confirmed_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._candles) - 1]
+        confirmed_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._candles) - 1]
+
+        if not confirmed_highs or not confirmed_lows:
+            return []
+
+        lookback_bars = self._anchor_lookback_bars()
+
+        if setup.direction == "SHORT":
+            # Check for Bullish BOS (Body close > last confirmed swing high)
+            last_sh = confirmed_highs[-1]
+            if len(self._candles) >= 2 and self._candles[-2].close > last_sh.price:
+                return []
+            if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
+                lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
+                anchor_low = lows_before[-1] if lows_before else confirmed_lows[-1]
+
+                setup.state = RetracementState.INVALIDATED
+                setup.invalidation_reason = f"Reversed by Bullish BOS at {candle.close:.2f}."
+                self._archived_setups.append(setup)
+
+                new_setup = RetracementSetup(
+                    symbol=self.symbol,
+                    timeframe=self.timeframe,
+                    direction="LONG",
+                    state=RetracementState.TP_DYNAMIC,
+                    point_1_price=last_sh.price,
+                    point_1_timestamp=last_sh.timestamp,
+                    bos_price=last_sh.price,
+                    bos_timestamp=last_sh.timestamp,
+                    point_2_price=anchor_low.price,
+                    point_2_timestamp=anchor_low.timestamp,
+                    current_high_price=candle.high,
+                    current_high_timestamp=candle.timestamp,
+                    dynamic_tp=candle.high,
+                    validation_passed=True,
+                )
+                self._apply_bullish_fib(new_setup, anchor_low.price, candle.high)
+                self.setup = new_setup
+                self._candles_since_bos = 0
+                return [RetracementEvent(
+                    setup_id=new_setup.setup_id,
+                    event_type=RetracementEventType.BOS_DETECTED,
+                    state_before=RetracementState.NO_SETUP,
+                    state_after=RetracementState.TP_DYNAMIC,
+                    timestamp=candle.timestamp,
+                    price=candle.close,
+                    metadata={"reversal": True, "reason": "Opposite Bullish BOS replacement"},
+                )]
+
+        elif setup.direction == "LONG":
+            # Check for Bearish BOS (Body close < last confirmed swing low)
+            last_sl = confirmed_lows[-1]
+            if len(self._candles) >= 2 and self._candles[-2].close < last_sl.price:
+                return []
+            if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
+                highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
+                anchor_high = highs_before[-1] if highs_before else confirmed_highs[-1]
+
+                setup.state = RetracementState.INVALIDATED
+                setup.invalidation_reason = f"Reversed by Bearish BOS at {candle.close:.2f}."
+                self._archived_setups.append(setup)
+
+                new_setup = RetracementSetup(
+                    symbol=self.symbol,
+                    timeframe=self.timeframe,
+                    direction="SHORT",
+                    state=RetracementState.TP_DYNAMIC,
+                    point_1_price=last_sl.price,
+                    point_1_timestamp=last_sl.timestamp,
+                    bos_price=last_sl.price,
+                    bos_timestamp=last_sl.timestamp,
+                    point_2_price=anchor_high.price,
+                    point_2_timestamp=anchor_high.timestamp,
+                    current_high_price=candle.low,
+                    current_high_timestamp=candle.timestamp,
+                    dynamic_tp=candle.low,
+                    validation_passed=True,
+                )
+                self._apply_bearish_fib(new_setup, anchor_high.price, candle.low)
+                self.setup = new_setup
+                self._candles_since_bos = 0
+                return [RetracementEvent(
+                    setup_id=new_setup.setup_id,
+                    event_type=RetracementEventType.BOS_DETECTED,
+                    state_before=RetracementState.NO_SETUP,
+                    state_after=RetracementState.TP_DYNAMIC,
+                    timestamp=candle.timestamp,
+                    price=candle.close,
+                    metadata={"reversal": True, "reason": "Opposite Bearish BOS replacement"},
+                )]
+
+        return []
+
     def _track_and_check_entry(self, candle: Candle) -> list[RetracementEvent]:
         setup = self.setup
         if setup is None:
@@ -354,24 +471,35 @@ class DualRetracementEngine:
         events: list[RetracementEvent] = []
 
         # Time-stop: invalidate the setup if the entry is never touched
-        # within the expiry window (mirrors the SMC engine's max expiry).
+        # within the timeframe-aware expiry window.
         self._candles_since_bos += 1
-        if self._candles_since_bos > self._max_expiry_candles:
+        max_expiry = self._max_expiry_bars()
+        if self._candles_since_bos > max_expiry:
             setup.state = RetracementState.INVALIDATED
-            setup.invalidation_reason = f"Setup expired after {self._max_expiry_candles} candles without entry touch."
+            setup.invalidation_reason = f"Setup expired after {max_expiry} candles without entry touch."
             return events
 
         # As the impulse wave expands higher/lower, dynamically update Target 1.000 (Keep Anchor locked!)
 
         if setup.direction == "LONG":
-            # 1. Check if a fresh micro-BOS formed while waiting for entry
+            # 1. Check for opposite (Bearish) BOS or fresh sharper micro-BOS before fills
             if not setup.layers:
+                opp_events = self._detect_opposite_bos(candle)
+                if opp_events:
+                    return opp_events
+
                 fresh_events = self._detect_fresh_bos_if_available(candle, "LONG")
                 if fresh_events:
                     setup.state = RetracementState.INVALIDATED
                     setup.invalidation_reason = "Superceded by fresh recent micro BOS."
                     self._archived_setups.append(setup)
                     return fresh_events
+
+                # Pre-entry SL breach: if price drops below 0.236 before entry, invalidate
+                if setup.sl_price is not None and candle.low <= setup.sl_price:
+                    setup.state = RetracementState.INVALIDATED
+                    setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f}) before entry."
+                    return events
 
                 # Update dynamic target if new high forms (before any layer fills)
                 if candle.high > (setup.current_high_price or 0.0):
@@ -402,9 +530,9 @@ class DualRetracementEngine:
                 ))
 
             # 3. Same-candle SL violation: any fill that also broke 0.236 is invalidated.
-            if setup.layers and setup.sl_price is not None and candle.low <= setup.sl_price:
+            if setup.sl_price is not None and candle.low <= setup.sl_price:
                 setup.state = RetracementState.INVALIDATED
-                setup.invalidation_reason = "Price breached Stop Loss (0.236) on entry candle."
+                setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f})."
                 return events
 
             if setup.layers:
@@ -419,14 +547,24 @@ class DualRetracementEngine:
                     setup.tp_locked = True
                 setup.state = RetracementState.TRADE_ACTIVE
         else:
-            # 1. Check if a fresh micro-BOS formed while waiting for entry
+            # 1. Check for opposite (Bullish) BOS or fresh sharper micro-BOS before fills
             if not setup.layers:
+                opp_events = self._detect_opposite_bos(candle)
+                if opp_events:
+                    return opp_events
+
                 fresh_events = self._detect_fresh_bos_if_available(candle, "SHORT")
                 if fresh_events:
                     setup.state = RetracementState.INVALIDATED
                     setup.invalidation_reason = "Superceded by fresh recent micro BOS."
                     self._archived_setups.append(setup)
                     return fresh_events
+
+                # Pre-entry SL breach: if price rallies above 0.236 before entry, invalidate
+                if setup.sl_price is not None and candle.high >= setup.sl_price:
+                    setup.state = RetracementState.INVALIDATED
+                    setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f}) before entry."
+                    return events
 
                 # Update dynamic target if new low forms (before any layer fills)
                 if candle.low < (setup.current_high_price or float("inf")):
@@ -456,9 +594,9 @@ class DualRetracementEngine:
                 ))
 
             # 3. Same-candle SL violation
-            if setup.layers and setup.sl_price is not None and candle.high >= setup.sl_price:
+            if setup.sl_price is not None and candle.high >= setup.sl_price:
                 setup.state = RetracementState.INVALIDATED
-                setup.invalidation_reason = "Price breached Stop Loss (0.236) on entry candle."
+                setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f})."
                 return events
 
             if setup.layers:

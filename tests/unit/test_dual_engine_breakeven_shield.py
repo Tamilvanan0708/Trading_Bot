@@ -166,3 +166,77 @@ def test_short_breakeven_shield_on_l2_tp():
     assert setup_buf.layers["L2"]["state"] == "TP_HIT"
     assert setup_buf.layers["L1"]["sl"] == setup_buf.fib_0_500
     assert setup_buf.sl_price == 2050.00
+
+
+def test_pre_entry_sl_breach_invalidates_setup():
+    """If price breaches SL (0.236) before filling any layers, the setup must be invalidated immediately."""
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="5m")
+    # Seed 20 historical candles so engine passes len < 20 check
+    for i in range(20):
+        engine._candles.append(_candle(i * 300, 2050.0, 2055.0, 2045.0, 2050.0))
+
+    setup = RetracementSetup(
+        setup_id="test_pre_entry_sl",
+        strategy="RETRACEMENT_BOS_V1",
+        symbol="XAUUSD",
+        direction="SHORT",
+        state=RetracementState.TP_DYNAMIC,
+        point_1_price=2050.0,
+        point_2_price=2100.0,
+    )
+    engine._apply_bearish_fib(setup, high_anchor=2100.0, low_target=2000.0)
+    # SL is at fib_0_236 = 2076.40
+    engine.setup = setup
+
+    # Price spikes through 2076.40 (SL) without touching L1 (which is at 2061.80) or enters and breaches
+    c = _candle(21 * 300, 2070.0, 2080.0, 2069.0, 2078.0)
+    engine.process_candle(c)
+
+    assert engine.setup.state == RetracementState.INVALIDATED
+    assert "Price breached Stop Loss" in engine.setup.invalidation_reason
+
+
+def test_opposite_bos_reverses_direction():
+    """If waiting for SHORT entry and a Bullish BOS occurs, the SHORT setup is invalidated and a LONG setup is created."""
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="5m", left_bars=2, right_bars=2)
+    setup = RetracementSetup(
+        setup_id="stale_short",
+        strategy="RETRACEMENT_BOS_V1",
+        symbol="XAUUSD",
+        direction="SHORT",
+        state=RetracementState.TP_DYNAMIC,
+        point_1_price=2020.0,
+        point_2_price=2050.0,
+    )
+    engine._apply_bearish_fib(setup, high_anchor=2050.0, low_target=2000.0)
+    engine.setup = setup
+
+    # Feed 25 candles creating a swing low then a swing high, then a candle breaking the swing high (Bullish BOS)
+    # Base candles
+    candles = []
+    base_ts = 10000
+    for i in range(20):
+        candles.append(_candle(base_ts + i * 300, 2000.0, 2005.0, 1995.0, 2000.0))
+    # Swing low at index 20
+    candles.append(_candle(base_ts + 20 * 300, 1995.0, 1998.0, 1980.0, 1985.0))
+    # Higher candles
+    candles.append(_candle(base_ts + 21 * 300, 1985.0, 2010.0, 1985.0, 2005.0))
+    candles.append(_candle(base_ts + 22 * 300, 2005.0, 2030.0, 2000.0, 2025.0))  # Swing high = 2030.0
+    candles.append(_candle(base_ts + 23 * 300, 2025.0, 2028.0, 2015.0, 2020.0))
+    candles.append(_candle(base_ts + 24 * 300, 2020.0, 2026.0, 2018.0, 2022.0))
+
+    for c in candles:
+        engine._candles.append(c)
+
+    # Now breakout candle closing above swing high (close > 2030.0)
+    breakout_candle = _candle(base_ts + 25 * 300, 2022.0, 2045.0, 2020.0, 2040.0)
+    engine.process_candle(breakout_candle)
+
+    # Stale SHORT setup should be superseded and active setup must now be LONG!
+    assert engine.setup is not None
+    assert engine.setup.direction == "LONG"
+    assert engine.setup.bos_price == 2030.0
+    assert engine.setup.state == RetracementState.TP_DYNAMIC
+    assert len(engine._archived_setups) >= 1
+    assert engine._archived_setups[-1].setup_id == "stale_short"
+

@@ -239,10 +239,13 @@ async function pollPrice() {
 async function renderWith(loader, renderer, mount) {
   if (!mount) mount = document.getElementById("view-mount");
   if (!mount) return null;
-  mount.innerHTML = '<div class="stack"><div class="skel"></div><div class="skel" style="width:80%"></div><div class="skel" style="width:60%"></div></div>';
+  const hasExistingContent = mount.children.length > 0 && !mount.querySelector(".skel");
+  if (!hasExistingContent) {
+    mount.innerHTML = '<div class="stack"><div class="skel"></div><div class="skel" style="width:80%"></div><div class="skel" style="width:60%"></div></div>';
+  }
   try {
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Connection timed out. Retrying…")), 8500)
+      setTimeout(() => reject(new Error("Connection timed out. Retrying…")), 15000)
     );
     const data = await Promise.race([loader(), timeoutPromise]);
     const html = await renderer(data);
@@ -250,8 +253,15 @@ async function renderWith(loader, renderer, mount) {
     mount.querySelectorAll("canvas[data-chart]").forEach(runCanvas);
     return data;
   } catch (err) {
+    if (hasExistingContent) {
+      console.warn("[UI] Transient refresh issue, keeping existing view:", err.message);
+      return null;
+    }
+    const cleanMsg = (err.name === "AbortError" || String(err.message || "").includes("aborted"))
+      ? "Feed synchronizing with server. Retrying live data..."
+      : UI.esc(err.message || "Failed to load view");
     mount.innerHTML = "";
-    mount.appendChild(UI.state("Data Unavailable", UI.esc(err.message || "Failed to load view"), "", true));
+    mount.appendChild(UI.state("Data Synchronizing", cleanMsg, "", true));
     return null;
   }
 }
@@ -3881,7 +3891,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     isStratUpdating = true;
     try {
       const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 3500);
+      const tid = setTimeout(() => controller.abort(), 12000);
       const r = await fetch(endpoint, { signal: controller.signal });
       clearTimeout(tid);
       if (!r.ok) return;
@@ -3909,7 +3919,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
 
   renderWith(async () => {
     const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 6000);
+    const tid = setTimeout(() => controller.abort(), 15000);
     try {
       const r = await fetch(endpoint, { signal: controller.signal });
       clearTimeout(tid);

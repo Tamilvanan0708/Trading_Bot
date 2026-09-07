@@ -13,7 +13,7 @@ const API = {
       if (s) url += (url.includes("?") ? "&" : "?") + s;
     }
     const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 8000);
+    const tid = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await fetch(url, {
         headers: { Accept: "application/json" },
@@ -34,7 +34,7 @@ const API = {
   },
   async post(path, body) {
     const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 8000);
+    const tid = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await fetch(this.base + path, {
         method: "POST",
