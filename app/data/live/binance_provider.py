@@ -49,7 +49,12 @@ class BinanceGoldMarketProvider(WebSocketMarketFeed):
         max_reconnect_attempts: int = 0,
     ) -> None:
         binance_symbol = BINANCE_SYMBOL_MAP.get(symbol.upper(), symbol.lower())
-        self._streams = streams or [f"{binance_symbol}@{STREAM_BOOK_TICKER}", f"{binance_symbol}@{STREAM_AGG_TRADE}"]
+        self._streams = streams or [
+            f"{binance_symbol}@{STREAM_BOOK_TICKER}",
+            f"{binance_symbol}@{STREAM_AGG_TRADE}",
+            f"{binance_symbol}@kline_5m",
+            f"{binance_symbol}@kline_15m",
+        ]
         self._binance_symbol = binance_symbol
         url = build_binance_stream_url(streams=self._streams)
         super().__init__(
@@ -98,6 +103,21 @@ class BinanceGoldMarketProvider(WebSocketMarketFeed):
                     timestamp=timestamp,
                     last=price,
                     volume=float(data.get("q", 0.0)),
+                )
+            ]
+
+        if event == "kline":
+            k = data.get("k", {})
+            price = float(k.get("c", 0.0))
+            if price <= 0:
+                return []
+            k_time = datetime.fromtimestamp(k.get("t", data.get("E", time.time())) / 1000.0, tz=timezone.utc)
+            return [
+                Tick(
+                    symbol=self.symbols[0],
+                    timestamp=k_time,
+                    last=price,
+                    volume=float(k.get("v", 0.0)),
                 )
             ]
 

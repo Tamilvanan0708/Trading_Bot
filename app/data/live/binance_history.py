@@ -135,12 +135,27 @@ class BinanceHistoryProvider(MarketDataProvider):
         try:
             rows = await self._fetch_klines(params)
         except Exception as exc:
-            logger.warning("Binance REST history fetch failed (%s); using research dataset fallback", exc)
-            from app.data.research_fallback import load_research_fallback_candles
-            fallback = load_research_fallback_candles(symbol, timeframe, limit=limit)
-            if fallback:
-                return fallback
-            raise exc
+            logger.warning("Binance REST history fetch failed (%s); trying global data-api fallback", exc)
+            rows = []
+            try:
+                spot_params = {
+                    "symbol": "PAXGUSDT",
+                    "interval": self._interval(timeframe),
+                    "limit": min(max(limit, 1), 1000),
+                }
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.get("https://data-api.binance.vision/api/v3/klines", params=spot_params)
+                    if resp.status_code == 200:
+                        rows = resp.json()
+            except Exception as e:
+                logger.debug("Global vision fallback failed: %s", e)
+
+            if not rows:
+                from app.data.research_fallback import load_research_fallback_candles
+                fallback = load_research_fallback_candles(symbol, timeframe, limit=limit)
+                if fallback:
+                    return fallback
+                raise exc
         candles: list[Candle] = []
         for row in rows:
             if len(row) < 6:

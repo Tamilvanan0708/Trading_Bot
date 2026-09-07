@@ -143,7 +143,7 @@ class RetracementMultiTFMonitor:
 
             async def _fetch(tf_name):
                 try:
-                    c = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf_name], limit=200), timeout=6.0)
+                    c = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf_name], limit=200), timeout=12.0)
                     return tf_name, c
                 except Exception:
                     return tf_name, []

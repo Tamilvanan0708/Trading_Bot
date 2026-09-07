@@ -323,6 +323,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     # MT5 Bridge Live Execution Dispatch (Strictly Fib Retracement Only)
                                     try:
                                         from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                        sl_distance = round(abs(entry_px - sl_px), 2)
+                                        tp_distance = round(abs(tp_px - entry_px), 2)
                                         get_mt5_bridge_manager().enqueue_order({
                                             "id": f"mt5-{new_trade.id[:8]}",
                                             "paper_trade_id": new_trade.id,
@@ -334,6 +336,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             "entry_price": entry_px,
                                             "stop_loss": sl_px,
                                             "take_profit_1": tp_px,
+                                            "sl_points": sl_distance,
+                                            "tp_points": tp_distance,
+                                            "execution_mode": "POINTS_DISTANCE",
                                         })
                                     except Exception as mt5_err:  # noqa: BLE001
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch order to MT5 queue: %s", mt5_err)
