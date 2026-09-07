@@ -86,26 +86,16 @@ async def receive_execution_report(payload: ExecutionReportPayload):
 async def trigger_test_order(payload: TestTradePayload):
     """
     Triggers a 0.01 lot test order for Fib Retracement to verify MT5 EA connectivity.
+    Stops are set to 0.0 to prevent [Invalid stops] rejections on live brokers.
     """
-    # Get approximate gold price for test order
-    try:
-        from app.data.live.service import get_live_service
-        ls = get_live_service()
-        current_px = (await ls.get_latest_price("XAUUSD")) or 4435.0
-    except Exception:
-        current_px = 4435.0
-
     action = payload.action.upper()
-    sl = current_px - payload.sl_points if action == "BUY" else current_px + payload.sl_points
-    tp = current_px + payload.tp_points if action == "BUY" else current_px - payload.tp_points
-
     order_data = {
         "strategy": "Fib Retracement",
         "layer": "TEST",
         "direction": action,
-        "entry_price": round(current_px, 2),
-        "stop_loss": round(sl, 2),
-        "take_profit_1": round(tp, 2),
+        "entry_price": 0.0,
+        "stop_loss": 0.0,
+        "take_profit_1": 0.0,
         "lot_size": payload.lots,
         "is_test": True,
     }

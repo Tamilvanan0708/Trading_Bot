@@ -173,10 +173,22 @@ void ExecuteIncomingOrder(string json)
    lots = MathFloor(lots / lot_step) * lot_step;
    if(lots > 0.50) lots = 0.50; // Hard safety clamp
    
+   // Protect against [Invalid stops]: Ensure SL and TP are on valid sides of market price
+   if(is_buy)
+   {
+      if(sl >= price || sl <= 0.0) sl = 0.0;
+      if(tp <= price || tp <= 0.0) tp = 0.0;
+   }
+   else
+   {
+      if(sl <= price || sl <= 0.0) sl = 0.0;
+      if(tp >= price || tp <= 0.0) tp = 0.0;
+   }
+   
    // Digits rounding for SL / TP
    int digits = (int)SymbolInfoInteger(trade_symbol, SYMBOL_DIGITS);
-   sl = NormalizeDouble(sl, digits);
-   tp = NormalizeDouble(tp, digits);
+   if(sl > 0) sl = NormalizeDouble(sl, digits);
+   if(tp > 0) tp = NormalizeDouble(tp, digits);
    price = NormalizeDouble(price, digits);
    
    PrintFormat("🚀 [XAU_AI_Bridge] EXECUTING ORDER: %s %.2f Lots of %s @ %.2f (SL=%.2f, TP=%.2f)...",
@@ -198,13 +210,24 @@ void ExecuteIncomingOrder(string json)
    request.deviation    = InpSlippagePts;
    request.magic        = InpMagicNumber;
    request.comment      = (comment != "") ? comment : "XAU_AI_Fib";
-   request.type_filling = ORDER_FILLING_IOC;
    
-   // If broker rejects IOC, try RETURN / FOK
+   // Determine supported filling mode dynamically
+   uint filling = (uint)SymbolInfoInteger(trade_symbol, SYMBOL_FILLING_MODE);
+   if((filling & SYMBOL_FILLING_IOC) != 0)
+      request.type_filling = ORDER_FILLING_IOC;
+   else if((filling & SYMBOL_FILLING_FOK) != 0)
+      request.type_filling = ORDER_FILLING_FOK;
+   else
+      request.type_filling = ORDER_FILLING_RETURN;
+   
    if(!OrderSend(request, trade_result))
    {
-      request.type_filling = ORDER_FILLING_FOK;
-      if(!OrderSend(request, trade_result))
+      if(request.type_filling != ORDER_FILLING_IOC)
+      {
+         request.type_filling = ORDER_FILLING_IOC;
+         OrderSend(request, trade_result);
+      }
+      else
       {
          request.type_filling = ORDER_FILLING_RETURN;
          OrderSend(request, trade_result);
