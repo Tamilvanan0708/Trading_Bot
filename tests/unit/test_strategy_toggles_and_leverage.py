@@ -129,5 +129,12 @@ def test_signals_endpoint_dynamic_lots():
         for s in sigs:
             assert "lot_size" in s
             assert float(s["lot_size"]) > 0
+            assert "timeframe" in s
+            assert s["timeframe"] is not None
+
+        # Confirm multiple timeframes are represented in signals
+        tfs = {s["timeframe"].lower() for s in sigs if s.get("timeframe")}
+        assert len(tfs) > 1, f"Expected multiple timeframes, got: {tfs}"
+
 
 

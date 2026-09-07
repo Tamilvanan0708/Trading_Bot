@@ -1052,10 +1052,11 @@ Routes["/signals"] = (mount, query) => {
       `;
 
       const sigLots = s.lot_size != null ? Number(s.lot_size).toFixed(2) : "0.09";
+      const sigTf = (s.timeframe || "5m").toUpperCase();
 
       return `<tr class="clickable ${trancheClass}" data-id="${s.id}">
         <td>${UI.fmtTs(s.created_at)}</td>
-        <td><strong>${UI.esc(s.symbol)}</strong> <span style="font-size:10px;color:var(--text-muted)">${UI.esc(s.timeframe || "5M")}</span></td>
+        <td><strong>${UI.esc(s.symbol)}</strong> <span class="badge badge-dim" style="font-size:10px;padding:1px 5px;margin-left:4px">${sigTf}</span></td>
         <td>${stratBadge}</td>
         <td>${layerBadge}</td>
         <td class="num font-mono" style="font-weight:600">${sigLots}</td>
@@ -1285,7 +1286,7 @@ Routes["/signals"] = (mount, query) => {
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Total Signals</span><span>📊</span></div>
           <div class="kpi-val">${totalCount}</div>
-          <div class="kpi-sub"><span class="badge badge-dim">XAU/USD 5M</span> Historical setups</div>
+          <div class="kpi-sub"><span class="badge badge-dim">Multi-TF</span> 5M · 15M · 30M · 1H · 4H</div>
         </div>
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Win Rate / Target Hit</span><span>🎯</span></div>
@@ -1439,7 +1440,7 @@ async function openSignalDrawer(id) {
 
       <div class="signal-hero ${dir === "LONG" ? "buy" : dir === "SHORT" ? "sell" : "flat"}">
         <div class="signal-direction">${dir === "LONG" ? "BUY / LONG ▲" : dir === "SHORT" ? "SELL / SHORT ▼" : "NO TRADE"}</div>
-        <div class="signal-reason">${UI.fmtTsFull(sig.created_at)} · Dynamic Sizing (${sigLots.toFixed(2)} Lots)</div>
+        <div class="signal-reason">${UI.fmtTsFull(sig.created_at)} · ${(sig.timeframe || "5m").toUpperCase()} Dynamic Sizing (${sigLots.toFixed(2)} Lots)</div>
       </div>
 
       <!-- VISUAL LIVE PRICE TRACKING GAUGE -->
