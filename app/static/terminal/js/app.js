@@ -4001,27 +4001,6 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <!-- BIG ACTIVE SIGNAL BOX -->
       <div id="strat-signal-box-wrap">${renderActiveSignalBox(tfData, price, selectedTf)}</div>
 
-      <!-- STRATEGY REAL-TIME CHART -->
-      <div class="card" style="padding:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:#131722;margin-bottom:var(--sp-3)">
-        <div class="card-head" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span>📈 REAL-TIME STRATEGY CHART · <span style="color:var(--primary);font-weight:700">BINANCE:XAUUSDT.P (${TF_LABELS[selectedTf]})</span></span>
-            <div class="btn-group" style="display:inline-flex;gap:4px">
-              <button id="chart-btn-vis" class="btn btn-xs btn-primary">🎯 STRATEGY OVERLAY (BOS & LEVELS)</button>
-              <button id="chart-btn-tv" class="btn btn-xs btn-outline">TRADINGVIEW (CLEAN)</button>
-            </div>
-          </div>
-          <span class="muted" style="display:flex;align-items:center;gap:8px">
-            <span class="pulse-dot live"></span>
-            <span id="chart-strategy-status-badge" class="badge badge-green">LIVE STRATEGY OVERLAYS</span>
-          </span>
-        </div>
-        <div class="card-body" style="padding:0;height:580px;width:100%;position:relative">
-          <div id="strat-overlay-chart-box-${strategyType.toLowerCase()}" style="height:100%;width:100%"></div>
-          <div id="strat-tv-chart-box-${strategyType.toLowerCase()}" style="height:100%;width:100%;display:none"></div>
-        </div>
-      </div>
-
       <!-- METRICS & FIBONACCI TABLE -->
       <div id="strat-points-metrics-wrap">${renderPointsMetrics(tfData)}</div>
 
@@ -4045,52 +4024,15 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       </div>
     </div>`;
   }, mount).then(() => {
-    let currentChartMode = "vis";
-    const chartBoxId = `strat-overlay-chart-box-${strategyType.toLowerCase()}`;
-    const tvBoxId = `strat-tv-chart-box-${strategyType.toLowerCase()}`;
-    const btnVis = document.getElementById("chart-btn-vis");
-    const btnTv = document.getElementById("chart-btn-tv");
-    const boxVis = document.getElementById(chartBoxId);
-    const boxTv = document.getElementById(tvBoxId);
-
-    if (btnVis && btnTv) {
-      btnVis.addEventListener("click", () => {
-        currentChartMode = "vis";
-        btnVis.className = "btn btn-xs btn-primary";
-        btnTv.className = "btn btn-xs btn-outline";
-        if (boxVis) boxVis.style.display = "block";
-        if (boxTv) boxTv.style.display = "none";
-        drawFibChart(chartBoxId, selectedTf, strategyType);
-      });
-      btnTv.addEventListener("click", () => {
-        currentChartMode = "tv";
-        btnTv.className = "btn btn-xs btn-primary";
-        btnVis.className = "btn btn-xs btn-outline";
-        if (boxVis) boxVis.style.display = "none";
-        const tvTf = selectedTf === "1h" ? "60" : (selectedTf === "2h" ? "120" : (selectedTf === "4h" ? "240" : (selectedTf === "30m" ? "30" : (selectedTf === "15m" ? "15" : "5"))));
-        renderStrategyTVChart(tvBoxId, tvTf);
-      });
-    }
-
-    // Default to Strategy Overlay (BOS & Levels)
-    drawFibChart(chartBoxId, selectedTf, strategyType);
-
     if (_stratTimer) clearInterval(_stratTimer);
     _stratTimer = setInterval(() => {
       updateStratInPlace();
-      if (currentChartMode === "vis") {
-        drawFibChart(chartBoxId, selectedTf, strategyType);
-      }
     }, AutoRefresh.speed || 2000);
 
     window.__viewCleanup = () => {
       if (_stratTimer) {
         clearInterval(_stratTimer);
         _stratTimer = null;
-      }
-      if (_chartInstances[chartBoxId]) {
-        try { _chartInstances[chartBoxId].chart.remove(); } catch(_) {}
-        delete _chartInstances[chartBoxId];
       }
     };
   });
