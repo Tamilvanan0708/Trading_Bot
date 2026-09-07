@@ -4658,11 +4658,30 @@ Routes["/backtest"] = (mount) => {
               </select>
             </div>
 
-            <div style="width:130px">
+            <div style="width:125px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">CURRENCY</label>
               <select id="bt-currency" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
                 <option value="cent" ${(!window.__btCurrency || window.__btCurrency === 'cent') ? 'selected' : ''}>Cent / ₹ INR</option>
                 <option value="usd" ${window.__btCurrency === 'usd' ? 'selected' : ''}>Standard $ USD</option>
+              </select>
+            </div>
+
+            <div style="width:145px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">SIZING MODE</label>
+              <select id="bt-sizing-mode" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
+                <option value="broker_risk" ${(!window.__btSizingMode || window.__btSizingMode === 'broker_risk') ? 'selected' : ''}>Dynamic % Risk</option>
+                <option value="fixed" ${window.__btSizingMode === 'fixed' ? 'selected' : ''}>Fixed Lot (0.01)</option>
+              </select>
+            </div>
+
+            <div style="width:115px">
+              <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">LEVERAGE</label>
+              <select id="bt-leverage" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
+                <option value="100" ${window.__btLeverage === 100 ? 'selected' : ''}>1:100</option>
+                <option value="200" ${window.__btLeverage === 200 ? 'selected' : ''}>1:200</option>
+                <option value="500" ${(!window.__btLeverage || window.__btLeverage === 500) ? 'selected' : ''}>1:500 (Std)</option>
+                <option value="1000" ${window.__btLeverage === 1000 ? 'selected' : ''}>1:1000</option>
+                <option value="2000" ${window.__btLeverage === 2000 ? 'selected' : ''}>1:2000</option>
               </select>
             </div>
 
@@ -4782,8 +4801,10 @@ Routes["/backtest"] = (mount) => {
         const cap = parseFloat(mount.querySelector("#bt-capital")?.value || "10000");
         const rPercent = parseFloat(mount.querySelector("#bt-risk-percent")?.value || "1.0");
 
-        const sizingMode = "broker_risk";
-        const riskMode = "percent";
+        const sMode = mount.querySelector("#bt-sizing-mode")?.value || "broker_risk";
+        const lev = parseInt(mount.querySelector("#bt-leverage")?.value || "500", 10);
+        const sizingMode = sMode;
+        const riskMode = sMode === "fixed" ? "fixed_amount" : "percent";
         const lot = 0.01;
 
         window.__btStrategy = strat;
@@ -4796,6 +4817,7 @@ Routes["/backtest"] = (mount) => {
         window.__btSizingMode = sizingMode;
         window.__btRiskMode = riskMode;
         window.__btRiskPercent = rPercent;
+        window.__btLeverage = lev;
 
         isLoading = true;
         renderView();
@@ -4903,6 +4925,10 @@ Routes["/settings"] = async (mount) => {
         account_balance: 10000.0,
         target_risk_usd: 100.0,
         fixed_lot_size: 0.01,
+        account_leverage: 500,
+        strategy_fib_retracement: true,
+        strategy_smc_fib: false,
+        strategy_fib_trend: false,
         fib_retracement_timeframes: ["5m", "15m", "30m", "1h"],
         smart_shield_enabled: true,
         smart_shield_level: "0.618",
@@ -4913,11 +4939,18 @@ Routes["/settings"] = async (mount) => {
     const st = stRaw.status || stRaw;
     const tg = d.tg || {};
     const exec = d.exec || {};
+    const sizingMode = exec.sizing_mode || "broker_risk";
     const accountCurrency = exec.account_currency || "cent";
     const riskPercent = exec.risk_percent !== undefined ? exec.risk_percent : 1.0;
     const accountBalance = exec.account_balance !== undefined ? exec.account_balance : 10000.0;
+    const fixedLotSize = exec.fixed_lot_size !== undefined ? exec.fixed_lot_size : 0.01;
+    const accountLeverage = exec.account_leverage !== undefined ? exec.account_leverage : 500;
+    const stratFibRetr = exec.strategy_fib_retracement !== false;
+    const stratSmcFib = exec.strategy_smc_fib === true;
+    const stratFibTrend = exec.strategy_fib_trend === true;
     const activeTfs = exec.fib_retracement_timeframes || ["5m", "15m", "30m", "1h"];
     const smartShield = exec.smart_shield_enabled !== false;
+    const smartShieldLevel = exec.smart_shield_level || "0.618";
 
     const isCent = accountCurrency === "cent";
     const sym = isCent ? "₹" : "$";
@@ -4926,22 +4959,23 @@ Routes["/settings"] = async (mount) => {
       <div class="row-between">
         <div>
           <div class="section-title">⚙️ Strategy Execution & Risk Settings</div>
-          <div class="muted" style="font-size:12px">Configure Cent Account (₹ INR), Dynamic % Compounding Risk, and Smart Shield Breakeven Engine</div>
+          <div class="muted" style="font-size:12px">Configure Cent Account (₹ INR), Broker Leverage, Dynamic % Risk Compounding, Strategy Toggles & Smart Shield</div>
         </div>
         <div class="toolbar">
           <span class="badge ${isCent ? 'badge-green' : 'badge-blue'}">${isCent ? 'CENT ACCOUNT (₹ INR)' : 'STANDARD ($ USD)'}</span>
+          <span class="badge badge-purple" id="toolbar-leverage-badge">LEVERAGE 1:${accountLeverage}</span>
           <span class="badge badge-blue">PERSISTENT SETTINGS</span>
         </div>
       </div>
 
-      <!-- EXECUTION & RISK CONFIG CARD -->
+      <!-- CARD 1: ACCOUNT CAPITAL & BROKER LEVERAGE -->
       <div class="card" style="border: 1px solid rgba(41,98,255,0.3)">
         <div class="card-head" style="background:rgba(41,98,255,0.08);display:flex;justify-content:space-between;align-items:center">
-          <span style="font-weight:700;color:#90caf9">🎯 POSITION SIZING & RISK ENGINE</span>
-          <span class="badge badge-green">DYNAMIC % RISK COMPOUNDING</span>
+          <span style="font-weight:700;color:#90caf9">🏛️ 1. ACCOUNT CAPITAL & BROKER LEVERAGE</span>
+          <span class="badge badge-blue">BROKER SETTINGS</span>
         </div>
         <div class="card-body">
-          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;margin-bottom:16px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px">
             <!-- ACCOUNT CURRENCY -->
             <div>
               <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
@@ -4951,6 +4985,7 @@ Routes["/settings"] = async (mount) => {
                 <option value="cent" ${accountCurrency === 'cent' ? 'selected' : ''}>Cent Account (USC / ₹ INR) — 1 Cent = ₹1</option>
                 <option value="usd" ${accountCurrency === 'usd' ? 'selected' : ''}>Standard Account ($ USD)</option>
               </select>
+              <span class="muted" style="font-size:11px;margin-top:4px;display:block">Denominated in Cent units ($1 USD = 100 Cent / ₹100 INR)</span>
             </div>
 
             <!-- ACCOUNT BALANCE -->
@@ -4959,11 +4994,48 @@ Routes["/settings"] = async (mount) => {
                 Account Balance (${sym})
               </label>
               <input type="number" id="set-account-balance" class="form-input" value="${accountBalance}" step="500" min="100" max="10000000" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
+              <span class="muted" style="font-size:11px;margin-top:4px;display:block">Base equity used for risk and margin calculation</span>
+            </div>
+
+            <!-- BROKER LEVERAGE -->
+            <div>
+              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+                Broker Leverage
+              </label>
+              <select id="set-account-leverage" class="form-input" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
+                <option value="100" ${accountLeverage === 100 ? 'selected' : ''}>1:100 (High Margin Required)</option>
+                <option value="200" ${accountLeverage === 200 ? 'selected' : ''}>1:200</option>
+                <option value="500" ${accountLeverage === 500 ? 'selected' : ''}>1:500 (Standard Recommended)</option>
+                <option value="1000" ${accountLeverage === 1000 ? 'selected' : ''}>1:1000 (Low Margin)</option>
+                <option value="2000" ${accountLeverage === 2000 ? 'selected' : ''}>1:2000 (Ultra Low Margin)</option>
+              </select>
+              <span class="muted" style="font-size:11px;margin-top:4px;display:block">Reduces required margin held by broker per open lot</span>
             </div>
           </div>
+        </div>
+      </div>
 
-          <!-- DYNAMIC RISK % PRESETS & CONTROLS -->
-          <div id="percent-risk-controls" style="background:#181e29;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+      <!-- CARD 2: POSITION SIZING ENGINE (DYNAMIC % COMPOUNDING vs FIXED LOT) -->
+      <div class="card" style="border: 1px solid rgba(0,230,118,0.3)">
+        <div class="card-head" style="background:rgba(0,230,118,0.08);display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;color:#69f0ae">🎯 2. POSITION SIZING & RISK ENGINE</span>
+          <span id="sizing-mode-badge" class="badge ${sizingMode === 'broker_risk' ? 'badge-green' : 'badge-amber'}">
+            ${sizingMode === 'broker_risk' ? 'DYNAMIC % RISK (COMPOUNDING)' : 'FIXED LOT SIZE'}
+          </span>
+        </div>
+        <div class="card-body">
+          <div style="margin-bottom:16px">
+            <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+              Select Position Sizing Mode
+            </label>
+            <select id="set-sizing-mode" class="form-input" style="width:100%;max-width:420px;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:700">
+              <option value="broker_risk" ${sizingMode === 'broker_risk' ? 'selected' : ''}>Dynamic % Risk (Compounding Auto-Lot based on SL distance)</option>
+              <option value="fixed" ${sizingMode === 'fixed' ? 'selected' : ''}>Fixed Lot Size (Manual 0.01, 0.02, 0.05 Lots)</option>
+            </select>
+          </div>
+
+          <!-- DYNAMIC RISK CONTROLS -->
+          <div id="dynamic-risk-section" style="${sizingMode === 'broker_risk' ? '' : 'display:none;'};background:#181e29;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
               <span style="font-size:12px;font-weight:700;color:#90caf9">⚡ RISK PERCENTAGE PER TRADE (AUTO-COMPOUNDING)</span>
               <span class="muted" style="font-size:11px">Auto-upsizes on profit & auto-downsizes on drawdown</span>
@@ -4986,43 +5058,156 @@ Routes["/settings"] = async (mount) => {
             </div>
           </div>
 
-          <!-- LIVE AUTO-COMPOUNDING & LOT SIZING PREVIEW CARD -->
-          <div class="card" style="background:#131822;border:1px solid rgba(0,230,118,0.2);margin-bottom:16px;padding:14px 16px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-              <span style="font-size:12px;font-weight:700;color:#69f0ae">📊 LIVE AUTO-LOT SIZING & COMPOUNDING PREVIEW</span>
-              <span id="preview-effective-risk" class="badge badge-green" style="font-size:11px;font-weight:700">₹100.00 Risk</span>
+          <!-- FIXED LOT CONTROLS -->
+          <div id="fixed-lot-section" style="${sizingMode === 'fixed' ? '' : 'display:none;'};background:#181e29;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+              <span style="font-size:12px;font-weight:700;color:#ffe082">📌 FIXED LOT SIZE PER TRADE</span>
+              <span class="muted" style="font-size:11px">1.0 pt Gold Move on 0.01 Lot = $1.00 USD (₹100 Cent)</span>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;margin-bottom:12px">
-              <div style="background:#181e29;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
-                <div style="font-size:10px;color:var(--text-dim);font-weight:600">5M (~3.0 pt SL)</div>
-                <div id="preview-lot-5m" style="font-size:15px;font-weight:800;color:#90caf9">0.33 Lot</div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+              <button type="button" class="btn btn-sm ${fixedLotSize === 0.01 ? 'btn-primary' : 'btn-outline'} fixed-preset-btn" data-lot="0.01" style="font-weight:700">
+                0.01 Lot ($1.00 / pt)
+              </button>
+              <button type="button" class="btn btn-sm ${fixedLotSize === 0.02 ? 'btn-primary' : 'btn-outline'} fixed-preset-btn" data-lot="0.02" style="font-weight:700">
+                0.02 Lot ($2.00 / pt)
+              </button>
+              <button type="button" class="btn btn-sm ${fixedLotSize === 0.05 ? 'btn-primary' : 'btn-outline'} fixed-preset-btn" data-lot="0.05" style="font-weight:700">
+                0.05 Lot ($5.00 / pt)
+              </button>
+              <button type="button" class="btn btn-sm ${fixedLotSize === 0.10 ? 'btn-primary' : 'btn-outline'} fixed-preset-btn" data-lot="0.10" style="font-weight:700">
+                0.10 Lot ($10.00 / pt)
+              </button>
+              <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+                <span style="font-size:12px;color:var(--text-dim);font-weight:600">Custom Lot:</span>
+                <input type="number" id="set-fixed-lot-size" class="form-input" value="${fixedLotSize}" step="0.01" min="0.01" max="10.0" style="width:85px;padding:6px 8px;background:#10141d;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:4px;font-size:13px;font-weight:700;text-align:center">
               </div>
-              <div style="background:#181e29;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
-                <div style="font-size:10px;color:var(--text-dim);font-weight:600">15M (~6.0 pt SL)</div>
-                <div id="preview-lot-15m" style="font-size:15px;font-weight:800;color:#a5d6a7">0.17 Lot</div>
-              </div>
-              <div style="background:#181e29;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
-                <div style="font-size:10px;color:var(--text-dim);font-weight:600">30M (~12.0 pt SL)</div>
-                <div id="preview-lot-30m" style="font-size:15px;font-weight:800;color:#ffe082">0.08 Lot</div>
-              </div>
-              <div style="background:#181e29;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
-                <div style="font-size:10px;color:var(--text-dim);font-weight:600">1H (~25.0 pt SL)</div>
-                <div id="preview-lot-1h" style="font-size:15px;font-weight:800;color:#ce93d8">0.04 Lot</div>
-              </div>
-            </div>
-            <div id="preview-compounding-note" style="font-size:11px;color:var(--text-muted);line-height:1.6;border-top:1px solid rgba(255,255,255,0.06);padding-top:8px">
-              📈 <b>Growth:</b> If balance reaches <b>₹15,000</b> (+50%), 5M lot auto-increases to <b style="color:#00e676">0.50 Lots</b>.<br>
-              🛡️ <b>Drawdown Protection:</b> If balance drops to <b>₹8,000</b> (-20%), 5M lot auto-downsizes to <b style="color:#ffb74d">0.27 Lots</b>.
             </div>
           </div>
 
-          <!-- FIB RETRACEMENT TIMEFRAMES SELECTOR -->
-          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px">
+          <!-- CARD 3: LIVE AUTO-LOT & MARGIN CALCULATOR PREVIEW -->
+          <div class="card" style="background:#131822;border:1px solid rgba(0,230,118,0.25);padding:14px 16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+              <span style="font-size:12px;font-weight:700;color:#69f0ae">📊 LIVE AUTO-LOT & MARGIN CALCULATOR PREVIEW</span>
+              <div style="display:flex;gap:8px;align-items:center">
+                <span id="preview-effective-risk" class="badge badge-green" style="font-size:11px;font-weight:700">₹100.00 Risk</span>
+                <span id="preview-leverage-badge" class="badge badge-purple" style="font-size:11px;font-weight:700">1:${accountLeverage} Leverage</span>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:10px;margin-bottom:12px">
+              <div style="background:#181e29;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
+                <div style="font-size:10px;color:var(--text-dim);font-weight:600">5M (~3.0 pt SL)</div>
+                <div id="preview-lot-5m" style="font-size:16px;font-weight:800;color:#90caf9">0.33 Lot</div>
+                <div id="preview-margin-5m" style="font-size:11px;color:#a5d6a7;font-weight:600;margin-top:2px">Margin: ₹292.71</div>
+              </div>
+              <div style="background:#181e29;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
+                <div style="font-size:10px;color:var(--text-dim);font-weight:600">15M (~6.0 pt SL)</div>
+                <div id="preview-lot-15m" style="font-size:16px;font-weight:800;color:#a5d6a7">0.17 Lot</div>
+                <div id="preview-margin-15m" style="font-size:11px;color:#a5d6a7;font-weight:600;margin-top:2px">Margin: ₹150.79</div>
+              </div>
+              <div style="background:#181e29;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
+                <div style="font-size:10px;color:var(--text-dim);font-weight:600">30M (~12.0 pt SL)</div>
+                <div id="preview-lot-30m" style="font-size:16px;font-weight:800;color:#ffe082">0.08 Lot</div>
+                <div id="preview-margin-30m" style="font-size:11px;color:#a5d6a7;font-weight:600;margin-top:2px">Margin: ₹70.96</div>
+              </div>
+              <div style="background:#181e29;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.06)">
+                <div style="font-size:10px;color:var(--text-dim);font-weight:600">1H (~25.0 pt SL)</div>
+                <div id="preview-lot-1h" style="font-size:16px;font-weight:800;color:#ce93d8">0.04 Lot</div>
+                <div id="preview-margin-1h" style="font-size:11px;color:#a5d6a7;font-weight:600;margin-top:2px">Margin: ₹35.48</div>
+              </div>
+            </div>
+
+            <!-- ACCOUNT MARGIN & FREE MARGIN BAR -->
+            <div id="preview-margin-health" style="background:#181e29;padding:10px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <div style="font-size:12px;color:var(--text)">
+                💰 <b>Required Margin (5M Trade):</b> <span id="summary-req-margin" style="color:#69f0ae;font-weight:700">₹292.71</span> · 
+                🛡️ <b>Free Margin Remaining:</b> <span id="summary-free-margin" style="color:#90caf9;font-weight:700">₹9,707.29</span>
+              </div>
+              <span id="summary-margin-level" class="badge badge-green" style="font-size:11px;font-weight:700">Margin Level: 3,416% (Safe)</span>
+            </div>
+
+            <div id="preview-compounding-note" style="font-size:11px;color:var(--text-muted);line-height:1.6;border-top:1px solid rgba(255,255,255,0.06);padding-top:8px">
+              📈 <b>Growth:</b> If balance reaches <b>₹15,000</b> (+50%), 5M lot auto-increases to <b style="color:#00e676">0.50 Lots</b>.<br>
+              🛡️ <b>Drawdown Protection:</b> If balance drops to <b>₹8,000</b> (-20%), 5M lot auto-downsizes to <b style="color:#ffb74d">${sym}0.27 Lots</b>.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 3: STRATEGY ENGINE SELECTION (MULTI-SLOT PARALLEL) -->
+      <div class="card" style="border: 1px solid rgba(255,183,77,0.3)">
+        <div class="card-head" style="background:rgba(255,183,77,0.08);display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;color:#ffe082">⚡ 3. STRATEGY ENGINE SELECTION (INDEPENDENT ON / OFF)</span>
+          <span class="badge badge-amber">MULTI-SLOT PARALLEL EXECUTION</span>
+        </div>
+        <div class="card-body">
+          <div class="muted" style="font-size:12px;margin-bottom:14px">
+            Toggle which strategies scan the market and execute paper trades. Multi-timeframes (5M, 15M, 30M, 1H) run in independent parallel slots without blocking.
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:14px">
+            <!-- STRATEGY 1: FIB RETRACEMENT -->
+            <div style="background:#181e29;border:1px solid ${stratFibRetr ? 'rgba(0,230,118,0.4)' : 'rgba(255,255,255,0.08)'};border-radius:8px;padding:14px 16px" id="card-strat-fib-retr">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;cursor:pointer;color:#fff;margin:0">
+                  <input type="checkbox" id="strat-cb-fib-retr" ${stratFibRetr ? 'checked' : ''} style="cursor:pointer"> 🎯 Fib Retracement
+                </label>
+                <span id="badge-strat-fib-retr" class="badge ${stratFibRetr ? 'badge-green' : 'badge-yellow'}" style="font-size:10px">
+                  ${stratFibRetr ? 'ACTIVE & TRADING' : 'STANDBY / OFF'}
+                </span>
+              </div>
+              <div style="font-size:11px;color:var(--text-dim);line-height:1.5">
+                Golden Pocket (0.618, 0.500, 0.382) retracements with 3-tranche entries and Smart Shield loss protection.
+              </div>
+            </div>
+
+            <!-- STRATEGY 2: SMC WITH FIB -->
+            <div style="background:#181e29;border:1px solid ${stratSmcFib ? 'rgba(0,230,118,0.4)' : 'rgba(255,255,255,0.08)'};border-radius:8px;padding:14px 16px" id="card-strat-smc-fib">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;cursor:pointer;color:#fff;margin:0">
+                  <input type="checkbox" id="strat-cb-smc-fib" ${stratSmcFib ? 'checked' : ''} style="cursor:pointer"> 💎 SMC With Fib
+                </label>
+                <span id="badge-strat-smc-fib" class="badge ${stratSmcFib ? 'badge-green' : 'badge-yellow'}" style="font-size:10px">
+                  ${stratSmcFib ? 'ACTIVE & TRADING' : 'STANDBY / OFF'}
+                </span>
+              </div>
+              <div style="font-size:11px;color:var(--text-dim);line-height:1.5">
+                Smart Money Concepts order block sweeps and 0.680 discount entries with liquidity hunting.
+              </div>
+            </div>
+
+            <!-- STRATEGY 3: FIB GO WITH TREND -->
+            <div style="background:#181e29;border:1px solid ${stratFibTrend ? 'rgba(0,230,118,0.4)' : 'rgba(255,255,255,0.08)'};border-radius:8px;padding:14px 16px" id="card-strat-fib-trend">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;cursor:pointer;color:#fff;margin:0">
+                  <input type="checkbox" id="strat-cb-fib-trend" ${stratFibTrend ? 'checked' : ''} style="cursor:pointer"> 📈 Fib Go With Trend
+                </label>
+                <span id="badge-strat-fib-trend" class="badge ${stratFibTrend ? 'badge-green' : 'badge-yellow'}" style="font-size:10px">
+                  ${stratFibTrend ? 'ACTIVE & TRADING' : 'STANDBY / OFF'}
+                </span>
+              </div>
+              <div style="font-size:11px;color:var(--text-dim);line-height:1.5">
+                9/21 EMA momentum breakout with 1.618 Fib extension targets and dynamic breakeven locks.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 4: ACTIVE FIB TIMEFRAMES & SMART SHIELD LOSS PROTECTION -->
+      <div class="card" style="border: 1px solid rgba(186,104,200,0.3)">
+        <div class="card-head" style="background:rgba(186,104,200,0.08);display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;color:#ce93d8">🛡️ 4. FIB TIMEFRAMES & SMART SHIELD LOSS PROTECTION</span>
+          <span class="badge badge-purple">RISK DEFENSE</span>
+        </div>
+        <div class="card-body">
+          <!-- TIMEFRAME SELECTOR -->
+          <div style="margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
               <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);margin:0">
-                Active Fib Retracement Timeframes
+                Active Fib Retracement Timeframes (Multi-Slot Parallel)
               </label>
-              <span style="font-size:11px;color:var(--text-dim)">Recommended: 5M, 15M, 30M, 1H (4H removed)</span>
+              <span style="font-size:11px;color:var(--text-dim)">Recommended: 5M, 15M, 30M, 1H (4H removed for faster turnover)</span>
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
               <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(100,181,246,0.3);border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#90caf9">
@@ -5040,13 +5225,30 @@ Routes["/settings"] = async (mount) => {
             </div>
           </div>
 
-          <!-- SMART SHIELD ENABLE & SAVE -->
-          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:600">
-              <input type="checkbox" id="cb-smart-shield" ${smartShield ? 'checked' : ''}> 🛡️ Smart Shield Protection Enabled
-            </label>
-            <button id="save-execution-settings-btn" class="btn btn-primary" style="padding:9px 24px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
-              💾 SAVE SETTINGS
+          <!-- SMART SHIELD SL TARGET CONFIG -->
+          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;align-items:center">
+            <div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:700;color:#fff;margin-bottom:6px">
+                <input type="checkbox" id="cb-smart-shield" ${smartShield ? 'checked' : ''}> 🛡️ Enable Smart Shield Protection
+              </label>
+              <div class="muted" style="font-size:11px">When L2 or L3 hits Take Profit, automatically trails L1 Stop Loss to eliminate risk</div>
+            </div>
+
+            <div>
+              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+                Smart Shield SL Target Level
+              </label>
+              <select id="set-smart-shield-level" class="form-input" style="width:100%;padding:8px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
+                <option value="0.618" ${smartShieldLevel === '0.618' ? 'selected' : ''}>0.618 Entry Breakeven (Zero Risk Escape - Recommended)</option>
+                <option value="0.500" ${smartShieldLevel === '0.500' ? 'selected' : ''}>0.500 Conservative Buffer Shield (Wide Breakeven)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- SAVE BUTTON ROW -->
+          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px;display:flex;justify-content:flex-end">
+            <button id="save-execution-settings-btn" class="btn btn-primary" style="padding:10px 28px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
+              💾 SAVE EXECUTION SETTINGS
             </button>
           </div>
         </div>
@@ -5081,16 +5283,23 @@ Routes["/settings"] = async (mount) => {
     </div>`;
   }, mount);
 
-  // Helper to recalculate live lot preview
+  // Helper to recalculate live lot and margin preview
   function updateLotPreview() {
     const cur = mount.querySelector("#set-account-currency")?.value || "cent";
     const sym = cur === "cent" ? "₹" : "$";
     const bal = parseFloat(mount.querySelector("#set-account-balance")?.value || "10000");
+    const leverage = parseInt(mount.querySelector("#set-account-leverage")?.value || "500", 10);
+    const mode = mount.querySelector("#set-sizing-mode")?.value || "broker_risk";
     const rPct = parseFloat(mount.querySelector("#set-risk-percent")?.value || "1.0");
+    const fixedLot = parseFloat(mount.querySelector("#set-fixed-lot-size")?.value || "0.01");
 
     const effectiveRisk = Math.max(1.0, bal * (rPct / 100.0));
 
+    // Calculate lot for given SL points
     const calcLot = (pts) => {
+      if (mode === "fixed") {
+        return Math.max(0.01, fixedLot).toFixed(2);
+      }
       const raw = effectiveRisk / (pts * 100.0);
       return Math.max(0.01, Math.min(5.0, Math.round(raw * 100) / 100)).toFixed(2);
     };
@@ -5100,33 +5309,105 @@ Routes["/settings"] = async (mount) => {
     const lot30m = calcLot(12.0);
     const lot1h = calcLot(25.0);
 
+    // Margin calculation for Gold at $4,435
+    // In Cent mode (₹ INR): notional in cents / leverage
+    // In USD mode: notional in USD / leverage
+    const calcMargin = (lot) => {
+      const notional = parseFloat(lot) * 100.0 * 4435.0;
+      return notional / leverage;
+    };
+
+    const margin5m = calcMargin(lot5m);
+    const margin15m = calcMargin(lot15m);
+    const margin30m = calcMargin(lot30m);
+    const margin1h = calcMargin(lot1h);
+
     const elEffRisk = mount.querySelector("#preview-effective-risk");
-    if (elEffRisk) elEffRisk.textContent = `${sym}${effectiveRisk.toFixed(2)} Risk`;
+    if (elEffRisk) {
+      if (mode === "fixed") {
+        elEffRisk.textContent = `${sym}${(fixedLot * 3.0 * 100.0).toFixed(2)} Risk (5M)`;
+      } else {
+        elEffRisk.textContent = `${sym}${effectiveRisk.toFixed(2)} Risk`;
+      }
+    }
+
+    const elLevBadge = mount.querySelector("#preview-leverage-badge");
+    if (elLevBadge) elLevBadge.textContent = `1:${leverage} Leverage`;
+    const elTbLevBadge = mount.querySelector("#toolbar-leverage-badge");
+    if (elTbLevBadge) elTbLevBadge.textContent = `LEVERAGE 1:${leverage}`;
 
     const el5m = mount.querySelector("#preview-lot-5m");
     if (el5m) el5m.textContent = `${lot5m} Lot`;
+    const elMargin5m = mount.querySelector("#preview-margin-5m");
+    if (elMargin5m) elMargin5m.textContent = `Margin: ${sym}${margin5m.toFixed(2)}`;
+
     const el15m = mount.querySelector("#preview-lot-15m");
     if (el15m) el15m.textContent = `${lot15m} Lot`;
+    const elMargin15m = mount.querySelector("#preview-margin-15m");
+    if (elMargin15m) elMargin15m.textContent = `Margin: ${sym}${margin15m.toFixed(2)}`;
+
     const el30m = mount.querySelector("#preview-lot-30m");
     if (el30m) el30m.textContent = `${lot30m} Lot`;
+    const elMargin30m = mount.querySelector("#preview-margin-30m");
+    if (elMargin30m) elMargin30m.textContent = `Margin: ${sym}${margin30m.toFixed(2)}`;
+
     const el1h = mount.querySelector("#preview-lot-1h");
     if (el1h) el1h.textContent = `${lot1h} Lot`;
+    const elMargin1h = mount.querySelector("#preview-margin-1h");
+    if (elMargin1h) elMargin1h.textContent = `Margin: ${sym}${margin1h.toFixed(2)}`;
 
-    const compBal = Math.round(bal * 1.5);
-    const compRisk = compBal * (rPct / 100.0);
-    const compLot5m = Math.max(0.01, Math.min(5.0, Math.round((compRisk / (3.0 * 100.0)) * 100) / 100)).toFixed(2);
+    // Summary bar: free margin
+    const freeMargin = Math.max(0, bal - margin5m);
+    const marginLevel = margin5m > 0 ? Math.round((bal / margin5m) * 100) : 9999;
 
-    const downBal = Math.round(bal * 0.8);
-    const downRisk = downBal * (rPct / 100.0);
-    const downLot5m = Math.max(0.01, Math.min(5.0, Math.round((downRisk / (3.0 * 100.0)) * 100) / 100)).toFixed(2);
+    const elReqMargin = mount.querySelector("#summary-req-margin");
+    if (elReqMargin) elReqMargin.textContent = `${sym}${margin5m.toFixed(2)}`;
+    const elFreeMargin = mount.querySelector("#summary-free-margin");
+    if (elFreeMargin) elFreeMargin.textContent = `${sym}${freeMargin.toFixed(2)}`;
+    const elMarginLevel = mount.querySelector("#summary-margin-level");
+    if (elMarginLevel) {
+      elMarginLevel.textContent = `Margin Level: ${marginLevel}% (${marginLevel >= 500 ? 'Safe' : 'Watch'})`;
+      elMarginLevel.className = marginLevel >= 500 ? "badge badge-green" : "badge badge-amber";
+    }
 
     const elComp = mount.querySelector("#preview-compounding-note");
     if (elComp) {
-      elComp.innerHTML = `
-        📈 <b>Growth:</b> If balance reaches <b>${sym}${compBal.toLocaleString()}</b> (+50%), 5M lot auto-increases to <b style="color:#00e676">${compLot5m} Lots</b>.<br>
-        🛡️ <b>Drawdown Protection:</b> If balance drops to <b>${sym}${downBal.toLocaleString()}</b> (-20%), 5M lot auto-downsizes to <b style="color:#ffb74d">${downLot5m} Lots</b>.
-      `;
+      if (mode === "broker_risk") {
+        const compBal = Math.round(bal * 1.5);
+        const compRisk = compBal * (rPct / 100.0);
+        const compLot5m = Math.max(0.01, Math.min(5.0, Math.round((compRisk / (3.0 * 100.0)) * 100) / 100)).toFixed(2);
+        const downBal = Math.round(bal * 0.8);
+        const downRisk = downBal * (rPct / 100.0);
+        const downLot5m = Math.max(0.01, Math.min(5.0, Math.round((downRisk / (3.0 * 100.0)) * 100) / 100)).toFixed(2);
+        elComp.innerHTML = `
+          📈 <b>Growth:</b> If balance reaches <b>${sym}${compBal.toLocaleString()}</b> (+50%), 5M lot auto-increases to <b style="color:#00e676">${compLot5m} Lots</b>.<br>
+          🛡️ <b>Drawdown Protection:</b> If balance drops to <b>${sym}${downBal.toLocaleString()}</b> (-20%), 5M lot auto-downsizes to <b style="color:#ffb74d">${downLot5m} Lots</b>.
+        `;
+      } else {
+        elComp.innerHTML = `
+          📌 <b>Fixed Sizing Active:</b> All trades open with fixed <b>${fixedLot} Lots</b> regardless of account balance fluctuations.<br>
+          💡 <b>Tip:</b> Switch to <i>Dynamic % Risk (Compounding)</i> to let profits accelerate lot growth safely.
+        `;
+      }
     }
+  }
+
+  // Sizing Mode Switcher
+  const sizingSelect = mount.querySelector("#set-sizing-mode");
+  if (sizingSelect) {
+    sizingSelect.addEventListener("change", (e) => {
+      const isDynamic = e.target.value === "broker_risk";
+      const dynSec = mount.querySelector("#dynamic-risk-section");
+      const fixSec = mount.querySelector("#fixed-lot-section");
+      const badge = mount.querySelector("#sizing-mode-badge");
+      if (dynSec) dynSec.style.display = isDynamic ? "" : "none";
+      if (fixSec) fixSec.style.display = isDynamic ? "none" : "";
+      if (badge) {
+        badge.textContent = isDynamic ? "DYNAMIC % RISK (COMPOUNDING)" : "FIXED LOT SIZE";
+        badge.className = isDynamic ? "badge badge-green" : "badge badge-amber";
+      }
+      updateLotPreview();
+    });
   }
 
   // Currency Change interaction
@@ -5147,6 +5428,14 @@ Routes["/settings"] = async (mount) => {
     });
   }
 
+  // Leverage dropdown change
+  const levSelect = mount.querySelector("#set-account-leverage");
+  if (levSelect) {
+    levSelect.addEventListener("change", () => {
+      updateLotPreview();
+    });
+  }
+
   // Risk % Preset Buttons
   mount.querySelectorAll(".risk-preset-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -5160,10 +5449,43 @@ Routes["/settings"] = async (mount) => {
     });
   });
 
+  // Fixed Lot Preset Buttons
+  mount.querySelectorAll(".fixed-preset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const lot = parseFloat(btn.dataset.lot);
+      const input = mount.querySelector("#set-fixed-lot-size");
+      if (input) input.value = lot;
+      mount.querySelectorAll(".fixed-preset-btn").forEach(b => {
+        b.className = b === btn ? "btn btn-sm btn-primary fixed-preset-btn" : "btn btn-sm btn-outline fixed-preset-btn";
+      });
+      updateLotPreview();
+    });
+  });
+
   // Numeric input change listeners for instant live preview
-  mount.querySelectorAll("#set-account-balance, #set-risk-percent").forEach(input => {
+  mount.querySelectorAll("#set-account-balance, #set-risk-percent, #set-fixed-lot-size").forEach(input => {
     input.addEventListener("input", updateLotPreview);
   });
+
+  // Strategy On/Off Checkboxes
+  const syncStratCard = (cbId, cardId, badgeId) => {
+    const cb = mount.querySelector(cbId);
+    const card = mount.querySelector(cardId);
+    const badge = mount.querySelector(badgeId);
+    if (!cb) return;
+    cb.addEventListener("change", () => {
+      if (badge) {
+        badge.textContent = cb.checked ? "ACTIVE & TRADING" : "STANDBY / OFF";
+        badge.className = cb.checked ? "badge badge-green" : "badge badge-yellow";
+      }
+      if (card) {
+        card.style.borderColor = cb.checked ? "rgba(0,230,118,0.4)" : "rgba(255,255,255,0.08)";
+      }
+    });
+  };
+  syncStratCard("#strat-cb-fib-retr", "#card-strat-fib-retr", "#badge-strat-fib-retr");
+  syncStratCard("#strat-cb-smc-fib", "#card-strat-smc-fib", "#badge-strat-smc-fib");
+  syncStratCard("#strat-cb-fib-trend", "#card-strat-fib-trend", "#badge-strat-fib-trend");
 
   // Initial calculation
   updateLotPreview();
@@ -5173,9 +5495,17 @@ Routes["/settings"] = async (mount) => {
   if (saveBtn) {
     saveBtn.addEventListener("click", async () => {
       const cur = mount.querySelector("#set-account-currency")?.value || "cent";
+      const sMode = mount.querySelector("#set-sizing-mode")?.value || "broker_risk";
       const rPct = parseFloat(mount.querySelector("#set-risk-percent")?.value || "1.0");
+      const fLot = parseFloat(mount.querySelector("#set-fixed-lot-size")?.value || "0.01");
       const balance = parseFloat(mount.querySelector("#set-account-balance")?.value || "10000.0");
+      const leverage = parseInt(mount.querySelector("#set-account-leverage")?.value || "500", 10);
       const smartShield = mount.querySelector("#cb-smart-shield")?.checked ?? true;
+      const smartShieldLvl = mount.querySelector("#set-smart-shield-level")?.value || "0.618";
+
+      const stratFibRetr = mount.querySelector("#strat-cb-fib-retr")?.checked ?? true;
+      const stratSmcFib = mount.querySelector("#strat-cb-smc-fib")?.checked ?? false;
+      const stratFibTrend = mount.querySelector("#strat-cb-fib-trend")?.checked ?? false;
 
       const tfs = [];
       if (mount.querySelector("#tf-cb-5m")?.checked) tfs.push("5m");
@@ -5189,33 +5519,39 @@ Routes["/settings"] = async (mount) => {
       try {
         const payload = {
           account_currency: cur,
-          sizing_mode: "broker_risk",
+          sizing_mode: sMode,
           risk_mode: "percent",
           risk_percent: rPct,
           account_balance: balance,
           target_risk_usd: 100.0,
-          fixed_lot_size: 0.01,
+          fixed_lot_size: fLot,
+          account_leverage: leverage,
+          strategy_fib_retracement: stratFibRetr,
+          strategy_smc_fib: stratSmcFib,
+          strategy_fib_trend: stratFibTrend,
           fib_retracement_timeframes: tfs.length > 0 ? tfs : ["5m", "15m", "30m", "1h"],
           smart_shield_enabled: smartShield,
-          smart_shield_level: "0.618",
+          smart_shield_level: smartShieldLvl,
         };
 
         await API.saveExecutionSettings(payload);
         window.__btCurrency = cur;
-        window.__btSizingMode = "broker_risk";
+        window.__btSizingMode = sMode;
         window.__btRiskMode = "percent";
         window.__btRiskPercent = rPct;
         window.__btCapital = balance;
-        showToast("Execution settings saved successfully! Live trading & Backtest updated.", "info");
+        window.__btLeverage = leverage;
+        showToast("Execution settings saved successfully! Live trading, Paper & Backtest updated.", "info");
       } catch (err) {
         showToast(`Failed to save settings: ${err.message}`, "error");
       } finally {
         saveBtn.disabled = false;
-        saveBtn.textContent = "💾 SAVE SETTINGS";
+        saveBtn.textContent = "💾 SAVE EXECUTION SETTINGS";
       }
     });
   }
 };
+
 
 /* ===================================================================== */
 /* Boot */

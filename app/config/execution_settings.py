@@ -66,6 +66,22 @@ class ExecutionSettings(BaseModel):
         default="0.618",
         description="Smart shield L1 SL target: 0.618 (Entry Breakeven) or 0.500 (Buffer)"
     )
+    account_leverage: int = Field(
+        default=500,
+        description="Broker account leverage: 100, 200, 500, 1000, 2000"
+    )
+    strategy_fib_retracement: bool = Field(
+        default=True,
+        description="Enable Fib With Retracement strategy execution"
+    )
+    strategy_smc_fib: bool = Field(
+        default=False,
+        description="Enable SMC With Fib strategy execution"
+    )
+    strategy_fib_trend: bool = Field(
+        default=False,
+        description="Enable Fib Go With Trend strategy execution"
+    )
 
 
 _CURRENT_SETTINGS: ExecutionSettings | None = None
@@ -135,3 +151,22 @@ def calculate_lot_size(
     # broker_risk: Round to standard broker lot step 0.01 with minimum lot floor
     broker_lot = round(raw_lot, 2)
     return max(min_lot, min(max_lot, broker_lot))
+
+
+def calculate_margin_required(
+    lot_size: float,
+    gold_price: float = 4435.0,
+    leverage: int = 500,
+    account_currency: str = "cent",
+) -> float:
+    """
+    Calculate required margin for gold (XAUUSD):
+    1 Standard Lot = 100 oz of Gold.
+    Notional Value = lot_size * 100 * gold_price.
+    Margin = Notional Value / leverage.
+    """
+    notional = max(0.01, lot_size) * 100.0 * max(100.0, gold_price)
+    lev = max(1, leverage)
+    margin = notional / lev
+    return round(margin, 2)
+
