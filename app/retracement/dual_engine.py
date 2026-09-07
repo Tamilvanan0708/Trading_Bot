@@ -152,18 +152,12 @@ class DualRetracementEngine:
         if len(self._candles) >= 2 and self._candles[-2].close > last_sh.price:
             return []  # BOS was already confirmed on a prior candle
         if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-            # Anchor Low: lowest confirmed swing low within lookback of the BOS swing
+            # Anchor Low: immediate confirmed swing low before the BOS swing that initiated the leg
             lows_before_bos = [
                 s for s in confirmed_lows
                 if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
             ]
-            anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
-            if str(self.timeframe).lower() in ("1m", "3m", "5m") and (last_sh.price - anchor_low.price) > 35.0:
-                recent_lows = [s for s in lows_before_bos if (last_sh.price - s.price) <= 35.0]
-                if recent_lows:
-                    anchor_low = recent_lows[-1]
-                elif lows_before_bos:
-                    anchor_low = lows_before_bos[-1]
+            anchor_low = lows_before_bos[-1] if lows_before_bos else confirmed_lows[-1]
             p2_low = anchor_low.price
             p2_ts = anchor_low.timestamp
 
@@ -192,18 +186,12 @@ class DualRetracementEngine:
         if len(self._candles) >= 2 and self._candles[-2].close < last_sl.price:
             return []
         if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-            # Anchor High: highest confirmed swing high within lookback of the BOS swing
+            # Anchor High: immediate confirmed swing high before the BOS swing that initiated the leg
             highs_before_bos = [
                 s for s in confirmed_highs
                 if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
             ]
-            anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
-            if str(self.timeframe).lower() in ("1m", "3m", "5m") and (anchor_high.price - last_sl.price) > 35.0:
-                recent_highs = [s for s in highs_before_bos if (s.price - last_sl.price) <= 35.0]
-                if recent_highs:
-                    anchor_high = recent_highs[-1]
-                elif highs_before_bos:
-                    anchor_high = highs_before_bos[-1]
+            anchor_high = highs_before_bos[-1] if highs_before_bos else confirmed_highs[-1]
             p2_high = anchor_high.price
             p2_ts = anchor_high.timestamp
 
@@ -286,11 +274,7 @@ class DualRetracementEngine:
                     lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
                     if not lows_before:
                         return []
-                    anchor_low = min(lows_before, key=lambda s: s.price)
-                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (last_sh.price - anchor_low.price) > 35.0:
-                        recent_lows = [s for s in lows_before if (last_sh.price - s.price) <= 35.0]
-                        if recent_lows:
-                            anchor_low = recent_lows[-1]
+                    anchor_low = lows_before[-1]
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,
@@ -330,11 +314,7 @@ class DualRetracementEngine:
                     highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
                     if not highs_before:
                         return []
-                    anchor_high = max(highs_before, key=lambda s: s.price)
-                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (anchor_high.price - last_sl.price) > 35.0:
-                        recent_highs = [s for s in highs_before if (s.price - last_sl.price) <= 35.0]
-                        if recent_highs:
-                            anchor_high = recent_highs[-1]
+                    anchor_high = highs_before[-1]
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,

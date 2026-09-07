@@ -3855,9 +3855,13 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const e2sl = m.entry_to_sl_pts != null ? m.entry_to_sl_pts : (d.sl?.price && d.entry?.price ? Math.abs(d.entry.price - d.sl.price).toFixed(2) : null);
     const tot = m.total_range_pts != null ? m.total_range_pts : (d.point_1?.price && d.point_2?.price ? Math.abs(d.point_1.price - d.point_2.price).toFixed(2) : null);
 
+    const targetPx = d.tp?.dynamic || d.current_high?.price || d.levels?.["1.000"]?.price;
+    const bosPx = d.bos?.price || d.point_1?.price;
+    const anchorPx = d.point_2?.price;
+
     return `<div class="grid grid-3" style="margin-bottom:var(--sp-3)">
-      <div class="metric"><div class="metric-label">BOS / ANCHOR</div><div class="metric-value" style="font-size:14px">$${d.bos?.price ? Number(d.bos.price).toFixed(2) : "—"} / $${d.point_1?.price ? Number(d.point_1.price).toFixed(2) : "—"}</div></div>
-      <div class="metric"><div class="metric-label">TARGET POINT (0.000)</div><div class="metric-value" style="font-size:14px">${d.point_2?.price ? `$${Number(d.point_2.price).toFixed(2)}` : "—"}</div></div>
+      <div class="metric"><div class="metric-label">BOS BREAK / ANCHOR</div><div class="metric-value" style="font-size:14px">$${bosPx ? Number(bosPx).toFixed(2) : "—"} / $${anchorPx ? Number(anchorPx).toFixed(2) : "—"}</div></div>
+      <div class="metric"><div class="metric-label">CURRENT EXPANSION (1.000)</div><div class="metric-value" style="font-size:14px">${targetPx ? `$${Number(targetPx).toFixed(2)}` : "—"}</div></div>
       <div class="metric"><div class="metric-label">TOTAL RANGE</div><div class="metric-value">${tot ? `${tot} PTS` : "—"}</div></div>
       <div class="metric"><div class="metric-label">ENTRY → TP</div><div class="metric-value up">${e2tp ? `+${e2tp} PTS` : "—"}</div></div>
       <div class="metric"><div class="metric-label">ENTRY → SL</div><div class="metric-value down">${e2sl ? `-${e2sl} PTS` : "—"}</div></div>

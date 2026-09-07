@@ -129,7 +129,7 @@ class RetracementMultiTFMonitor:
             return None
 
     async def _bootstrap_from_history(self) -> dict[str, list]:
-        """Load real historical candles via Binance REST provider when feed lacks enough candles."""
+        """Load real historical candles via Binance REST provider in parallel."""
         import time
         now = time.time()
         if getattr(self, "_cached_hist_candles", None) and (now - getattr(self, "_last_bootstrap_ts", 0) < 120.0):
@@ -140,13 +140,18 @@ class RetracementMultiTFMonitor:
             from app.data.live.binance_history import BinanceHistoryProvider
             provider = BinanceHistoryProvider(get_settings())
             result = {}
-            for tf in self.timeframes:
+
+            async def _fetch(tf_name):
                 try:
-                    candles = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf], limit=200), timeout=3.0)
-                    if candles:
-                        result[tf] = candles
+                    c = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf_name], limit=200), timeout=6.0)
+                    return tf_name, c
                 except Exception:
-                    pass
+                    return tf_name, []
+
+            fetched = await asyncio.gather(*[_fetch(tf) for tf in self.timeframes], return_exceptions=True)
+            for item in fetched:
+                if isinstance(item, tuple) and len(item) == 2 and item[1]:
+                    result[item[0]] = item[1]
             if result:
                 self._cached_hist_candles = result
                 self._last_bootstrap_ts = now
@@ -161,58 +166,50 @@ class RetracementMultiTFMonitor:
     # ------------------------------------------------------------------
 
     async def advance(self, db) -> dict[str, RetracementSetup | None]:
-        """Process newly-closed candles on all timeframes with Option 1A Multi-Slot Parallel Execution:
+        """Process newly-closed candles on all timeframes with Multi-Slot Parallel Execution:
         - Every timeframe (5m, 15m, 30m, 1h, 4h) maintains its own independent trading slot.
-        - An entry touch on 30m/1h does NOT purge or freeze other timeframes.
         - All timeframe engines co-exist and execute concurrently with zero cross-timeframe lockout.
         """
         async with self._lock:
             snap = await self._snapshot()
             raw_results: dict[str, RetracementSetup | None] = {}
 
-            # Check if any engine has already been seeded
-            engines_seeded = any(slot.last_processed_ts is not None for slot in self.slots.values())
-            has_snap_candles = bool(
-                snap and hasattr(snap, "get_series") and any(
-                    len(list(snap.get_series(TF_MAP[tf]))) > 0
-                    for tf in self.timeframes if tf in TF_MAP
+            # Check if any slot has fewer than 50 candles
+            slots_needing_candles = [
+                tf for tf in self.timeframes
+                if (
+                    snap is None
+                    or len(list(snap.get_series(TF_MAP[tf]))) < 50
+                    or self.slots[tf].last_processed_ts is None
+                    or len(self.slots[tf].engine._candles) < 50
                 )
-            )
-
-            # Bootstrap from real Binance historical candles ONLY when engines have never been seeded and snapshot has no candles
-            needs_bootstrap = (not engines_seeded) and (not has_snap_candles)
+            ]
 
             hist_candles: dict[str, list] = {}
-            if needs_bootstrap:
-                logger.info(
-                    "[RETR-MULTI] Seeding engines from Binance REST history bootstrap.",
-                )
+            if slots_needing_candles:
                 hist_candles = await self._bootstrap_from_history()
 
             for tf in self.timeframes:
                 slot = self.slots[tf]
-                candles: list = []
-                # Priority 1: Use live snapshot candles if available
                 snap_candles = list(snap.get_series(TF_MAP[tf])) if snap is not None else []
-                if snap_candles and (engines_seeded or len(snap_candles) >= 50 or not needs_bootstrap):
+                candles: list = []
+
+                if len(snap_candles) >= 50:
                     candles = snap_candles
                     slot.live_price = snap.current_price
                     slot.data_status = "HEALTHY"
                     slot.has_live_data = True
                 elif hist_candles.get(tf):
-                    # Priority 2: Use bootstrapped historical candles
                     candles = hist_candles[tf]
-                    # Merge any new snap candles on top of historical
                     if snap_candles:
                         last_hist_ts = candles[-1].timestamp if candles else None
                         new_live = [c for c in snap_candles if last_hist_ts is None or c.timestamp > last_hist_ts]
                         candles = candles + new_live
                     if snap is not None and snap.current_price:
                         slot.live_price = snap.current_price
-                    slot.data_status = "HISTORICAL"
+                    slot.data_status = "HEALTHY"
                     slot.has_live_data = True
                 elif snap_candles:
-                    # Priority 3: Use whatever snap candles exist (even if few)
                     candles = snap_candles
                     slot.live_price = snap.current_price if snap else None
                     slot.data_status = "HEALTHY"
