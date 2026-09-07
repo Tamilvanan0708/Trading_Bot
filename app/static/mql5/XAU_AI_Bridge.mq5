@@ -151,6 +151,8 @@ void ExecuteIncomingOrder(string json)
    double lots     = ExtractJsonDouble(json, "lot_size");
    double sl       = ExtractJsonDouble(json, "stop_loss");
    double tp       = ExtractJsonDouble(json, "take_profit");
+   double sl_pts   = ExtractJsonDouble(json, "sl_points");
+   double tp_pts   = ExtractJsonDouble(json, "tp_points");
    string comment  = ExtractJsonString(json, "comment");
    
    if(order_id == "" || action == "" || lots <= 0) return;
@@ -173,7 +175,18 @@ void ExecuteIncomingOrder(string json)
    lots = MathFloor(lots / lot_step) * lot_step;
    if(lots > 0.50) lots = 0.50; // Hard safety clamp
    
-   // Protect against [Invalid stops]: Ensure SL and TP are on valid sides of market price
+   // 1. If relative points provided, calculate SL & TP directly from MT5 live broker price
+   // This eliminates 100% of price discrepancies between external feeds (Binance) and MT5!
+   if(sl_pts > 0.0)
+   {
+      sl = is_buy ? (price - sl_pts) : (price + sl_pts);
+   }
+   if(tp_pts > 0.0)
+   {
+      tp = is_buy ? (price + tp_pts) : (price - tp_pts);
+   }
+   
+   // 2. Protect against [Invalid stops]: Ensure SL and TP are on valid sides of market price
    if(is_buy)
    {
       if(sl >= price || sl <= 0.0) sl = 0.0;

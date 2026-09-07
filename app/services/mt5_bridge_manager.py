@@ -140,14 +140,22 @@ class MT5BridgeManager:
         raw_lot = float(order_data.get("lot_size") or order_data.get("lots") or 0.01)
         clamped_lot = max(0.01, min(0.50, round(raw_lot, 2)))  # Solution A+B clamp
 
+        entry_px = float(order_data.get("entry_price") or order_data.get("target_entry") or 0.0)
+        sl_px = float(order_data.get("stop_loss") or 0.0)
+        tp_px = float(order_data.get("take_profit_1") or order_data.get("take_profit") or 0.0)
+        sl_pts = round(abs(entry_px - sl_px), 2) if (entry_px > 0 and sl_px > 0) else float(order_data.get("sl_points") or 0.0)
+        tp_pts = round(abs(tp_px - entry_px), 2) if (entry_px > 0 and tp_px > 0) else float(order_data.get("tp_points") or 0.0)
+
         order_payload = {
             "id": order_id,
             "symbol": str(order_data.get("symbol") or exec_cfg.mt5_symbol or "XAUUSD").upper(),
             "action": str(order_data.get("direction") or order_data.get("action") or "BUY").upper(),
             "lot_size": clamped_lot,
-            "entry_price": float(order_data.get("entry_price") or order_data.get("target_entry") or 0.0),
-            "stop_loss": float(order_data.get("stop_loss") or 0.0),
-            "take_profit": float(order_data.get("take_profit_1") or order_data.get("take_profit") or 0.0),
+            "entry_price": entry_px,
+            "stop_loss": sl_px,
+            "take_profit": tp_px,
+            "sl_points": sl_pts,
+            "tp_points": tp_pts,
             "strategy": "Fib Retracement",
             "layer": str(order_data.get("layer", "L1")),
             "magic_number": exec_cfg.mt5_magic_number,
