@@ -339,7 +339,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
                                             f"🎯 *Take Profit:* ${tp_px:.2f}\n"
                                             f"🧠 *AI Verdict:* {ai_short}\n"
-                                            f"🔒 *Lock:* Other timeframes on Standby until trade closes\n"
+                                            f"⚡ *Multi-Slot:* {tf_key.upper()} Active (15M, 30M, 1H scanning in parallel)\n"
                                             f"━━━━━━━━━━━━━━━━━━━━"
                                         )
                                         await tg.send_raw_alert(msg)
@@ -555,7 +555,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
                                         f"🎯 *Take Profit:* ${tp_px:.2f}\n"
                                         f"🧠 *AI Verdict:* {ai_short}\n"
-                                        f"🔒 *Lock:* Other timeframes on Standby until trade closes\n"
+                                        f"⚡ *Multi-Slot:* {tf_key.upper()} Active (Parallel execution)\n"
                                         f"━━━━━━━━━━━━━━━━━━━━"
                                     )
                                     await tg.send_raw_alert(msg)
@@ -699,7 +699,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         f"🛑 *Stop Loss (0.236):* ${sl_px:.2f}\n"
                                         f"🏆 *Target (1.618 Target):* ${tp_target:.2f}\n"
                                         f"🧠 *AI Verdict:* {ai_short}\n"
-                                        f"🔒 *Lock:* Other timeframes on Standby until trade closes\n"
+                                        f"⚡ *Multi-Slot:* {tf_key.upper()} Active (Parallel execution)\n"
                                         f"━━━━━━━━━━━━━━━━━━━━"
                                     )
                                     await tg.send_raw_alert(msg)
