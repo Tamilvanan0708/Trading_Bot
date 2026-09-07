@@ -312,8 +312,8 @@ table.term { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.term th {
   text-align: left; padding: 8px 12px;
   font-size: 10px; letter-spacing: 1px; color: var(--text-muted); text-transform: uppercase;
-  border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.015);
-  white-space: nowrap; position: sticky; top: 0;
+  border-bottom: 1px solid var(--border); background: #0e1626;
+  white-space: nowrap; position: sticky; top: 0; z-index: 5;
 }
 table.term td { padding: 8px 12px; border-bottom: 1px solid rgba(31,42,58,0.6); white-space: nowrap; font-variant-numeric: tabular-nums; }
 table.term tbody tr { transition: background var(--trans); cursor: default; }

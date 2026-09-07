@@ -23,6 +23,7 @@ from app.backtesting.data_loader import fetch_historical_candles
 from app.core.constants import SignalDirection
 from app.core.logging import logger
 from app.data.models import Candle
+from app.config.execution_settings import calculate_lot_size
 from app.retracement.dual_engine import DualRetracementEngine
 from app.retracement.fib_trend_engine import FibTrendEngine, FibTrendState
 from app.retracement.models import RetracementState
@@ -75,20 +76,23 @@ class StrategyBacktester:
         self.current_balance = initial_capital
 
     def _calculate_trade_pnl(self, pts: float, entry_px: float, sl_px: float) -> tuple[float, float, float]:
-        """Calculates (trade_lot, pnl_usd, r_mult) based on active sizing_mode and dynamic risk percent."""
-        risk_pts = max(0.2, abs(entry_px - sl_px))
+        """Calculates (trade_lot, pnl_usd, r_mult) using current live production method (Solution A+B: max 0.50 lot clamp)."""
+        risk_pts = max(2.0, abs(entry_px - sl_px))
         r_mult = round(pts / risk_pts, 2)
-        if self.sizing_mode == "broker_risk":
-            if self.risk_mode == "percent":
-                effective_risk = max(1.0, self.current_balance * (self.risk_percent / 100.0))
-            else:
-                effective_risk = max(1.0, self.target_risk_usd)
-            raw_lot = effective_risk / (risk_pts * 100.0)
-            trade_lot = max(0.01, min(5.0, round(raw_lot, 2)))
-            pnl_usd = round(pts * trade_lot * 100.0, 2)
-        else:
-            trade_lot = self.lot_size
-            pnl_usd = round(pts * trade_lot * 100.0, 2)
+        trade_lot = calculate_lot_size(
+            entry_px=entry_px,
+            sl_px=sl_px,
+            sizing_mode=self.sizing_mode,
+            target_risk_usd=self.target_risk_usd,
+            fixed_lot_size=self.lot_size,
+            min_lot=0.01,
+            max_lot=0.50,
+            risk_mode=self.risk_mode,
+            risk_percent=self.risk_percent,
+            account_balance=self.current_balance,
+            account_currency=self.account_currency,
+        )
+        pnl_usd = round(pts * trade_lot * 100.0, 2)
         self.current_balance = max(10.0, round(self.current_balance + pnl_usd, 2))
         return trade_lot, pnl_usd, r_mult
 
