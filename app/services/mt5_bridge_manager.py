@@ -188,9 +188,15 @@ class MT5BridgeManager:
                 order = self._orders.get(oid)
                 if not order:
                     continue
-                if symbol and order["symbol"] != symbol.upper():
-                    remaining_ids.append(oid)
-                    continue
+                if symbol:
+                    req_sym = symbol.upper()
+                    ord_sym = str(order.get("symbol", "")).upper()
+                    is_sym_match = (req_sym == ord_sym) or (
+                        ("XAU" in req_sym or "GOLD" in req_sym) and ("XAU" in ord_sym or "GOLD" in ord_sym)
+                    )
+                    if not is_sym_match:
+                        remaining_ids.append(oid)
+                        continue
 
                 order["status"] = "SENT_TO_EA"
                 order["sent_at"] = time.time()
