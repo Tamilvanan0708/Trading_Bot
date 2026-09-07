@@ -2986,7 +2986,7 @@ Routes["/observation"] = (mount) => {
 
 function renderPaperTradeRows(trades) {
   if (!trades || !trades.length) {
-    return '<tr><td colspan="10" style="text-align:center;padding:32px 14px;color:var(--text-muted);font-size:13px">⏳ <b>No matching paper trades.</b><br><span style="font-size:11px">A 0.01 lot paper trade is automatically opened with live PnL and running point tracking as soon as a 5M strategy entry is touched.</span></td></tr>';
+    return '<tr><td colspan="10" style="text-align:center;padding:32px 14px;color:var(--text-muted);font-size:13px">⏳ <b>No matching paper trades.</b><br><span style="font-size:11px">A dynamic lot paper trade is automatically opened with live PnL and running point tracking as soon as a 5M strategy entry is touched.</span></td></tr>';
   }
   return trades.map(t => {
     const entry = t.entry_price || t.actual_entry || t.target_entry || 0;
@@ -3069,7 +3069,7 @@ function renderPaperTradeRows(trades) {
       <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
       <td>${stratBadge} <span class="badge badge-dim" style="font-size:10px">${t.layer || ''}</span></td>
       <td>${UI.dirBadge(t.direction)}</td>
-      <td class="num font-mono" style="font-weight:600">0.01</td>
+      <td class="num font-mono" style="font-weight:600">${Number(t.lot_size != null ? t.lot_size : 0.01).toFixed(2)}</td>
       <td class="num font-mono"><b>$${Number(entry).toFixed(2)}</b></td>
       <td class="num font-mono"><b>$${Number(curPx).toFixed(2)}</b></td>
       <td class="num ${ptsCls}"><b>${ptsSign}${absPts} PTS</b></td>
@@ -3189,7 +3189,7 @@ Routes["/paper"] = (mount) => {
           `"${t.strategy || ""}"`,
           t.layer || "",
           t.direction || "LONG",
-          "0.01",
+          Number(t.lot_size != null ? t.lot_size : 0.01).toFixed(2),
           entry,
           curPx,
           pts,
@@ -3350,7 +3350,7 @@ Routes["/paper"] = (mount) => {
 
       <!-- 2. Compact Safety Ribbon Bar (Replaces bulky card) -->
       <div class="paper-safety-bar">
-        <div class="safety-chip"><span class="label">Simulation:</span> <span class="badge ${blocked ? 'badge-red' : 'badge-green'}">${blocked ? 'BLOCKED' : 'ACTIVE (0.01 Lots)'}</span></div>
+        <div class="safety-chip"><span class="label">Simulation:</span> <span class="badge ${blocked ? 'badge-red' : 'badge-green'}">${blocked ? 'BLOCKED' : 'ACTIVE (Dynamic Lots)'}</span></div>
         <div class="safety-chip"><span class="label">Max DD:</span> <span class="badge badge-dim">30% Guard</span></div>
         <div class="safety-chip"><span class="label">Daily Loss Limit:</span> <span class="badge badge-dim">3% / 5 Loss Max</span></div>
         <div class="safety-chip"><span class="label">Real Money:</span> <span class="badge badge-red">DISABLED</span></div>
