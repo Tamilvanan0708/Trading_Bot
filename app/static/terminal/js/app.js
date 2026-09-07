@@ -1001,34 +1001,42 @@ Routes["/signals"] = (mount, query) => {
       else if (outcomeStatus === "TP_HIT") statusBadge = '<span class="badge badge-success">TP HIT</span>';
       else if (outcomeStatus === "SL_HIT") statusBadge = '<span class="badge badge-danger">SL HIT</span>';
       else if (outcomeStatus === "BREAKEVEN_HIT" || outcomeStatus === "BREAKEVEN") statusBadge = '<span class="badge" style="background:rgba(255,171,0,0.15);color:#ffab00;border:1px solid #ffab00;font-weight:700">🛡 BREAKEVEN</span>';
+      else if (outcomeStatus === "CANCELLED" || outcomeStatus === "EXPIRED" || outcomeStatus === "SUPERSEDED") statusBadge = '<span class="badge badge-dim" style="background:rgba(120,144,156,0.2);color:#90a4ae;border:1px solid rgba(120,144,156,0.4)">CANCELLED</span>';
       else if (outcomeStatus === "ESCAPE" || outcomeStatus === "ESCAPE_CLOSED") statusBadge = '<span class="badge" style="background:#ffab00;color:#000">ESCAPE</span>';
 
-      // Live PnL / Delta Column
+      // Live PnL / Delta Column (Denominated in ₹ INR / Cent Account)
       const entry = Number(s.entry_price || 0);
       const sl = Number(s.stop_loss || 0);
       const tp = Number(s.take_profit_1 || s.take_profit || 0);
       const dir = String(s.direction || "LONG").toUpperCase();
+      const isCentFeed = (window.__executionSettings && window.__executionSettings.account_currency === "cent") || true;
+      const feedCurrSym = isCentFeed ? "₹" : "$";
+      const sigLotsNum = Number(s.lot_size) || 0.01;
       let pnlPillHtml = '<span class="pnl-pill neutral">—</span>';
 
       if (outcomeStatus === "FILLED" && livePrice > 0 && entry > 0) {
         const pts = dir === "LONG" ? (livePrice - entry) : (entry - livePrice);
         const absPts = Math.abs(pts).toFixed(2);
-        const absDollars = (Math.abs(pts) * 1.0).toFixed(2);
+        const absVal = (Math.abs(pts) * sigLotsNum * 100.0).toFixed(2);
         const sign = pts >= 0 ? "+" : "-";
         const cls = pts >= 0 ? "profit" : "loss";
-        pnlPillHtml = `<span class="pnl-pill ${cls}">${sign}$${absDollars} (${sign}${absPts} pts)</span>`;
+        pnlPillHtml = `<span class="pnl-pill ${cls}">${sign}${feedCurrSym}${absVal} (${sign}${absPts} pts)</span>`;
       } else if (outcomeStatus === "TP_HIT" && entry > 0) {
         const targetTp = isTrend && s.take_profit_2 && Number(s.take_profit_2) > 0 ? Number(s.take_profit_2) : tp;
         const pts = Math.abs((targetTp || tp) - entry).toFixed(2);
-        pnlPillHtml = `<span class="pnl-pill profit">+$${pts} (+${pts} pts)</span>`;
+        const absVal = (Number(pts) * sigLotsNum * 100.0).toFixed(2);
+        pnlPillHtml = `<span class="pnl-pill profit">+${feedCurrSym}${absVal} (+${pts} pts)</span>`;
       } else if (outcomeStatus === "SL_HIT" && entry > 0 && sl > 0) {
         const pts = Math.abs(entry - sl).toFixed(2);
-        pnlPillHtml = `<span class="pnl-pill loss">-$${pts} (-${pts} pts)</span>`;
+        const absVal = (Number(pts) * sigLotsNum * 100.0).toFixed(2);
+        pnlPillHtml = `<span class="pnl-pill loss">-${feedCurrSym}${absVal} (-${pts} pts)</span>`;
       } else if (outcomeStatus === "BREAKEVEN_HIT" || outcomeStatus === "BREAKEVEN") {
-        pnlPillHtml = `<span class="pnl-pill neutral">$0.00 (0.00 pts)</span>`;
+        pnlPillHtml = `<span class="pnl-pill neutral">${feedCurrSym}0.00 (0.00 pts)</span>`;
       } else if (outcomeStatus === "PENDING" && livePrice > 0 && entry > 0) {
         const dist = Math.abs(entry - livePrice).toFixed(2);
         pnlPillHtml = `<span class="pnl-pill neutral">${dist} pts away</span>`;
+      } else if (outcomeStatus === "CANCELLED" || outcomeStatus === "EXPIRED") {
+        pnlPillHtml = `<span class="pnl-pill neutral">Cancelled</span>`;
       }
 
       // Dual TP Display for Trend Breakout trades

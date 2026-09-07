@@ -163,6 +163,18 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         try:
                             existing_sig = await repo.get_signal_by_id(sig_id)
                             if existing_sig is None:
+                                # Cancel older PENDING signals for this layer and timeframe (1 active signal rule)
+                                prev_pendings = (await db.execute(
+                                    select(SignalModel).where(
+                                        SignalModel.strategy == "FIB_WITH_RETRACEMENT",
+                                        SignalModel.timeframe == tf_key,
+                                        SignalModel.strategy_version == f"FIB_RETR_V1:{l_key}",
+                                        SignalModel.outcome == "PENDING",
+                                    )
+                                )).scalars().all()
+                                for p_sig in prev_pendings:
+                                    p_sig.outcome = "CANCELLED"
+
                                 await repo.save_signal({
                                     "id": sig_id,
                                     "symbol": "XAUUSD",
@@ -416,6 +428,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     try:
                         existing_sig = await repo.get_signal_by_id(sig_id)
                         if existing_sig is None and entry_px > 0:
+                            # Cancel older PENDING signals for SMC on this timeframe (1 active signal rule)
+                            prev_pendings = (await db.execute(
+                                select(SignalModel).where(
+                                    SignalModel.strategy == "SMC_WITH_FIB",
+                                    SignalModel.timeframe == tf_key,
+                                    SignalModel.outcome == "PENDING",
+                                )
+                            )).scalars().all()
+                            for p_sig in prev_pendings:
+                                p_sig.outcome = "CANCELLED"
+
                             await repo.save_signal({
                                 "id": sig_id,
                                 "symbol": "XAUUSD",
@@ -842,6 +865,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     trade_tf = str(l_entry["timeframe"]).upper()
                                     break
 
+                        exec_cfg = get_execution_settings()
+                        is_cent = (exec_cfg.account_currency == "cent")
+                        curr_sym = "₹" if is_cent else "$"
+                        curr_name = "INR" if is_cent else "USD"
+
                         if t.exit_reason == "TP_HIT":
                             msg = (
                                 f"🎯 *TAKE PROFIT HIT!*\n"
@@ -850,7 +878,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 f"🪙 *Symbol:* XAU/USD ({trade_tf})\n"
                                 f"💵 *Entry:* ${entry:.2f}\n"
                                 f"💰 *Exit Price:* ${t.exit_price:.2f}\n"
-                                f"🏆 *Result:* +{pts:.2f} PTS (+${t.realized_pnl:.2f} USD)\n"
+                                f"🏆 *Result:* +{pts:.2f} PTS (+{curr_sym}{t.realized_pnl:.2f} {curr_name})\n"
                                 f"━━━━━━━━━━━━━━━━━━━━"
                             )
                         elif t.exit_reason == "BREAKEVEN_HIT":
@@ -861,7 +889,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 f"🪙 *Symbol:* XAU/USD ({trade_tf})\n"
                                 f"💵 *Entry:* ${entry:.2f}\n"
                                 f"💰 *Exit Price:* ${t.exit_price:.2f}\n"
-                                f"⚖️ *Result:* {pts:+.2f} PTS (${t.realized_pnl:+.2f} USD — Capital Protected)\n"
+                                f"⚖️ *Result:* {pts:+.2f} PTS ({curr_sym}{t.realized_pnl:+.2f} {curr_name} — Capital Protected)\n"
                                 f"━━━━━━━━━━━━━━━━━━━━"
                             )
                         else:
@@ -872,7 +900,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 f"🪙 *Symbol:* XAU/USD ({trade_tf})\n"
                                 f"💵 *Entry:* ${entry:.2f}\n"
                                 f"🛑 *Exit Price:* ${t.exit_price:.2f}\n"
-                                f"📉 *Result:* -{abs(pts):.2f} PTS (-${abs(t.realized_pnl):.2f} USD)\n"
+                                f"📉 *Result:* -{abs(pts):.2f} PTS (-{curr_sym}{abs(t.realized_pnl):.2f} {curr_name})\n"
                                 f"━━━━━━━━━━━━━━━━━━━━"
                             )
                         await tg.send_raw_alert(msg)

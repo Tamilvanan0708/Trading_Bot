@@ -27,10 +27,26 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
     try:
         repo = Repository(db)
         raw_signals = await repo.list_recent_signals(limit=limit * 5)
-        signals = [
+        filtered_signals = [
             s for s in raw_signals
             if s.strategy in ("SMC_WITH_FIB", "FIB_WITH_RETRACEMENT", "RETRACEMENT", "FIB_GO_WITH_TREND")
         ][:limit]
+
+        # Enforce strictly 1 PENDING signal per (strategy, timeframe, layer) slot
+        seen_pending_slots = set()
+        signals = []
+        for s in filtered_signals:
+            outcome = (s.outcome or "PENDING").upper()
+            if outcome == "PENDING":
+                tf_key = (s.timeframe or "5m").lower()
+                strat_key = s.strategy
+                layer_key = s.strategy_version or ""
+                slot_key = (strat_key, tf_key, layer_key if "RETR" in strat_key else "")
+                if slot_key in seen_pending_slots:
+                    s.outcome = "CANCELLED"
+                else:
+                    seen_pending_slots.add(slot_key)
+            signals.append(s)
 
         exec_cfg = get_execution_settings()
         output = []
