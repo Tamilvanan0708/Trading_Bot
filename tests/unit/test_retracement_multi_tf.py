@@ -135,7 +135,7 @@ def _run_engines(series_by_tf):
     """Build a monitor and advance each slot over its full series once."""
     from app.retracement.multi_tf import RetracementMultiTFMonitor
 
-    mon = RetracementMultiTFMonitor(symbol="XAUUSD")
+    mon = RetracementMultiTFMonitor(symbol="XAUUSD", timeframes=["15m", "30m", "1h"])
     for tf, series in series_by_tf.items():
         slot = mon.slots[tf]
         candles = series
@@ -197,7 +197,7 @@ async def test_timeframe_isolation_no_overwrite(in_memory_db: AsyncSession):
     """A setup detected on 15m must NEVER overwrite the 30m or 1h setup."""
     from app.retracement.multi_tf import RetracementMultiTFMonitor
 
-    mon = RetracementMultiTFMonitor(symbol="XAUUSD")
+    mon = RetracementMultiTFMonitor(symbol="XAUUSD", timeframes=["15m", "30m", "1h"])
     snap = _snapshot(
         m15=_m15_waiting_series(),
         m30=_m30_trade_active_series(),
@@ -247,7 +247,7 @@ async def test_new_high_updates_only_that_timeframe(in_memory_db: AsyncSession):
     """A new valid high on 15m updates the 15M dynamic TP; 30m/1h unchanged."""
     from app.retracement.multi_tf import RetracementMultiTFMonitor
 
-    mon = RetracementMultiTFMonitor(symbol="XAUUSD")
+    mon = RetracementMultiTFMonitor(symbol="XAUUSD", timeframes=["15m", "30m", "1h"])
     snap1 = _snapshot(
         m15=_m15_waiting_series(),
         m30=_m30_trade_active_series(),
@@ -308,7 +308,7 @@ async def test_persistence_isolated_per_timeframe(in_memory_db: AsyncSession):
     never returns another's setup."""
     from app.retracement.multi_tf import RetracementMultiTFMonitor
 
-    mon = RetracementMultiTFMonitor(symbol="XAUUSD")
+    mon = RetracementMultiTFMonitor(symbol="XAUUSD", timeframes=["15m", "30m", "1h"])
     snap = _snapshot(
         m15=_m15_waiting_series(),
         m30=_m30_trade_active_series(),
@@ -361,8 +361,9 @@ async def test_multi_api_endpoint_returns_all_timeframes(in_memory_db: AsyncSess
     _patch_live(pytest.MonkeyPatch(), snap, price=snap.m15[-1].close)
 
     # Reset the singleton so the test starts clean.
-    from app.retracement.multi_tf import get_retracement_multi_tf_service
-    get_retracement_multi_tf_service("XAUUSD").reset()
+    from app.retracement import multi_tf
+    from app.retracement.multi_tf import RetracementMultiTFMonitor
+    multi_tf._instances["XAUUSD"] = RetracementMultiTFMonitor("XAUUSD", timeframes=["15m", "30m", "1h"])
 
     async def fake_db_session():
         yield in_memory_db
@@ -423,7 +424,7 @@ def test_timeframe_keeps_scanning_after_completion():
     more, _ = _zigzag([130, 126, 134, 131, 140], ts)
     series = flat + zig + more
 
-    mon = RetracementMultiTFMonitor(symbol="XAUUSD")
+    mon = RetracementMultiTFMonitor(symbol="XAUUSD", timeframes=["15m", "30m", "1h"])
     slot = mon.slots["15m"]
     archived = []
     for candle in series:

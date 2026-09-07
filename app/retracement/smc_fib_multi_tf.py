@@ -20,7 +20,7 @@ from app.core.logging import logger
 from app.data.live.service import get_live_service
 from app.retracement.smc_fib_engine import SMCFibEngine
 
-DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h"]
+DEFAULT_TIMEFRAMES = ["5m"]
 TF_MAP: dict[str, TimeFrame] = {
     "5m": TimeFrame.M5,
     "15m": TimeFrame.M15,

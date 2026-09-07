@@ -3645,10 +3645,10 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   const isFibTrend = strategyType === "FIB_GO_WITH_TREND";
   const TFS = isFibTrend
     ? ["15m", "30m", "1h", "2h", "4h"]
-    : ["5m", "15m", "30m", "1h"];
+    : ["5m"];
   const TF_LABELS = isFibTrend
     ? {"15m":"15M", "30m":"30M", "1h":"1H", "2h":"2H", "4h":"4H"}
-    : {"5m":"5M", "15m":"15M", "30m":"30M", "1h":"1H"};
+    : {"5m":"5M"};
   
   const tfKey = isFibTrend ? "__selectedFibTrendTf" : ("__selectedTf_" + strategyType);
   if (!window[tfKey] || !TFS.includes(window[tfKey])) {

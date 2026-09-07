@@ -40,7 +40,7 @@ from app.retracement.dual_engine import DualRetracementEngine
 from app.retracement.models import RetracementSetup, RetracementState
 from app.retracement.repository import RetracementRepository
 
-DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h"]
+DEFAULT_TIMEFRAMES = ["5m"]
 TF_MAP: dict[str, TimeFrame] = {
     "5m": TimeFrame.M5,
     "15m": TimeFrame.M15,
