@@ -167,11 +167,15 @@ async def get_performance(db: AsyncSession = Depends(get_db_session)):
 @router.get("/performance/account")
 async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
     """Detailed account statement with balance, equity, drawdown, and trade statistics."""
+    from app.config.execution_settings import get_execution_settings
+    exec_cfg = get_execution_settings()
     repo = Repository(db)
     active = await repo.list_active_paper_trades()
     closed = await repo.list_closed_paper_trades(limit=500)
     total_pnl = sum(t.realized_pnl or 0.0 for t in closed)
-    initial_balance = get_settings().ACCOUNT_BALANCE
+    initial_balance = exec_cfg.account_balance
+    account_currency = exec_cfg.account_currency
+    account_leverage = exec_cfg.account_leverage
     balance = round(initial_balance + total_pnl, 2)
     net_profit = round(total_pnl, 2)
     total_trades = len(closed)
@@ -206,7 +210,11 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
         "initial_balance": initial_balance,
         "current_balance": balance,
         "equity": round(balance + unrealized_pnl, 2),
+        "account_currency": account_currency,
+        "account_leverage": account_leverage,
+        "currency_symbol": "₹" if account_currency == "cent" else "$",
         "net_profit_usd": net_profit,
+        "net_profit": net_profit,
         "net_return_pct": round((net_profit / initial_balance) * 100.0, 2) if initial_balance > 0 else 0.0,
         "total_trades": total_trades,
         "winning_trades": len(wins),
@@ -219,6 +227,27 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
         "realized_pnl_usd": total_pnl,
         "unrealized_pnl_usd": unrealized_pnl,
         "active_positions": len(active),
+    }
+
+
+@router.post("/paper-trades/reset")
+@router.get("/paper-trades/reset")
+async def reset_paper_trades(db: AsyncSession = Depends(get_db_session)):
+    """Completely resets all paper trading records, clearing old trade history for a fresh start."""
+    from sqlalchemy import delete
+    from app.database.models import PaperTradeModel, SignalModel
+    from app.config.execution_settings import get_execution_settings
+
+    # Delete all paper trades
+    await db.execute(delete(PaperTradeModel))
+    await db.commit()
+
+    exec_cfg = get_execution_settings()
+    return {
+        "status": "success",
+        "message": f"Paper trading reset successfully. Fresh balance: {'₹' if exec_cfg.account_currency == 'cent' else '$'}{exec_cfg.account_balance:,.2f}",
+        "account_balance": exec_cfg.account_balance,
+        "account_currency": exec_cfg.account_currency,
     }
 
 

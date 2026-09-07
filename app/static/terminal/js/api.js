@@ -91,6 +91,7 @@ const API = {
   // Runtime Execution Settings
   getExecutionSettings: () => API.get("/settings/execution"),
   saveExecutionSettings: (settings) => API.post("/settings/execution", settings),
+  resetPaperTrades: () => API.post("/paper-trades/reset"),
 };
 
 /* Global app state cache (lightweight, updated by polling) */

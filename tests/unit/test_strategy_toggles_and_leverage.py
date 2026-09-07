@@ -67,4 +67,29 @@ def test_dynamic_vs_fixed_lot_sizing():
         account_balance=10000.0,
         account_currency="cent",
     )
-    assert lot_dynamic >= 0.01
+    assert lot_dynamic == 0.33
+
+
+def test_lot_size_tight_sl_clamp_and_max_ceiling():
+    # Tight SL distance (0.1 pt gap) - should be clamped to 2.0 pt floor and capped at 0.50 lot max
+    lot_tight = calculate_lot_size(
+        entry_px=4435.0,
+        sl_px=4434.9,
+        sizing_mode="broker_risk",
+        risk_mode="percent",
+        risk_percent=1.0,
+        account_balance=10000.0,
+    )
+    assert lot_tight == 0.50
+
+    # Even with 0 pt or virtually zero difference
+    lot_zero = calculate_lot_size(
+        entry_px=4435.0,
+        sl_px=4435.0,
+        sizing_mode="broker_risk",
+        risk_mode="percent",
+        risk_percent=1.0,
+        account_balance=10000.0,
+    )
+    assert lot_zero == 0.50
+

@@ -2984,9 +2984,9 @@ Routes["/observation"] = (mount) => {
   }, mount);
 };
 
-function renderPaperTradeRows(trades) {
+function renderPaperTradeRows(trades, currSym = "₹", leverage = 500) {
   if (!trades || !trades.length) {
-    return '<tr><td colspan="10" style="text-align:center;padding:32px 14px;color:var(--text-muted);font-size:13px">⏳ <b>No matching paper trades.</b><br><span style="font-size:11px">A dynamic lot paper trade is automatically opened with live PnL and running point tracking as soon as a 5M strategy entry is touched.</span></td></tr>';
+    return '<tr><td colspan="12" style="text-align:center;padding:32px 14px;color:var(--text-muted);font-size:13px">⏳ <b>No matching paper trades.</b><br><span style="font-size:11px">A dynamic lot paper trade is automatically opened with live PnL and running point tracking as soon as a 5M strategy entry is touched.</span></td></tr>';
   }
   return trades.map(t => {
     const entry = t.entry_price || t.actual_entry || t.target_entry || 0;
@@ -3000,6 +3000,12 @@ function renderPaperTradeRows(trades) {
     const pnlSign = pnl >= 0 ? "+" : "-";
     const ptsCls = pts >= 0 ? "up" : "down";
     const pnlCls = pnl >= 0 ? "profit" : "loss";
+
+    // Used Margin calculation: (lot * 100 * entry_price) / leverage
+    const lotVal = Number(t.lot_size != null ? t.lot_size : 0.01);
+    const levVal = Number(leverage || 500);
+    const entryForMargin = Number(entry || 4435.0);
+    const marginReq = (lotVal * 100.0 * entryForMargin) / levVal;
 
     const stratStr = String(t.strategy || "").toUpperCase();
     const isSMC = stratStr.includes("SMC");
@@ -3069,11 +3075,14 @@ function renderPaperTradeRows(trades) {
       <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
       <td>${stratBadge} <span class="badge badge-dim" style="font-size:10px">${t.layer || ''}</span></td>
       <td>${UI.dirBadge(t.direction)}</td>
-      <td class="num font-mono" style="font-weight:600">${Number(t.lot_size != null ? t.lot_size : 0.01).toFixed(2)}</td>
+      <td class="num font-mono" style="font-weight:600">
+        <div>${lotVal.toFixed(2)} Lot</div>
+        <div style="font-size:10.5px;color:#81c784;font-weight:600;margin-top:2px" title="Used Margin at 1:${levVal}">Margin: ${currSym}${marginReq.toFixed(2)}</div>
+      </td>
       <td class="num font-mono"><b>$${Number(entry).toFixed(2)}</b></td>
       <td class="num font-mono"><b>$${Number(curPx).toFixed(2)}</b></td>
       <td class="num ${ptsCls}"><b>${ptsSign}${absPts} PTS</b></td>
-      <td><span class="pnl-pill ${pnlCls}">${pnlSign}$${absPnl}</span></td>
+      <td><span class="pnl-pill ${pnlCls}">${pnlSign}${currSym}${absPnl}</span></td>
       <td class="num font-mono" style="color:var(--text-bright)">${rrStr}</td>
       <td style="padding:6px 10px;vertical-align:middle">${slTpContent}</td>
       <td style="vertical-align:middle">${statusBadge}</td>
@@ -3105,6 +3114,11 @@ Routes["/paper"] = (mount) => {
     const safety = (d.ov && d.ov.safety) || {};
     const blocked = safety.headline === "PAPER_TRADING_BLOCKED" || safety.headline === "SIGNALS_BLOCKED";
     const obsMode = safety.observation_mode || false;
+
+    // Currency and leverage sync from backend execution settings / account
+    const isCent = acct.account_currency === "cent";
+    const currSym = acct.currency_symbol || (isCent ? "₹" : "$");
+    const leverage = Number(acct.account_leverage || 500);
 
     // Filters state
     let activeStrat = "ALL";
@@ -3154,7 +3168,7 @@ Routes["/paper"] = (mount) => {
       const countEl = mount.querySelector("#paper-trade-count");
       if (countEl) countEl.textContent = `${filtered.length} of ${currentTrades.length} trades`;
       if (tbody) {
-        tbody.innerHTML = renderPaperTradeRows(filtered);
+        tbody.innerHTML = renderPaperTradeRows(filtered, currSym, leverage);
         wireChartButtons();
       }
 
@@ -3175,7 +3189,7 @@ Routes["/paper"] = (mount) => {
         UI.toast("Export", "No paper trades to export.", "amber");
         return;
       }
-      const headers = ["Opened_At", "Strategy", "Layer", "Direction", "Lots", "Entry_Price", "Exit_Price", "Running_Pts", "PnL_USD", "Risk_Reward", "SL", "TP1", "TP2", "Status"];
+      const headers = ["Opened_At", "Strategy", "Layer", "Direction", "Lots", "Used_Margin", "Entry_Price", "Exit_Price", "Running_Pts", "PnL", "Risk_Reward", "SL", "TP1", "TP2", "Status"];
       const lines = [headers.join(",")];
       list.forEach(t => {
         const entry = t.entry_price || t.actual_entry || t.target_entry || "";
@@ -3184,12 +3198,15 @@ Routes["/paper"] = (mount) => {
         const pts = t.running_pts != null ? Number(t.running_pts).toFixed(2) : "0.00";
         const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0))).toFixed(2);
         const rr = t.risk_reward ? `1:${Number(t.risk_reward).toFixed(1)}` : "1:1.8";
+        const lotVal = Number(t.lot_size != null ? t.lot_size : 0.01);
+        const marginReq = ((lotVal * 100.0 * (Number(entry) || 4435.0)) / leverage).toFixed(2);
         lines.push([
           `"${t.opened_at || t.created_at || ""}"`,
           `"${t.strategy || ""}"`,
           t.layer || "",
           t.direction || "LONG",
-          Number(t.lot_size != null ? t.lot_size : 0.01).toFixed(2),
+          lotVal.toFixed(2),
+          marginReq,
           entry,
           curPx,
           pts,
@@ -3222,22 +3239,23 @@ Routes["/paper"] = (mount) => {
         const newAcct = acctRes.status === "fulfilled" ? acctRes.value : null;
         const newRaw = ptRes.status === "fulfilled" ? ptRes.value : null;
         if (newAcct) {
+          const liveCurr = newAcct.currency_symbol || (newAcct.account_currency === "cent" ? "₹" : "$");
           const elB = document.getElementById("paper-metric-balance");
           const elE = document.getElementById("paper-metric-equity");
           const elR = document.getElementById("paper-metric-rpnl");
           const elU = document.getElementById("paper-metric-upnl");
-          if (elB && newAcct.current_balance != null) elB.textContent = "$" + UI.fmt(newAcct.current_balance, 2);
-          if (elE && newAcct.equity != null) elE.textContent = "$" + UI.fmt(newAcct.equity, 2);
+          if (elB && newAcct.current_balance != null) elB.textContent = liveCurr + UI.fmt(newAcct.current_balance, 2);
+          if (elE && newAcct.equity != null) elE.textContent = liveCurr + UI.fmt(newAcct.equity, 2);
           if (elR && newAcct.realized_pnl_usd != null) {
             const rp = Number(newAcct.realized_pnl_usd);
             const sgn = rp >= 0 ? "+" : "-";
-            elR.textContent = `${sgn}$${Math.abs(rp).toFixed(2)}`;
+            elR.textContent = `${sgn}${liveCurr}${Math.abs(rp).toFixed(2)}`;
             elR.style.color = rp >= 0 ? "var(--green-bright)" : "var(--red-bright)";
           }
           if (elU && newAcct.unrealized_pnl_usd != null) {
             const up = Number(newAcct.unrealized_pnl_usd);
-            const sgn = up >= 0 ? "+$" : "-$";
-            elU.textContent = `${sgn}${Math.abs(up).toFixed(2)}`;
+            const sgn = up >= 0 ? "+" : "-";
+            elU.textContent = `${sgn}${liveCurr}${Math.abs(up).toFixed(2)}`;
           }
         }
         if (newRaw) {
@@ -3251,11 +3269,12 @@ Routes["/paper"] = (mount) => {
     }
 
     // Initial KPI numbers
-    const balance = acct.current_balance != null ? Number(acct.current_balance) : 10000;
-    const equity = acct.equity != null ? Number(acct.equity) : 10000;
+    const initialBal = acct.initial_balance != null ? Number(acct.initial_balance) : 10000;
+    const balance = acct.current_balance != null ? Number(acct.current_balance) : initialBal;
+    const equity = acct.equity != null ? Number(acct.equity) : balance;
     const rpnl = Number(acct.realized_pnl_usd != null ? acct.realized_pnl_usd : 0);
     const upnl = Number(acct.unrealized_pnl_usd != null ? acct.unrealized_pnl_usd : 0);
-    const returnPct = ((rpnl / 10000.0) * 100).toFixed(2);
+    const returnPct = initialBal > 0 ? ((rpnl / initialBal) * 100).toFixed(2) : "0.00";
     const rpnlSign = rpnl >= 0 ? "+" : "-";
     const returnSign = rpnl >= 0 ? "+" : "";
 
@@ -3332,6 +3351,27 @@ Routes["/paper"] = (mount) => {
         });
       }
 
+      // Wire reset paper trades
+      const resetBtn = mount.querySelector("#btn-reset-paper");
+      if (resetBtn) {
+        resetBtn.addEventListener("click", async () => {
+          if (!confirm(`Are you sure you want to reset Paper Trading?\nAll trade history will be deleted and your account will restart fresh at ${currSym}${UI.fmt(initialBal, 2)} (${isCent ? 'Cent Account' : 'Standard Account'}).`)) return;
+          resetBtn.disabled = true;
+          resetBtn.innerHTML = "⏳ Resetting...";
+          try {
+            const res = await (API.resetPaperTrades ? API.resetPaperTrades() : API.post("/paper-trades/reset"));
+            UI.toast("Account Reset", res.message || "Paper trading reset successfully!", "green");
+            setTimeout(() => {
+              location.reload();
+            }, 600);
+          } catch (err) {
+            UI.toast("Reset Error", err.message || "Failed to reset paper trades.", "red");
+            resetBtn.disabled = false;
+            resetBtn.innerHTML = "🔄 Reset Account";
+          }
+        });
+      }
+
       wireChartButtons();
 
       if (_paperTimer) clearInterval(_paperTimer);
@@ -3351,23 +3391,24 @@ Routes["/paper"] = (mount) => {
       <!-- 2. Compact Safety Ribbon Bar (Replaces bulky card) -->
       <div class="paper-safety-bar">
         <div class="safety-chip"><span class="label">Simulation:</span> <span class="badge ${blocked ? 'badge-red' : 'badge-green'}">${blocked ? 'BLOCKED' : 'ACTIVE (Dynamic Lots)'}</span></div>
+        <div class="safety-chip"><span class="label">Account:</span> <span class="badge ${isCent ? 'badge-purple' : 'badge-dim'}">${isCent ? 'Cent (USC / ₹ INR)' : 'USD ($)'}</span></div>
+        <div class="safety-chip"><span class="label">Leverage:</span> <span class="badge badge-purple">1:${leverage}</span></div>
         <div class="safety-chip"><span class="label">Max DD:</span> <span class="badge badge-dim">30% Guard</span></div>
         <div class="safety-chip"><span class="label">Daily Loss Limit:</span> <span class="badge badge-dim">3% / 5 Loss Max</span></div>
         <div class="safety-chip"><span class="label">Real Money:</span> <span class="badge badge-red">DISABLED</span></div>
         <div class="safety-chip"><span class="label">Observation:</span> <span class="badge ${obsMode ? 'badge-amber' : 'badge-muted'}">${obsMode ? 'ACTIVE' : 'OFF'}</span></div>
-        <div class="safety-chip" style="margin-left:auto"><span class="label">Execution:</span> <span class="badge badge-blue">Instant 5M Runner</span></div>
       </div>
 
       <!-- 3. Financial KPI Summary Grid -->
       <div class="sig-kpi-grid">
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Account Balance</span><span>💼</span></div>
-          <div class="kpi-val" id="paper-metric-balance">$${UI.fmt(balance, 2)}</div>
-          <div class="kpi-sub"><span class="badge badge-dim">Equity: $${UI.fmt(equity, 2)}</span> Initial $10,000</div>
+          <div class="kpi-val" id="paper-metric-balance">${currSym}${UI.fmt(balance, 2)}</div>
+          <div class="kpi-sub"><span class="badge badge-dim">Equity: ${currSym}${UI.fmt(equity, 2)}</span> Initial ${currSym}${UI.fmt(initialBal, 0)}</div>
         </div>
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Realized Net PnL</span><span>📈</span></div>
-          <div class="kpi-val" id="paper-metric-rpnl" style="${rpnl >= 0 ? 'color:var(--green-bright)' : 'color:var(--red-bright)'}">${rpnlSign}$${Math.abs(rpnl).toFixed(2)}</div>
+          <div class="kpi-val" id="paper-metric-rpnl" style="${rpnl >= 0 ? 'color:var(--green-bright)' : 'color:var(--red-bright)'}">${rpnlSign}${currSym}${Math.abs(rpnl).toFixed(2)}</div>
           <div class="kpi-sub"><span class="badge ${rpnl >= 0 ? 'badge-green' : 'badge-red'}">${returnSign}${returnPct}% Return</span> All closed trades</div>
         </div>
         <div class="sig-kpi-card">
@@ -3377,7 +3418,7 @@ Routes["/paper"] = (mount) => {
         </div>
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Active Queue / Floating</span><span>⚡</span></div>
-          <div class="kpi-val" id="paper-metric-upnl" style="color:var(--cyan)">${upnl >= 0 ? "+$" : "-$"}${Math.abs(upnl).toFixed(2)}</div>
+          <div class="kpi-val" id="paper-metric-upnl" style="color:var(--cyan)">${upnl >= 0 ? "+" : "-"}${currSym}${Math.abs(upnl).toFixed(2)}</div>
           <div class="kpi-sub"><span class="badge badge-amber">${openTrades.length} Open</span> Live floating trades</div>
         </div>
       </div>
@@ -3415,6 +3456,7 @@ Routes["/paper"] = (mount) => {
           <input class="input" id="paper-search" placeholder="Search price, layer…" style="min-width:150px">
           <button class="btn btn-sm" id="btn-export-paper-csv" title="Export paper trades to CSV">📥 Export CSV</button>
           <button class="btn btn-sm" id="btn-repair-paper" style="border-color:#388e3c;color:#81c784" title="Repair false SL losses by applying Smart Shield trailing">🔧 Repair SL</button>
+          <button class="btn btn-sm" id="btn-reset-paper" style="border-color:#e53935;color:#ef9a9a;background:rgba(229,57,53,0.1);font-weight:700" title="Completely clear paper trade history and start fresh with ₹10,000 Cent Account">🔄 Reset Account</button>
         </div>
       </div>
 
@@ -3425,18 +3467,18 @@ Routes["/paper"] = (mount) => {
             <th>Opened</th>
             <th>Strategy / Layer</th>
             <th>Direction</th>
-            <th>Lots</th>
+            <th>Lots & Margin</th>
             <th>Entry Price</th>
             <th>Live / Exit</th>
             <th>Running Points</th>
-            <th>PnL ($)</th>
+            <th>PnL (${currSym})</th>
             <th>R:R</th>
             <th>SL / TP</th>
             <th>Status</th>
             <th style="text-align:center">Action</th>
           </tr>
         </thead>
-        <tbody id="paper-trades-tbody">${renderPaperTradeRows(currentTrades)}</tbody>
+        <tbody id="paper-trades-tbody">${renderPaperTradeRows(currentTrades, currSym, leverage)}</tbody>
       </table></div>
     </div>`;
   }, mount);

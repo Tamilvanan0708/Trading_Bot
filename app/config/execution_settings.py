@@ -123,7 +123,7 @@ def calculate_lot_size(
     target_risk_usd: float = 100.0,
     fixed_lot_size: float = 0.01,
     min_lot: float = 0.01,
-    max_lot: float = 5.0,
+    max_lot: float = 0.50,
     risk_mode: str = "percent",
     risk_percent: float = 1.0,
     account_balance: float = 10000.0,
@@ -132,7 +132,7 @@ def calculate_lot_size(
     """
     Calculate lot size based on configured sizing mode:
     - 'fixed': Returns fixed_lot_size (e.g. 0.01).
-    - 'broker_risk': Dynamic sizing respecting broker limits (lot step 0.01, min 0.01).
+    - 'broker_risk': Dynamic sizing respecting broker limits (lot step 0.01, min 0.01, max 0.50).
       If risk_mode == 'percent', scales dynamically with account_balance * (risk_percent / 100.0).
     """
     mode = (sizing_mode or "broker_risk").lower().strip()
@@ -145,10 +145,11 @@ def calculate_lot_size(
     else:
         effective_risk = max(1.0, target_risk_usd)
 
-    risk_pts = max(0.2, abs(entry_px - sl_px))
+    # Minimum SL calculation floor: at least 2.0 points to protect against runaway lots on tight wicks
+    risk_pts = max(2.0, abs(entry_px - sl_px))
     raw_lot = effective_risk / (risk_pts * 100.0)
 
-    # broker_risk: Round to standard broker lot step 0.01 with minimum lot floor
+    # broker_risk: Round to standard broker lot step 0.01 with minimum floor 0.01 and safety cap 0.50
     broker_lot = round(raw_lot, 2)
     return max(min_lot, min(max_lot, broker_lot))
 
