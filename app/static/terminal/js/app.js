@@ -4848,10 +4848,13 @@ Routes["/backtest"] = (mount) => {
 
           const resData = await resp.json();
           backtestData = resData;
-          window.__lastBacktestData = resData;
-          showToast(`Backtest completed: ${resData.summary?.total_trades || 0} trades evaluated`, "info");
+          if (typeof UI !== "undefined" && UI.toast) {
+            UI.toast("Backtest Complete", `Evaluated ${resData.summary?.total_trades || 0} trades`, "green");
+          }
         } catch (err) {
-          showToast(`Backtest failed: ${err.message}`, "error");
+          if (typeof UI !== "undefined" && UI.toast) {
+            UI.toast("Backtest Failed", err.message || "Simulation error", "red");
+          }
         } finally {
           isLoading = false;
           renderView();
@@ -5240,8 +5243,11 @@ Routes["/settings"] = async (mount) => {
           </div>
 
           <!-- SAVE BUTTON ROW -->
-          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px;display:flex;justify-content:flex-end">
-            <button id="save-execution-settings-btn" class="btn btn-primary" style="padding:10px 28px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
+          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px;display:flex;justify-content:flex-end;align-items:center;gap:14px">
+            <span id="save-status-msg" style="display:none;color:#00e676;font-size:13px;font-weight:700;align-items:center;gap:6px">
+              ✅ Saved! Settings Applied Live
+            </span>
+            <button id="save-execution-settings-btn" class="btn btn-primary" style="padding:10px 28px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px;transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1);cursor:pointer">
               💾 SAVE EXECUTION SETTINGS
             </button>
           </div>
@@ -5508,7 +5514,8 @@ Routes["/settings"] = async (mount) => {
       if (mount.querySelector("#tf-cb-1h")?.checked) tfs.push("1h");
 
       saveBtn.disabled = true;
-      saveBtn.textContent = "⏳ SAVING...";
+      saveBtn.innerHTML = "⏳ SAVING...";
+      saveBtn.style.opacity = "0.85";
 
       try {
         const payload = {
@@ -5535,12 +5542,58 @@ Routes["/settings"] = async (mount) => {
         window.__btRiskPercent = rPct;
         window.__btCapital = balance;
         window.__btLeverage = leverage;
-        showToast("Execution settings saved successfully! Live trading, Paper & Backtest updated.", "info");
+
+        // Visual Green Animation for user feedback
+        saveBtn.innerHTML = "✅ SAVED!";
+        saveBtn.style.background = "#00e676";
+        saveBtn.style.color = "#0a0e17";
+        saveBtn.style.borderColor = "#00e676";
+        saveBtn.style.fontWeight = "800";
+        saveBtn.style.transform = "scale(1.03)";
+        saveBtn.style.boxShadow = "0 0 16px rgba(0,230,118,0.5)";
+        saveBtn.style.opacity = "1";
+
+        const statusMsg = mount.querySelector("#save-status-msg");
+        if (statusMsg) {
+          statusMsg.style.display = "inline-flex";
+          statusMsg.style.opacity = "1";
+        }
+
+        if (typeof UI !== "undefined" && UI.toast) {
+          UI.toast("Settings Saved", "Execution settings saved successfully!", "green");
+        }
+
+        // Return button back to normal after 2.5 seconds
+        setTimeout(() => {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = "💾 SAVE EXECUTION SETTINGS";
+          saveBtn.style.background = "";
+          saveBtn.style.color = "";
+          saveBtn.style.borderColor = "";
+          saveBtn.style.fontWeight = "";
+          saveBtn.style.transform = "";
+          saveBtn.style.boxShadow = "";
+          if (statusMsg) {
+            statusMsg.style.opacity = "0";
+            setTimeout(() => { statusMsg.style.display = "none"; }, 300);
+          }
+        }, 2500);
+
       } catch (err) {
-        showToast(`Failed to save settings: ${err.message}`, "error");
-      } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = "💾 SAVE EXECUTION SETTINGS";
+        saveBtn.innerHTML = "❌ FAILED TO SAVE";
+        saveBtn.style.background = "#ef5350";
+        saveBtn.style.color = "#fff";
+        saveBtn.style.borderColor = "#ef5350";
+        if (typeof UI !== "undefined" && UI.toast) {
+          UI.toast("Save Error", err.message || "Failed to save settings", "red");
+        }
+        setTimeout(() => {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = "💾 SAVE EXECUTION SETTINGS";
+          saveBtn.style.background = "";
+          saveBtn.style.color = "";
+          saveBtn.style.borderColor = "";
+        }, 3000);
       }
     });
   }
