@@ -308,6 +308,24 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     active_setup_by_tf[tf_key] = current_anchor
                                     logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (Fib Retr %s %s) @ %.2f", sig_id, tf_key.upper(), l_key, entry_px)
 
+                                    # MT5 Bridge Live Execution Dispatch (Strictly Fib Retracement Only)
+                                    try:
+                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                        get_mt5_bridge_manager().enqueue_order({
+                                            "id": f"mt5-{new_trade.id[:8]}",
+                                            "paper_trade_id": new_trade.id,
+                                            "strategy": "Fib Retracement",
+                                            "layer": l_key,
+                                            "direction": f_state.direction,
+                                            "symbol": "XAUUSD",
+                                            "lot_size": trade_lot,
+                                            "entry_price": entry_px,
+                                            "stop_loss": sl_px,
+                                            "take_profit_1": tp_px,
+                                        })
+                                    except Exception as mt5_err:  # noqa: BLE001
+                                        logger.warning("[MT5-BRIDGE] Failed to dispatch order to MT5 queue: %s", mt5_err)
+
                                     # Telegram: Dispatch Trade Opened Alert
                                     try:
                                         dir_badge = "BUY / LONG ▲" if f_state.direction == "LONG" else "SELL / SHORT ▼"

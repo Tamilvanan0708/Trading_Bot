@@ -19,6 +19,7 @@ from app.api.routes import (
     retracement,
     signals,
     terminal,
+    mt5_bridge,
 )
 from app.config.settings import get_settings
 from app.core.logging import logger
@@ -157,6 +158,7 @@ def create_app() -> FastAPI:
     app.include_router(webhook_router)
     app.include_router(overview.router)
     app.include_router(terminal.router)
+    app.include_router(mt5_bridge.router)
 
     @app.get("/settings/execution", tags=["Execution Settings"])
     async def get_root_execution_settings():

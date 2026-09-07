@@ -92,6 +92,9 @@ const API = {
   getExecutionSettings: () => API.get("/settings/execution"),
   saveExecutionSettings: (settings) => API.post("/settings/execution", settings),
   resetPaperTrades: () => API.post("/paper-trades/reset"),
+  // MT5 Bridge
+  getMT5Status: () => API.get("/api/mt5/status"),
+  sendMT5TestTrade: (payload) => API.post("/api/mt5/test-trade", payload),
 };
 
 /* Global app state cache (lightweight, updated by polling) */

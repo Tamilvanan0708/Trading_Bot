@@ -82,6 +82,22 @@ class ExecutionSettings(BaseModel):
         default=False,
         description="Enable Fib Go With Trend strategy execution"
     )
+    mt5_bridge_enabled: bool = Field(
+        default=False,
+        description="Enable live execution to MetaTrader 5 via MQL5 EA bridge"
+    )
+    mt5_symbol: str = Field(
+        default="XAUUSD",
+        description="Broker symbol name for Gold (e.g. XAUUSD, XAUUSDm, XAUUSD.stp)"
+    )
+    mt5_magic_number: int = Field(
+        default=777888,
+        description="Magic number for MT5 orders"
+    )
+    mt5_allowed_strategy: str = Field(
+        default="Fib Retracement",
+        description="Strictly allowed strategy for MT5 execution (only Fib Retracement)"
+    )
 
 
 _CURRENT_SETTINGS: ExecutionSettings | None = None

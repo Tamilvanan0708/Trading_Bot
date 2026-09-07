@@ -4954,10 +4954,11 @@ Routes["/backtest"] = (mount) => {
 /* ================= SETTINGS ================= */
 Routes["/settings"] = async (mount) => {
   await renderWith(async () => {
-    const [st, tg, exec] = await Promise.allSettled([
+    const [st, tg, exec, mt5] = await Promise.allSettled([
       API.systemStatus(),
       API.telegramStatus(),
       API.getExecutionSettings(),
+      API.getMT5Status ? API.getMT5Status() : Promise.resolve(null),
     ]);
     return {
       st: st.status === "fulfilled" ? st.value : null,
@@ -4978,12 +4979,14 @@ Routes["/settings"] = async (mount) => {
         smart_shield_enabled: true,
         smart_shield_level: "0.618",
       },
+      mt5: mt5.status === "fulfilled" ? mt5.value : null,
     };
   }, (d) => {
     const stRaw = d.st || {};
     const st = stRaw.status || stRaw;
     const tg = d.tg || {};
     const exec = d.exec || {};
+    const mt5 = d.mt5 || {};
     const sizingMode = exec.sizing_mode || "broker_risk";
     const accountCurrency = exec.account_currency || "cent";
     const riskPercent = exec.risk_percent !== undefined ? exec.risk_percent : 1.0;
@@ -4996,6 +4999,10 @@ Routes["/settings"] = async (mount) => {
     const activeTfs = exec.fib_retracement_timeframes || ["5m", "15m", "30m", "1h"];
     const smartShield = exec.smart_shield_enabled !== false;
     const smartShieldLevel = exec.smart_shield_level || "0.618";
+    const mt5BridgeEnabled = exec.mt5_bridge_enabled === true;
+    const mt5Symbol = exec.mt5_symbol || "XAUUSD";
+    const mt5Online = mt5.is_online === true;
+    const mt5Acct = mt5.connected_account || {};
 
     const isCent = accountCurrency === "cent";
     const sym = isCent ? "₹" : "$";
@@ -5296,6 +5303,66 @@ Routes["/settings"] = async (mount) => {
         </div>
       </div>
 
+      
+      <!-- CARD: METATRADER 5 (MT5) LIVE AUTO-TRADER (MQL5 EA BRIDGE) -->
+      <div class="card" style="border: 1px solid rgba(171,71,188,0.35);margin-top:16px">
+        <div class="card-head" style="background:rgba(171,71,188,0.08);display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:700;color:#ce93d8">🏛️ 2. METATRADER 5 (MT5) LIVE AUTO-TRADER (MQL5 EA BRIDGE)</span>
+          <span id="mt5-status-badge" class="badge ${mt5Online ? 'badge-green' : 'badge-yellow'}">${mt5Online ? '🟢 ONLINE (VT Markets Connected)' : '⚪ WAITING FOR MT5 EA'}</span>
+        </div>
+        <div class="card-body">
+          <!-- Strict Strategy Filter Callout -->
+          <div style="background:rgba(171,71,188,0.1);border:1px solid rgba(171,71,188,0.3);padding:12px 16px;border-radius:6px;font-size:12.5px;color:#e1bee7;margin-bottom:16px;line-height:1.5">
+            🎯 <b>Strict Strategy Filter Active:</b> Only <b>Fib Retracement</b> strategy trades are permitted to execute on MT5. <i>SMC With Fib</i> and <i>Fib Go With Trend</i> are strictly isolated to paper trading simulation.
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px">
+            <!-- MT5 Execution Toggle -->
+            <div>
+              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+                Live MT5 Auto-Execution
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:10px;padding:9px 14px;background:#181e29;border:1px solid rgba(255,255,255,0.15);border-radius:6px;cursor:pointer;width:100%;font-size:13px;font-weight:700;color:${mt5BridgeEnabled ? '#00e676' : '#9e9e9e'}">
+                <input type="checkbox" id="set-mt5-bridge-enabled" ${mt5BridgeEnabled ? 'checked' : ''} style="cursor:pointer;width:16px;height:16px">
+                <span id="label-mt5-bridge-state">${mt5BridgeEnabled ? 'ENABLED (Auto-Orders Sent to MT5)' : 'DISABLED (Standby)'}</span>
+              </label>
+              <span class="muted" style="font-size:11px;margin-top:4px;display:block">When ON, Fib Retracement entry signals trigger native MT5 OrderSend()</span>
+            </div>
+
+            <!-- Broker Symbol Mapping -->
+            <div>
+              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+                Broker Gold Symbol
+              </label>
+              <input type="text" id="set-mt5-symbol" class="form-input" value="${mt5Symbol}" placeholder="XAUUSD" style="width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
+              <span class="muted" style="font-size:11px;margin-top:4px;display:block">Default: <b>XAUUSD</b> (or XAUUSDm / XAUUSD.stp for custom brokers)</span>
+            </div>
+
+            <!-- Connected Broker Account Info -->
+            <div>
+              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+                Connected MT5 Account
+              </label>
+              <div style="background:#181e29;padding:9px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);font-size:12.5px;font-weight:600;color:var(--text)">
+                <span id="mt5-account-display">${mt5Acct.login ? `${mt5Acct.login} (${mt5Acct.server || 'VTMarkets-Demo'})` : 'VT Markets Demo (1305493)'}</span>
+                <span style="font-size:11px;color:#81c784;display:block;margin-top:2px" id="mt5-balance-display">Balance: ${mt5Acct.balance != null ? `$${Number(mt5Acct.balance).toFixed(2)}` : '$1,000.00 USD'} • 1:${mt5Acct.leverage || 500}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- EA Download & Test Trade Actions -->
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08)">
+            <a href="/api/mt5/download-ea" download="XAU_AI_Bridge.mq5" class="btn btn-sm btn-outline" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;border-color:#ab47bc;color:#ce93d8;font-weight:700;padding:8px 16px">
+              📥 Download XAU_AI_Bridge.mq5
+            </a>
+            <button id="btn-test-mt5-trade" class="btn btn-sm" style="background:rgba(0,230,118,0.12);border:1px solid #00e676;color:#00e676;font-weight:700;padding:8px 16px;cursor:pointer">
+              🧪 Send Test 0.01 Lot Order
+            </button>
+            <span id="test-trade-status" style="font-size:12px;font-weight:600;color:var(--text-muted)"></span>
+          </div>
+        </div>
+      </div>
+
       <!-- SAFETY & SYSTEM STATUS CARD -->
       <div class="card">
         <div class="card-head"><span>🛡️ Safety & Engine Status</span></div>
@@ -5532,6 +5599,46 @@ Routes["/settings"] = async (mount) => {
   // Initial calculation
   updateLotPreview();
 
+  // Wire up MT5 Bridge Controls
+  const mt5Toggle = mount.querySelector("#set-mt5-bridge-enabled");
+  const mt5StateLabel = mount.querySelector("#label-mt5-bridge-state");
+  if (mt5Toggle && mt5StateLabel) {
+    mt5Toggle.addEventListener("change", () => {
+      mt5StateLabel.textContent = mt5Toggle.checked ? "ENABLED (Auto-Orders Sent to MT5)" : "DISABLED (Standby)";
+      mt5StateLabel.style.color = mt5Toggle.checked ? "#00e676" : "#9e9e9e";
+    });
+  }
+
+  const testTradeBtn = mount.querySelector("#btn-test-mt5-trade");
+  const testTradeStatus = mount.querySelector("#test-trade-status");
+  if (testTradeBtn) {
+    testTradeBtn.addEventListener("click", async () => {
+      testTradeBtn.disabled = true;
+      testTradeBtn.innerHTML = "⏳ Enqueuing...";
+      if (testTradeStatus) testTradeStatus.textContent = "";
+      try {
+        const res = await API.sendMT5TestTrade({ action: "BUY", lots: 0.01, sl_points: 3.0, tp_points: 5.0 });
+        if (testTradeStatus) {
+          testTradeStatus.textContent = `✅ Test order #${res.order_id || 'queued'} sent to MT5 queue! Waiting for EA fill...`;
+          testTradeStatus.style.color = "#00e676";
+        }
+        if (typeof UI !== "undefined" && UI.toast) {
+          UI.toast("Test Order Queued", "0.01 Lot Fib Retracement test order enqueued for MT5 EA!", "green");
+        }
+      } catch (err) {
+        if (testTradeStatus) {
+          testTradeStatus.textContent = `❌ Error: ${err.message}`;
+          testTradeStatus.style.color = "#ef5350";
+        }
+      } finally {
+        setTimeout(() => {
+          testTradeBtn.disabled = false;
+          testTradeBtn.innerHTML = "🧪 Send Test 0.01 Lot Order";
+        }, 2000);
+      }
+    });
+  }
+
   // Wire up Save Button
   const saveBtn = mount.querySelector("#save-execution-settings-btn");
   if (saveBtn) {
@@ -5560,6 +5667,9 @@ Routes["/settings"] = async (mount) => {
       saveBtn.style.opacity = "0.85";
 
       try {
+        const mt5Enabled = mount.querySelector("#set-mt5-bridge-enabled")?.checked ?? false;
+        const mt5Sym = mount.querySelector("#set-mt5-symbol")?.value || "XAUUSD";
+
         const payload = {
           account_currency: cur,
           sizing_mode: sMode,
@@ -5575,6 +5685,10 @@ Routes["/settings"] = async (mount) => {
           fib_retracement_timeframes: tfs.length > 0 ? tfs : ["5m", "15m", "30m", "1h"],
           smart_shield_enabled: smartShield,
           smart_shield_level: smartShieldLvl,
+          mt5_bridge_enabled: mt5Enabled,
+          mt5_symbol: mt5Sym,
+          mt5_magic_number: 777888,
+          mt5_allowed_strategy: "Fib Retracement",
         };
 
         await API.saveExecutionSettings(payload);
