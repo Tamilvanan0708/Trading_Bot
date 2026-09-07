@@ -33,7 +33,12 @@ from app.services.status import get_status
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Initialize Database tables + live service + analysis scheduler
-    await init_db()
+    try:
+        import asyncio
+        await asyncio.wait_for(init_db(), timeout=15.0)
+    except Exception as exc:
+        logger.warning("Database init_db warning (proceeding): %s", exc)
+
     live_service = get_live_service()
     await live_service.start()
     scheduler = AnalysisScheduler(live_service)

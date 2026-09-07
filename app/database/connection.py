@@ -114,17 +114,15 @@ _MIGRATIONS = [
 async def _migrate_columns() -> None:
     """Add missing columns to existing tables (safe to run on every startup)."""
     from sqlalchemy import text
-    from sqlalchemy.exc import OperationalError
 
+    is_postgres = "postgres" in settings.DATABASE_URL.lower()
     for table, column, coltype in _MIGRATIONS:
         try:
+            stmt = f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {coltype}" if is_postgres else f"ALTER TABLE {table} ADD COLUMN {column} {coltype}"
             async with engine.begin() as conn:
-                await conn.execute(
-                    text(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
-                )
+                await conn.execute(text(stmt))
             logger.info("Migration: added column %s.%s", table, column)
         except Exception as exc:
-            # "duplicate column name" / "already exists" is expected when the column already exists
             err_msg = str(exc).lower()
             if "duplicate" in err_msg or "already exists" in err_msg:
                 pass

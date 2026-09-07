@@ -67,23 +67,23 @@ class Settings(BaseSettings):
 
     # AI Validation — multi-provider with free-provider fallback
     # AI_PROVIDER: "mock" (heuristic only) | "auto" (chain) | "groq" | "gemini"
-    #              | "openrouter" | "ollama" | "bai" | "openai" (legacy)
-    AI_PROVIDER: Literal["mock", "auto", "groq", "gemini", "openrouter", "ollama", "bai", "openai"] = "mock"
-    AI_API_KEY: str = ""  # legacy OpenAI-style key (OpenAI-compatible endpoint)
-    AI_API_BASE_URL: str = ""  # optional override for the OpenAI-compatible endpoint
+    #              | "openrouter" | "ollama" | "bai"    # AI Provider Selection
+    AI_PROVIDER: Literal["mock", "auto", "groq", "gemini", "openrouter", "ollama", "bai", "openai"] = "auto"
+    AI_API_KEY: str = ""
+    AI_API_BASE_URL: str = ""
     AI_MODEL: str = "gpt-4o-mini"
-    AI_TEMPERATURE: float = 0.1
-    AI_REQUEST_TIMEOUT_SECONDS: float = 15.0
-    AI_MAX_RETRIES: int = 1
-    AI_RETRY_DELAY: float = 1.0
+    AI_TEMPERATURE: float = Field(default=0.1, ge=0.0, le=2.0)
+    AI_REQUEST_TIMEOUT_SECONDS: float = Field(default=15.0, gt=0)
+    AI_MAX_RETRIES: int = Field(default=1, ge=0, le=5)
+    AI_RETRY_DELAY: float = Field(default=1.0, ge=0)
 
     # Groq (primary free provider)
-    GROQ_API_KEY: str = ""
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_API_KEY: str = "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"
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
 
     # Google Gemini (secondary fallback)
-    GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_API_KEY: str = "AQ.Ab8RN6LqpGWT7jkES8qwmJvgLSLPmXJJrZP0gELKaygkla5iIw"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # OpenRouter (tertiary fallback)
     OPENROUTER_API_KEY: str = ""
@@ -102,9 +102,9 @@ class Settings(BaseSettings):
     BAI_BASE_URL: str = "https://api.b.ai/v1"
 
     # Telegram
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_CHAT_ID: str = ""
-    TELEGRAM_ENABLED: bool = False
+    TELEGRAM_BOT_TOKEN: str = "8724401786:AAEOjScHIEgtPb1LP2VlZzUZEG9NmHclWYE"
+    TELEGRAM_CHAT_ID: str = "817345394"
+    TELEGRAM_ENABLED: bool = True
 
     # Paper Trading
     PAPER_TRADING_ENABLED: bool = True
@@ -156,7 +156,7 @@ class Settings(BaseSettings):
     MT5_TZ_OFFSET_MINUTES: int = 0
 
     # Live Market Feed Configuration
-    LIVE_FEED_PROVIDER: Literal["mock", "binance", "ctrader", "tradingview", "mt5"] = "mock"
+    LIVE_FEED_PROVIDER: Literal["mock", "binance", "ctrader", "tradingview", "mt5"] = "binance"
     BINANCE_WS_URL: str = "wss://fstream.binance.com/stream"
     BINANCE_REST_BASE_URL: str = "https://fapi.binance.com"
     BINANCE_HISTORY_TIMEOUT_SECONDS: float = Field(default=15.0, gt=0)
