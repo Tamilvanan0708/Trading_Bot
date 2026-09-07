@@ -9,6 +9,8 @@
 #property description "Ultra-fast bridge connecting Python Quantitative Engine to MetaTrader 5."
 #property description "STRICT POLICY: Exclusively executes Fib Retracement strategy trades on XAUUSD."
 
+#include <Trade\Trade.mqh>
+
 //--- Inputs
 input group "=== Bot Connection Settings ==="
 input string   InpBotURL        = "http://127.0.0.1:8000"; // Python Bot URL (or Render URL)
@@ -20,6 +22,7 @@ input int      InpSlippagePts   = 50;                       // Max Slippage in P
 //--- Internal State
 string g_symbol;
 datetime g_last_heartbeat = 0;
+CTrade g_trade;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -41,6 +44,11 @@ int OnInit()
    
    // Send immediate first heartbeat
    SendHeartbeat();
+   
+   // Configure CTrade
+   g_trade.SetExpertMagicNumber(InpMagicNumber);
+   g_trade.SetDeviationInPoints(InpSlippagePts);
+   g_trade.SetTypeFillingBySymbol(g_symbol);
    
    // Start fast millisecond timer for low-latency signal polling
    EventSetMillisecondTimer(InpPollIntervalMs);
@@ -155,7 +163,7 @@ void ExecuteIncomingOrder(string json)
    double tp_pts   = ExtractJsonDouble(json, "tp_points");
    string comment  = ExtractJsonString(json, "comment");
    
-   if(order_id == "" || action == "" || lots <= 0) return;
+   if(order_id == "" || action == "") return;
    
    // Resolve chart/broker symbol
    string trade_symbol = (symbol != "") ? symbol : g_symbol;
@@ -163,6 +171,97 @@ void ExecuteIncomingOrder(string json)
    {
       SymbolSelect(trade_symbol, true);
    }
+
+   // 1. Position Close Dispatch
+   if(action == "CLOSE")
+   {
+      ulong ticket = (ulong)ExtractJsonDouble(json, "ticket");
+      string reason = ExtractJsonString(json, "reason");
+      bool closed = false;
+      
+      if(ticket > 0)
+      {
+         if(PositionSelectByTicket(ticket))
+         {
+            PrintFormat("🛑 [XAU_AI_Bridge] CLOSING POSITION Ticket #%d (Reason: %s)...", ticket, reason);
+            closed = g_trade.PositionClose(ticket);
+         }
+         else
+         {
+            PrintFormat("⚠️ [XAU_AI_Bridge] Ticket #%d not active. Checking by symbol and magic...", ticket);
+         }
+      }
+      
+      // Fallback: If ticket was 0 or not found by ticket, search open positions with InpMagicNumber
+      if(!closed)
+      {
+         for(int i = PositionsTotal() - 1; i >= 0; i--)
+         {
+            ulong pos_ticket = PositionGetTicket(i);
+            if(pos_ticket > 0)
+            {
+               long pos_magic = PositionGetInteger(POSITION_MAGIC);
+               string pos_sym = PositionGetString(POSITION_SYMBOL);
+               if(pos_magic == InpMagicNumber && (pos_sym == trade_symbol || pos_sym == g_symbol))
+               {
+                  PrintFormat("🛑 [XAU_AI_Bridge] Closing matching position #%d...", pos_ticket);
+                  if(g_trade.PositionClose(pos_ticket))
+                  {
+                     closed = true;
+                     ticket = pos_ticket;
+                  }
+               }
+            }
+         }
+      }
+      
+      PrintFormat(closed ? "✅ [XAU_AI_Bridge] POSITION CLOSED! Ticket: #%d" : "⚠️ [XAU_AI_Bridge] CLOSE NOT EXECUTED: Ticket #%d", ticket);
+      SendExecutionReport(order_id, ticket, closed ? "CLOSED" : "CLOSE_FAILED", 0.0, g_trade.ResultRetcode(), closed ? "" : "Failed to close position");
+      return;
+   }
+
+   // 2. Position Modify Dispatch (Smart Shield Breakeven / SL Trailing)
+   if(action == "MODIFY")
+   {
+      ulong ticket = (ulong)ExtractJsonDouble(json, "ticket");
+      double new_sl = ExtractJsonDouble(json, "stop_loss");
+      double new_tp = ExtractJsonDouble(json, "take_profit");
+      int digits = (int)SymbolInfoInteger(trade_symbol, SYMBOL_DIGITS);
+      if(new_sl > 0) new_sl = NormalizeDouble(new_sl, digits);
+      if(new_tp > 0) new_tp = NormalizeDouble(new_tp, digits);
+      
+      bool modified = false;
+      if(ticket > 0 && PositionSelectByTicket(ticket))
+      {
+         PrintFormat("🛡 [XAU_AI_Bridge] MODIFYING Ticket #%d -> SL=%.2f, TP=%.2f", ticket, new_sl, new_tp);
+         modified = g_trade.PositionModify(ticket, new_sl, new_tp);
+      }
+      else
+      {
+         for(int i = PositionsTotal() - 1; i >= 0; i--)
+         {
+            ulong pos_ticket = PositionGetTicket(i);
+            if(pos_ticket > 0)
+            {
+               long pos_magic = PositionGetInteger(POSITION_MAGIC);
+               string pos_sym = PositionGetString(POSITION_SYMBOL);
+               if(pos_magic == InpMagicNumber && (pos_sym == trade_symbol || pos_sym == g_symbol))
+               {
+                  PrintFormat("🛡 [XAU_AI_Bridge] Modifying matching position #%d -> SL=%.2f, TP=%.2f", pos_ticket, new_sl, new_tp);
+                  modified = g_trade.PositionModify(pos_ticket, new_sl, new_tp);
+                  ticket = pos_ticket;
+                  break;
+               }
+            }
+         }
+      }
+      
+      SendExecutionReport(order_id, ticket, modified ? "MODIFIED" : "MODIFY_FAILED", 0.0, g_trade.ResultRetcode(), modified ? "" : "Failed to modify position");
+      return;
+   }
+
+   // 3. New Position Open Dispatch (BUY / SELL)
+   if(lots <= 0) return;
    
    bool is_buy = (action == "BUY" || action == "LONG");
    double ask = SymbolInfoDouble(trade_symbol, SYMBOL_ASK);
@@ -190,12 +289,18 @@ void ExecuteIncomingOrder(string json)
    if(is_buy)
    {
       if(sl >= price || sl <= 0.0) sl = 0.0;
-      if(tp <= price || tp <= 0.0) tp = 0.0;
+      if(tp <= price || tp <= 0.0)
+      {
+         tp = (tp_pts > 0.0) ? (price + tp_pts) : (price + 2.0);
+      }
    }
    else
    {
       if(sl <= price || sl <= 0.0) sl = 0.0;
-      if(tp >= price || tp <= 0.0) tp = 0.0;
+      if(tp >= price || tp <= 0.0)
+      {
+         tp = (tp_pts > 0.0) ? (price - tp_pts) : (price - 2.0);
+      }
    }
    
    // Digits rounding for SL / TP

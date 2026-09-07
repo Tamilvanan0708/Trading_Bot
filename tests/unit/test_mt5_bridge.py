@@ -181,3 +181,61 @@ def test_api_endpoints():
     ea_res = client.get("/api/mt5/download-ea")
     assert ea_res.status_code == 200
     assert "XAU_AI_Bridge" in ea_res.text
+
+
+def test_enqueue_close_and_modify():
+    """Verify that close and modify orders can be enqueued and tracked by paper trade id or ticket."""
+    mgr = get_mt5_bridge_manager()
+
+    # 1. Enqueue Open Order with paper_trade_id
+    res_open = mgr.enqueue_order({
+        "id": "ord-open-1",
+        "strategy": "Fib Retracement",
+        "paper_trade_id": "pt-xyz-123",
+        "direction": "SELL",
+        "symbol": "XAUUSD",
+        "lot_size": 0.15,
+        "entry_price": 4392.06,
+        "stop_loss": 4398.82,
+        "take_profit_1": 4385.31,
+    })
+    assert res_open["status"] == "queued"
+
+    # 2. Simulate MT5 filling with ticket 672226252
+    mgr.record_execution_report({
+        "order_id": "ord-open-1",
+        "ticket": 672226252,
+        "status": "FILLED",
+        "fill_price": 4391.12,
+    })
+    assert mgr._paper_trade_to_ticket["pt-xyz-123"] == 672226252
+
+    # 3. Enqueue Modify (Smart Shield Breakeven)
+    res_mod = mgr.enqueue_modify(
+        paper_trade_id="pt-xyz-123",
+        symbol="XAUUSD",
+        new_sl=4392.06,
+    )
+    assert res_mod["status"] == "queued"
+    assert res_mod["payload"]["action"] == "MODIFY"
+    assert res_mod["payload"]["ticket"] == 672226252
+    assert res_mod["payload"]["stop_loss"] == 4392.06
+
+    # 4. Enqueue Close (TP Hit)
+    res_close = mgr.enqueue_close(
+        paper_trade_id="pt-xyz-123",
+        symbol="XAUUSD",
+        reason="TP_HIT",
+    )
+    assert res_close["status"] == "queued"
+    assert res_close["payload"]["action"] == "CLOSE"
+    assert res_close["payload"]["ticket"] == 672226252
+    assert res_close["payload"]["reason"] == "TP_HIT"
+
+    # 5. Verify pending orders returned to EA
+    pending = mgr.pop_pending_orders(symbol="XAUUSD")
+    assert len(pending) == 3
+    assert pending[0]["action"] == "SELL"
+    assert pending[1]["action"] == "MODIFY"
+    assert pending[2]["action"] == "CLOSE"
+

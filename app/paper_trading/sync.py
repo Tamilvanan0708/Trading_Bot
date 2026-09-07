@@ -371,9 +371,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     if (f_state.direction == "LONG" and eng_sl > (existing.stop_loss or 0.0)) or (f_state.direction == "SHORT" and eng_sl < (existing.stop_loss or 999999.0)):
                                         existing.stop_loss = eng_sl
                                         await db.commit()
-                                        logger.info("[PAPER-AUTO] Trailing Smart Shield moved %s SL to %.2f", sig_id, eng_sl)
-
-                                # 2. If layer has completed TP in engine, resolve it
+                                              # 2. If layer has completed TP in engine, resolve it
                                 if layer.get("state") == "TP_HIT":
                                     existing.state = "CLOSED"
                                     existing.exit_price = tp_px
@@ -384,6 +382,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     existing.realized_r = round(pts / max(0.1, abs(entry_px - (existing.stop_loss or 0.0))), 2)
                                     await db.commit()
                                     logger.info("[PAPER-AUTO] Engine TP_HIT closed Retracement %s (%s) @ %.2f (+$%.2f)", sig_id, l_key, tp_px, existing.realized_pnl)
+
+                                    # MT5 Bridge Live Close Dispatch
+                                    try:
+                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                        get_mt5_bridge_manager().enqueue_close(
+                                            paper_trade_id=existing.id,
+                                            symbol=exec_cfg.mt5_symbol or "XAUUSD",
+                                            reason="TP_HIT",
+                                        )
+                                    except Exception as mt5_err:
+                                        logger.warning("[MT5-BRIDGE] Failed to dispatch close to MT5: %s", mt5_err)
 
                                     # 3. Smart Shield Immediate Trigger: When L2 or L3 hits TP, trail L1 SL
                                     if exec_cfg.smart_shield_enabled and l_key in ("L2", "L3"):
@@ -397,6 +406,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 l1_trade.stop_loss = new_l1_sl
                                                 await db.commit()
                                                 logger.info("[PAPER-AUTO] Smart Shield (%s): L%s TP hit -> trailed L1 SL to %.2f", exec_cfg.smart_shield_level, l_key[-1], new_l1_sl)
+
+                                                # MT5 Bridge Live SL Modify Dispatch
+                                                try:
+                                                    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                                    get_mt5_bridge_manager().enqueue_modify(
+                                                        paper_trade_id=l1_trade.id,
+                                                        symbol=exec_cfg.mt5_symbol or "XAUUSD",
+                                                        new_sl=new_l1_sl,
+                                                    )
+                                                except Exception as mt5_err:
+                                                    logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5: %s", mt5_err)
 
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[PAPER-SYNC] Fib sync error: %s", exc)
@@ -822,6 +842,18 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                 # Telegram & Signal Sync: Dispatch Trade Closed Alert (TP or SL or BE)
                 if closed:
+                    # MT5 Live Position Close Synchronization (Strict Fib Retracement)
+                    if "FIB_RETR" in (t.signal_id or ""):
+                        try:
+                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                            get_mt5_bridge_manager().enqueue_close(
+                                paper_trade_id=t.id,
+                                symbol=exec_cfg.mt5_symbol or "XAUUSD",
+                                reason=t.exit_reason or "CLOSED",
+                            )
+                        except Exception as mt5_err:
+                            logger.warning("[MT5-BRIDGE] Failed to dispatch close to MT5: %s", mt5_err)
+
                     # Synchronize parent SignalModel outcome
                     if t.signal_id:
                         try:

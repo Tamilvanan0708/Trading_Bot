@@ -34,6 +34,8 @@ class MT5BridgeManager:
         self._lock = threading.Lock()
         self._orders: dict[str, dict[str, Any]] = {}
         self._pending_ids: list[str] = []
+        self._paper_trade_to_ticket: dict[str, int] = {}
+        self._ticket_to_paper_trade: dict[int, str] = {}
         self._heartbeat: dict[str, Any] = {
             "account_login": None,
             "server": None,
@@ -184,6 +186,92 @@ class MT5BridgeManager:
             "payload": order_payload,
         }
 
+    def enqueue_close(
+        self,
+        paper_trade_id: str | None = None,
+        ticket: int | None = None,
+        symbol: str | None = None,
+        reason: str = "CLOSE",
+    ) -> dict[str, Any]:
+        """Enqueues a position close request for MT5 execution."""
+        exec_cfg = get_execution_settings()
+        if not exec_cfg.mt5_bridge_enabled:
+            return {"status": "disabled", "reason": "MT5 bridge is disabled."}
+
+        target_ticket = ticket
+        if not target_ticket and paper_trade_id:
+            target_ticket = self._paper_trade_to_ticket.get(str(paper_trade_id))
+
+        order_id = f"mt5-close-{uuid.uuid4().hex[:8]}"
+        order_payload = {
+            "id": order_id,
+            "action": "CLOSE",
+            "ticket": int(target_ticket) if target_ticket else 0,
+            "paper_trade_id": paper_trade_id,
+            "symbol": str(symbol or exec_cfg.mt5_symbol or "XAUUSD").upper(),
+            "reason": reason,
+            "magic_number": exec_cfg.mt5_magic_number,
+            "created_at": time.time(),
+            "status": "PENDING",
+        }
+
+        with self._lock:
+            self._orders[order_id] = order_payload
+            self._pending_ids.append(order_id)
+
+        logger.info(
+            "[MT5-BRIDGE] Enqueued CLOSE request %s for Ticket #%s (Paper Trade: %s, Reason: %s)",
+            order_id,
+            target_ticket or "ALL",
+            paper_trade_id,
+            reason,
+        )
+        return {"status": "queued", "order_id": order_id, "payload": order_payload}
+
+    def enqueue_modify(
+        self,
+        paper_trade_id: str | None = None,
+        ticket: int | None = None,
+        symbol: str | None = None,
+        new_sl: float | None = None,
+        new_tp: float | None = None,
+    ) -> dict[str, Any]:
+        """Enqueues a SL/TP modify request for MT5 execution (e.g. Smart Shield Breakeven)."""
+        exec_cfg = get_execution_settings()
+        if not exec_cfg.mt5_bridge_enabled:
+            return {"status": "disabled", "reason": "MT5 bridge is disabled."}
+
+        target_ticket = ticket
+        if not target_ticket and paper_trade_id:
+            target_ticket = self._paper_trade_to_ticket.get(str(paper_trade_id))
+
+        order_id = f"mt5-mod-{uuid.uuid4().hex[:8]}"
+        order_payload = {
+            "id": order_id,
+            "action": "MODIFY",
+            "ticket": int(target_ticket) if target_ticket else 0,
+            "paper_trade_id": paper_trade_id,
+            "symbol": str(symbol or exec_cfg.mt5_symbol or "XAUUSD").upper(),
+            "stop_loss": float(new_sl) if new_sl is not None else 0.0,
+            "take_profit": float(new_tp) if new_tp is not None else 0.0,
+            "magic_number": exec_cfg.mt5_magic_number,
+            "created_at": time.time(),
+            "status": "PENDING",
+        }
+
+        with self._lock:
+            self._orders[order_id] = order_payload
+            self._pending_ids.append(order_id)
+
+        logger.info(
+            "[MT5-BRIDGE] Enqueued MODIFY request %s for Ticket #%s (SL=%.2f, TP=%.2f)",
+            order_id,
+            target_ticket or "ALL",
+            new_sl or 0.0,
+            new_tp or 0.0,
+        )
+        return {"status": "queued", "order_id": order_id, "payload": order_payload}
+
     def pop_pending_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
         """Called by MT5 EA to fetch and consume pending orders."""
         with self._lock:
@@ -229,6 +317,11 @@ class MT5BridgeManager:
             order["retcode"] = report.get("retcode")
             order["error"] = report.get("error")
 
+            pt_id = order.get("paper_trade_id")
+            if ticket and pt_id:
+                self._paper_trade_to_ticket[str(pt_id)] = int(ticket)
+                self._ticket_to_paper_trade[int(ticket)] = str(pt_id)
+
             record = {
                 "order_id": order_id,
                 "ticket": ticket,
@@ -259,6 +352,8 @@ class MT5BridgeManager:
             self._orders.clear()
             self._pending_ids.clear()
             self._execution_history.clear()
+            self._paper_trade_to_ticket.clear()
+            self._ticket_to_paper_trade.clear()
 
 
 # Global singleton helper
