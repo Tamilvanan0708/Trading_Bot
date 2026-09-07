@@ -148,7 +148,17 @@ class LiveMarketDataService:
         logger.info("LiveMarketDataService startup dispatched (non-blocking).")
 
     async def _startup_async(self) -> None:
-        """Background startup: load history, connect feed, start refresh loop."""
+        """Background startup: connect feed immediately, then load history in background."""
+        self._feed = self._build_feed()
+        if self._feed is not None:
+            self._feed.set_on_tick_callback(self.on_tick)
+            self._feed.set_on_reconnect_callback(self._on_feed_reconnect)
+            await self.registry.register_feed(self._feed)
+        elif self.settings.LIVE_FEED_PROVIDER in ("tradingview", "mock"):
+            await self.registry.register_buffer(self._symbol)
+        elif self.settings.LIVE_FEED_PROVIDER == "mt5":
+            self._mt5_task = asyncio.create_task(self._start_mt5_polling(), name="mt5-tick-poll")
+
         try:
             await self._load_historical_base()
         except Exception as exc:  # noqa: BLE001 - non-fatal at startup
@@ -158,24 +168,6 @@ class LiveMarketDataService:
         except Exception as exc:  # noqa: BLE001 - 5m base is best-effort
             logger.debug("5m base load skipped (non-fatal): %s", exc)
 
-        self._feed = self._build_feed()
-        if self._feed is not None:
-            # Register the service's on_tick as the feed's callback so that
-            # every live tick is aggregated into forming candles AND pushed
-            # to the registry ring buffer.
-            self._feed.set_on_tick_callback(self.on_tick)
-            # Trigger a history backfill whenever the WebSocket reconnects
-            # after an outage (not on the initial connection).
-            self._feed.set_on_reconnect_callback(self._on_feed_reconnect)
-            await self.registry.register_feed(self._feed)
-        elif self.settings.LIVE_FEED_PROVIDER in ("tradingview", "mock"):
-            # Passive providers (webhook / mock) receive ticks via
-            # registry.push_tick / on_tick directly, so a buffer must exist
-            # even though no WebSocket feed is registered.
-            await self.registry.register_buffer(self._symbol)
-        elif self.settings.LIVE_FEED_PROVIDER == "mt5":
-            # MT5 is polling-based (not a WebSocketMarketFeed): run a dedicated task.
-            self._mt5_task = asyncio.create_task(self._start_mt5_polling(), name="mt5-tick-poll")
         # Start the periodic REST history refresh loop.
         self._refresh_task = asyncio.create_task(
             self._history_refresh_loop(), name="history-refresh"
