@@ -5226,22 +5226,16 @@ Routes["/settings"] = async (mount) => {
           </div>
 
           <!-- SMART SHIELD SL TARGET CONFIG -->
-          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;align-items:center">
-            <div>
-              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;font-weight:700;color:#fff;margin-bottom:6px">
-                <input type="checkbox" id="cb-smart-shield" ${smartShield ? 'checked' : ''}> 🛡️ Enable Smart Shield Protection
-              </label>
-              <div class="muted" style="font-size:11px">When L2 or L3 hits Take Profit, automatically trails L1 Stop Loss to eliminate risk</div>
-            </div>
-
-            <div>
-              <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
-                Smart Shield SL Target Level
-              </label>
-              <select id="set-smart-shield-level" class="form-input" style="width:100%;padding:8px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
+          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px">
+            <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+              🛡️ Smart Shield Trailing Stop Loss Target
+            </label>
+            <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
+              <select id="set-smart-shield-level" class="form-input" style="max-width:500px;width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
                 <option value="0.618" ${smartShieldLevel === '0.618' ? 'selected' : ''}>0.618 Entry Breakeven (Zero Risk Escape - Recommended)</option>
                 <option value="0.500" ${smartShieldLevel === '0.500' ? 'selected' : ''}>0.500 Conservative Buffer Shield (Wide Breakeven)</option>
               </select>
+              <span class="muted" style="font-size:11px">When L2 or L3 hits Take Profit, automatically trails L1 Stop Loss to the selected Fibonacci target level</span>
             </div>
           </div>
 
@@ -5500,7 +5494,7 @@ Routes["/settings"] = async (mount) => {
       const fLot = parseFloat(mount.querySelector("#set-fixed-lot-size")?.value || "0.01");
       const balance = parseFloat(mount.querySelector("#set-account-balance")?.value || "10000.0");
       const leverage = parseInt(mount.querySelector("#set-account-leverage")?.value || "500", 10);
-      const smartShield = mount.querySelector("#cb-smart-shield")?.checked ?? true;
+      const smartShield = true;
       const smartShieldLvl = mount.querySelector("#set-smart-shield-level")?.value || "0.618";
 
       const stratFibRetr = mount.querySelector("#strat-cb-fib-retr")?.checked ?? true;
