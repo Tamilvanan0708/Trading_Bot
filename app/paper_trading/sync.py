@@ -398,8 +398,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                                         get_mt5_bridge_manager().enqueue_close(
                                             paper_trade_id=existing.id,
-                                            symbol=exec_cfg.mt5_symbol or "XAUUSD",
+                                            symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
                                             reason="TP_HIT",
+                                            direction=f_state.direction,
                                         )
                                     except Exception as mt5_err:
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch close to MT5: %s", mt5_err)
@@ -424,8 +425,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                     from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                                                     get_mt5_bridge_manager().enqueue_modify(
                                                         paper_trade_id=l1_trade.id,
-                                                        symbol=exec_cfg.mt5_symbol or "XAUUSD",
+                                                        symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
                                                         new_sl=new_l1_sl,
+                                                        direction=f_state.direction,
                                                     )
                                                 except Exception as mt5_err:
                                                     logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5: %s", mt5_err)
@@ -447,8 +449,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                                         get_mt5_bridge_manager().enqueue_close(
                                             paper_trade_id=existing.id,
-                                            symbol=exec_cfg.mt5_symbol or "XAUUSD",
+                                            symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
                                             reason=existing.exit_reason,
+                                            direction=f_state.direction,
                                         )
                                     except Exception as mt5_err:
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch close to MT5: %s", mt5_err)
@@ -987,6 +990,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 paper_trade_id=t.id,
                                 symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
                                 reason=t.exit_reason or "CLOSED",
+                                direction=t.direction,
                             )
                         except Exception as mt5_err:
                             logger.warning("[MT5-BRIDGE] Failed to dispatch close to MT5: %s", mt5_err)

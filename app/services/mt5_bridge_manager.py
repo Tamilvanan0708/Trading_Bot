@@ -200,6 +200,7 @@ class MT5BridgeManager:
         ticket: int | None = None,
         symbol: str | None = None,
         reason: str = "CLOSE",
+        direction: str | None = None,
     ) -> dict[str, Any]:
         """Enqueues a position close request for MT5 execution."""
         exec_cfg = get_execution_settings()
@@ -216,6 +217,7 @@ class MT5BridgeManager:
             "action": "CLOSE",
             "ticket": int(target_ticket) if target_ticket else 0,
             "paper_trade_id": paper_trade_id,
+            "direction": str(direction or "").upper(),
             "symbol": str(symbol or exec_cfg.mt5_symbol or "XAUUSD").upper(),
             "reason": reason,
             "magic_number": exec_cfg.mt5_magic_number,
@@ -243,6 +245,7 @@ class MT5BridgeManager:
         symbol: str | None = None,
         new_sl: float | None = None,
         new_tp: float | None = None,
+        direction: str | None = None,
     ) -> dict[str, Any]:
         """Enqueues a SL/TP modify request for MT5 execution (e.g. Smart Shield Breakeven)."""
         exec_cfg = get_execution_settings()
@@ -259,6 +262,7 @@ class MT5BridgeManager:
             "action": "MODIFY",
             "ticket": int(target_ticket) if target_ticket else 0,
             "paper_trade_id": paper_trade_id,
+            "direction": str(direction or "").upper(),
             "symbol": str(symbol or exec_cfg.mt5_symbol or "XAUUSD").upper(),
             "stop_loss": float(new_sl) if new_sl is not None else 0.0,
             "take_profit": float(new_tp) if new_tp is not None else 0.0,

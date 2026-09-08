@@ -177,6 +177,7 @@ void ExecuteIncomingOrder(string json)
    {
       ulong ticket = (ulong)ExtractJsonDouble(json, "ticket");
       string reason = ExtractJsonString(json, "reason");
+      string close_dir = ExtractJsonString(json, "direction");
       bool closed = false;
       
       if(ticket > 0)
@@ -192,7 +193,7 @@ void ExecuteIncomingOrder(string json)
          }
       }
       
-      // Fallback: If ticket was 0 or not found by ticket, search open positions with InpMagicNumber
+      // Fallback: If ticket was 0 or not found by ticket, search open positions with InpMagicNumber & Direction
       if(!closed)
       {
          for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -202,13 +203,26 @@ void ExecuteIncomingOrder(string json)
             {
                long pos_magic = PositionGetInteger(POSITION_MAGIC);
                string pos_sym = PositionGetString(POSITION_SYMBOL);
-               if(pos_magic == InpMagicNumber && (pos_sym == trade_symbol || pos_sym == g_symbol))
+               long pos_type = PositionGetInteger(POSITION_TYPE);
+               
+               bool dir_match = true;
+               if(close_dir == "BUY" || close_dir == "LONG")
                {
-                  PrintFormat("🛑 [XAU_AI_Bridge] Closing matching position #%d...", pos_ticket);
+                  dir_match = (pos_type == POSITION_TYPE_BUY);
+               }
+               else if(close_dir == "SELL" || close_dir == "SHORT")
+               {
+                  dir_match = (pos_type == POSITION_TYPE_SELL);
+               }
+               
+               if(pos_magic == InpMagicNumber && (pos_sym == trade_symbol || pos_sym == g_symbol) && dir_match)
+               {
+                  PrintFormat("🛑 [XAU_AI_Bridge] Closing matching position #%d (Dir: %s)...", pos_ticket, close_dir);
                   if(g_trade.PositionClose(pos_ticket))
                   {
                      closed = true;
                      ticket = pos_ticket;
+                     break; // Safety: Only close ONE matching trade per request
                   }
                }
             }
@@ -224,6 +238,7 @@ void ExecuteIncomingOrder(string json)
    if(action == "MODIFY")
    {
       ulong ticket = (ulong)ExtractJsonDouble(json, "ticket");
+      string mod_dir = ExtractJsonString(json, "direction");
       double new_sl = ExtractJsonDouble(json, "stop_loss");
       double new_tp = ExtractJsonDouble(json, "take_profit");
       int digits = (int)SymbolInfoInteger(trade_symbol, SYMBOL_DIGITS);
@@ -245,9 +260,21 @@ void ExecuteIncomingOrder(string json)
             {
                long pos_magic = PositionGetInteger(POSITION_MAGIC);
                string pos_sym = PositionGetString(POSITION_SYMBOL);
-               if(pos_magic == InpMagicNumber && (pos_sym == trade_symbol || pos_sym == g_symbol))
+               long pos_type = PositionGetInteger(POSITION_TYPE);
+               
+               bool dir_match = true;
+               if(mod_dir == "BUY" || mod_dir == "LONG")
                {
-                  PrintFormat("🛡 [XAU_AI_Bridge] Modifying matching position #%d -> SL=%.2f, TP=%.2f", pos_ticket, new_sl, new_tp);
+                  dir_match = (pos_type == POSITION_TYPE_BUY);
+               }
+               else if(mod_dir == "SELL" || mod_dir == "SHORT")
+               {
+                  dir_match = (pos_type == POSITION_TYPE_SELL);
+               }
+
+               if(pos_magic == InpMagicNumber && (pos_sym == trade_symbol || pos_sym == g_symbol) && dir_match)
+               {
+                  PrintFormat("🛡 [XAU_AI_Bridge] Modifying matching position #%d (Dir: %s) -> SL=%.2f, TP=%.2f", pos_ticket, mod_dir, new_sl, new_tp);
                   modified = g_trade.PositionModify(pos_ticket, new_sl, new_tp);
                   ticket = pos_ticket;
                   break;
