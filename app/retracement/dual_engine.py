@@ -152,12 +152,12 @@ class DualRetracementEngine:
         if len(self._candles) >= 2 and self._candles[-2].close > last_sh.price:
             return []  # BOS was already confirmed on a prior candle
         if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-            # Anchor Low: immediate confirmed swing low before the BOS swing that initiated the leg
+            # Anchor Low: lowest confirmed swing low before the BOS swing that initiated the leg
             lows_before_bos = [
                 s for s in confirmed_lows
                 if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
             ]
-            anchor_low = lows_before_bos[-1] if lows_before_bos else confirmed_lows[-1]
+            anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
             p2_low = anchor_low.price
             p2_ts = anchor_low.timestamp
 
@@ -186,12 +186,12 @@ class DualRetracementEngine:
         if len(self._candles) >= 2 and self._candles[-2].close < last_sl.price:
             return []
         if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-            # Anchor High: immediate confirmed swing high before the BOS swing that initiated the leg
+            # Anchor High: highest confirmed swing high before the BOS swing that initiated the leg
             highs_before_bos = [
                 s for s in confirmed_highs
                 if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
             ]
-            anchor_high = highs_before_bos[-1] if highs_before_bos else confirmed_highs[-1]
+            anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
             p2_high = anchor_high.price
             p2_ts = anchor_high.timestamp
 
@@ -274,7 +274,7 @@ class DualRetracementEngine:
                     lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
                     if not lows_before:
                         return []
-                    anchor_low = lows_before[-1]
+                    anchor_low = min(lows_before, key=lambda s: s.price)
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,
@@ -314,7 +314,7 @@ class DualRetracementEngine:
                     highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
                     if not highs_before:
                         return []
-                    anchor_high = highs_before[-1]
+                    anchor_high = max(highs_before, key=lambda s: s.price)
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,
@@ -385,7 +385,7 @@ class DualRetracementEngine:
                 return []
             if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
                 lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
-                anchor_low = lows_before[-1] if lows_before else confirmed_lows[-1]
+                anchor_low = min(lows_before, key=lambda s: s.price) if lows_before else confirmed_lows[-1]
 
                 setup.state = RetracementState.INVALIDATED
                 setup.invalidation_reason = f"Reversed by Bullish BOS at {candle.close:.2f}."
@@ -427,7 +427,7 @@ class DualRetracementEngine:
                 return []
             if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
                 highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
-                anchor_high = highs_before[-1] if highs_before else confirmed_highs[-1]
+                anchor_high = max(highs_before, key=lambda s: s.price) if highs_before else confirmed_highs[-1]
 
                 setup.state = RetracementState.INVALIDATED
                 setup.invalidation_reason = f"Reversed by Bearish BOS at {candle.close:.2f}."
@@ -622,14 +622,17 @@ class DualRetracementEngine:
                     setup.tp_locked = True
                 setup.state = RetracementState.TRADE_ACTIVE
                 # Same-candle TP check: if a layer was just filled and the same candle
-                # also reaches the layer's TP, mark it TP_HIT immediately.
+                # also reaches the layer's TP, require candle.close >= tp to ensure the bounce
+                # occurred after entry rather than before the pullback.
                 for layer in setup.layers.values():
                     if layer["state"] != "FILLED":
                         continue
-                    if setup.direction == "LONG" and candle.high >= layer["tp"]:
+                    if setup.direction == "LONG" and candle.close >= layer["tp"]:
                         layer["state"] = "TP_HIT"
-                    elif setup.direction == "SHORT" and candle.low <= layer["tp"]:
+                        layer["exit_price"] = layer["tp"]
+                    elif setup.direction == "SHORT" and candle.close <= layer["tp"]:
                         layer["state"] = "TP_HIT"
+                        layer["exit_price"] = layer["tp"]
 
         return events
 
@@ -784,6 +787,9 @@ class DualRetracementEngine:
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
+                # If layer was filled in this exact candle, candle high happened before fill unless close >= tp
+                if layer.get("filled_at") == candle.timestamp.isoformat() and candle.close < layer["tp"]:
+                    continue
                 if candle.high >= layer["tp"]:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = layer["tp"]
@@ -810,6 +816,9 @@ class DualRetracementEngine:
         else:  # SHORT
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
+                    continue
+                # If layer was filled in this exact candle, candle low happened before fill unless close <= tp
+                if layer.get("filled_at") == candle.timestamp.isoformat() and candle.close > layer["tp"]:
                     continue
                 if candle.low <= layer["tp"]:
                     layer["state"] = "TP_HIT"

@@ -437,8 +437,8 @@ def test_timeframe_keeps_scanning_after_completion():
     current = slot.engine.setup
     assert current is not None, "15m must keep scanning after the first setup completed"
     assert current.point_2_price is not None
-    # The completed setup was archived (engine moved on) — at least one TP_HIT.
-    assert any(a.outcome == "TP_HIT" for a in archived)
+    # The completed setup was archived (engine moved on) — at least one completed outcome.
+    assert any(a.outcome in ("TP_HIT", "SL_HIT") for a in archived)
     # The new current setup is distinct from every archived one.
     assert all(a.setup_id != current.setup_id for a in archived)
 
