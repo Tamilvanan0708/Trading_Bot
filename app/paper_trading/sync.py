@@ -462,37 +462,44 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                 smc_svc = get_smc_fib_multi_tf_service("XAUUSD")
                 smc_states = await smc_svc.advance(db)
 
-                # Check if any open trade already exists for SMC_WITH_FIB across any timeframe
-                existing_open_smc = (await db.execute(
+                # Check if any open trades exist for SMC_WITH_FIB across any timeframe
+                open_smc_trades = (await db.execute(
                     select(PaperTradeModel).where(
                         PaperTradeModel.state == "OPEN",
                         PaperTradeModel.signal_id.like("SMC_FIB_%"),
                     )
-                )).scalars().first()
+                )).scalars().all()
 
-                # Orphan-trade cleanup: if the open SMC paper trade's engine has already COMPLETED/RESET
-                # (all engines show is_trade_active=False and NO_SETUP), close it at live price.
-                if existing_open_smc is not None:
-                    any_engine_still_active = any(
-                        (smc_states.get(tf) or {}).get("is_trade_active", False)
-                        for tf in smc_svc.timeframes
-                    )
-                    if not any_engine_still_active:
-                        # Engine has auto-reset; close the stale open trade
-                        entry_chk = existing_open_smc.actual_entry or existing_open_smc.target_entry or 0.0
-                        close_px = live_price if (live_price and live_price > 1000.0) else (existing_open_smc.stop_loss or entry_chk)
+                # Per-trade validation: check if each open trade is still actively tracked by its timeframe engine.
+                # If its timeframe engine is no longer active (or anchor changed), close the stale trade immediately.
+                existing_open_smc = None
+                for ot in open_smc_trades:
+                    parts = (ot.signal_id or "").split("_")
+                    ot_tf = parts[2].lower() if len(parts) >= 3 else None
+                    ot_card = smc_states.get(ot_tf) if ot_tf else None
+                    ot_engine_active = bool(ot_card and ot_card.get("is_trade_active"))
+
+                    ot_anchor = parts[3] if len(parts) >= 4 else None
+                    card_p2 = ot_card.get("point_2", {}).get("price") if ot_card else None
+                    card_anchor = str(int(card_p2)) if card_p2 else None
+                    is_valid_active = ot_engine_active and (ot_anchor is None or ot_anchor == card_anchor)
+
+                    if is_valid_active and existing_open_smc is None:
+                        existing_open_smc = ot
+                    else:
+                        entry_chk = ot.actual_entry or ot.target_entry or 0.0
+                        close_px = live_price if (live_price and live_price > 1000.0) else (ot.stop_loss or entry_chk)
                         if entry_chk > 0 and close_px and close_px > 1000.0:
-                            dir_chk = existing_open_smc.direction or "LONG"
+                            dir_chk = ot.direction or "LONG"
                             pts_stale = round((close_px - entry_chk) if dir_chk == "LONG" else (entry_chk - close_px), 2)
-                            existing_open_smc.state = "CLOSED"
-                            existing_open_smc.exit_price = close_px
-                            existing_open_smc.exit_reason = "TP_HIT" if pts_stale > 0 else "SL_HIT"
-                            existing_open_smc.closed_at = datetime.now(timezone.utc)
-                            existing_open_smc.realized_pnl = round(pts_stale * (existing_open_smc.lot_size or 0.01) * 100.0, 2)
-                            existing_open_smc.realized_r = round(pts_stale / max(0.1, abs(entry_chk - (existing_open_smc.stop_loss or 0.0))), 2)
+                            ot.state = "CLOSED"
+                            ot.exit_price = close_px
+                            ot.exit_reason = "TP_HIT" if pts_stale > 0 else "SL_HIT"
+                            ot.closed_at = datetime.now(timezone.utc)
+                            ot.realized_pnl = round(pts_stale * (ot.lot_size or 0.01) * 100.0, 2)
+                            ot.realized_r = round(pts_stale / max(0.1, abs(entry_chk - (ot.stop_loss or 0.0))), 2)
                             await db.commit()
-                            logger.info("[PAPER-AUTO] Orphan-closed stale SMC trade %s (engine reset) @ %.2f", existing_open_smc.signal_id, close_px)
-                            existing_open_smc = None
+                            logger.info("[PAPER-AUTO] Orphan-closed stale SMC trade %s (TF %s inactive or anchor mismatch) @ %.2f", ot.signal_id, ot_tf, close_px)
 
                 for tf_key in smc_svc.timeframes:
                     s_card = smc_states.get(tf_key) or {}

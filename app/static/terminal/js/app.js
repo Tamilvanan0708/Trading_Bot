@@ -3927,6 +3927,26 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     </div>`;
   }
 
+  function renderTfButtons(d, curSelTf) {
+    return TFS.map(tf => {
+      const isSel = tf === curSelTf;
+      const isTradeActiveOnTf = d.timeframes?.[tf]?.is_trade_active;
+      const btnClass = isSel ? "btn btn-primary" : "btn btn-secondary";
+      const borderStyle = isTradeActiveOnTf ? "border:1px solid #00e676;box-shadow:0 0 8px rgba(0,230,118,0.3);" : "";
+      const activeBadge = isTradeActiveOnTf
+        ? `<span style="display:inline-flex;align-items:center;gap:4px;color:#00e676;font-size:10px;font-weight:800;margin-left:5px"><span class="dot dot-green" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#00e676;box-shadow:0 0 6px #00e676;animation:pulse 1.5s infinite"></span>ACTIVE</span>`
+        : "";
+      return `<button class="${btnClass}" onclick="window.__setStrategyTf('${strategyType}', '${tf}')" style="padding:6px 14px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;${borderStyle}">${TF_LABELS[tf]}${activeBadge}</button>`;
+    }).join(" ");
+  }
+
+  function renderLockMsg(d) {
+    const activeLockTf = d.active_trade_tf || d.cascading_active_tf;
+    return activeLockTf
+      ? `<span class="badge badge-green" style="font-size:12px">⚡ MULTI-SLOT: ${TF_LABELS[activeLockTf] || activeLockTf.toUpperCase()} ACTIVE · CONCURRENT SCANNING</span>`
+      : `<span class="badge badge-blue" style="font-size:12px">⚡ MULTI-SLOT: 5M · 15M · 30M · 1H CONCURRENT SCANNING</span>`;
+  }
+
   let _stratTimer = null;
   let isStratUpdating = false;
 
@@ -3959,6 +3979,12 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
 
       const lWrap = document.getElementById("strat-levels-table-wrap");
       if (lWrap) lWrap.innerHTML = renderLevelsTable(tfData.levels);
+
+      const bWrap = document.getElementById("strat-tf-buttons-wrap");
+      if (bWrap) bWrap.innerHTML = renderTfButtons(d, selectedTf);
+
+      const lMsgWrap = document.getElementById("strat-lock-msg-wrap");
+      if (lMsgWrap) lMsgWrap.innerHTML = renderLockMsg(d);
     } catch (_) {}
     finally {
       isStratUpdating = false;
@@ -3984,18 +4010,8 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const tfData = d.timeframes?.[selectedTf] || {};
     const activeCascadeTf = d.cascading_active_tf;
 
-    const activeLockTf = d.active_trade_tf || d.cascading_active_tf;
-    const tfButtons = TFS.map(tf => {
-      const isSel = tf === selectedTf;
-      const isTradeActiveOnTf = d.timeframes?.[tf]?.is_trade_active;
-      const btnClass = isSel ? "btn btn-primary" : "btn btn-secondary";
-      const activeDot = isTradeActiveOnTf ? " ●" : "";
-      return `<button class="${btnClass}" onclick="window.__setStrategyTf('${strategyType}', '${tf}')" style="padding:6px 14px;font-size:12px;font-weight:700">${TF_LABELS[tf]}${activeDot}</button>`;
-    }).join(" ");
-
-    const activeLockMsg = activeLockTf
-      ? `<span class="badge badge-green" style="font-size:12px">⚡ MULTI-SLOT: ${TF_LABELS[activeLockTf] || activeLockTf.toUpperCase()} ACTIVE · CONCURRENT SCANNING</span>`
-      : `<span class="badge badge-blue" style="font-size:12px">⚡ MULTI-SLOT: 5M · 15M · 30M · 1H CONCURRENT SCANNING</span>`;
+    const tfButtons = renderTfButtons(d, selectedTf);
+    const activeLockMsg = renderLockMsg(d);
 
     const scopeText = isFibTrend
       ? '15M · 30M · 1H · 2H · 4H (Multi-Slot Parallel Execution)'
@@ -4009,7 +4025,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         </div>
         <div class="toolbar" style="margin:0">
           <span class="badge badge-green" style="display:flex;align-items:center;gap:4px"><span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>LIVE AUTO-REFRESH</span>
-          ${activeLockMsg}
+          <span id="strat-lock-msg-wrap">${activeLockMsg}</span>
           <span class="badge badge-blue">SIGNAL ONLY</span>
           <span class="badge badge-red">REAL MONEY DISABLED</span>
         </div>
@@ -4020,7 +4036,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         <div class="row-between">
           <div style="display:flex;align-items:center;gap:10px">
             <span style="font-size:12px;font-weight:700;color:var(--text-dim)">SELECT TIMEFRAME:</span>
-            <div style="display:flex;gap:6px">${tfButtons}</div>
+            <div id="strat-tf-buttons-wrap" style="display:flex;gap:6px">${tfButtons}</div>
           </div>
           <div style="font-size:12px;color:var(--text-dim)">Engine Scope: <b style="color:#2962ff">${scopeText}</b></div>
         </div>
