@@ -284,9 +284,15 @@ class RetracementMultiTFMonitor:
             setup = slot.engine.setup
             repo = RetracementRepository(db)
 
-            # 1) Finalize a persisted active setup this timeframe just completed.
-            if setup is None and slot.last_completed is not None:
-                await self._finalize_completed(repo, tf, slot.last_completed)
+            # 1) Finalize a persisted active setup if this timeframe has no active setup in engine.
+            if setup is None:
+                persisted = await repo.load_latest_active(
+                    self.symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
+                if persisted is not None:
+                    if slot.last_completed is not None and _same_setup(persisted, slot.last_completed):
+                        await self._finalize_completed(repo, tf, slot.last_completed)
+                    else:
+                        await self._finalize_stale(repo, tf, persisted)
 
             # 2) Upsert the current active setup for THIS timeframe only.
             if setup is not None and setup.point_2_price is not None:

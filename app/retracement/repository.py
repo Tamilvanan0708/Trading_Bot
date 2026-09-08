@@ -5,6 +5,7 @@ RETRACEMENT_BOS_V1 — Repository for persisting setups and event history.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -110,10 +111,16 @@ class RetracementRepository:
         if timeframe is not None:
             stmt = stmt.where(RetracementSetupModel.timeframe == timeframe)
         stmt = stmt.where(RetracementSetupModel.state.notin_(["COMPLETED", "INVALIDATED"]))
-        stmt = stmt.order_by(RetracementSetupModel.updated_at.desc()).limit(1)
         res = await self.session.execute(stmt)
         row = res.scalar_one_or_none()
-        return row.to_domain() if row else None
+        if not row:
+            return None
+        # Reject stale ghost setups older than 12 hours
+        if row.updated_at:
+            up_dt = row.updated_at if row.updated_at.tzinfo else row.updated_at.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - up_dt).total_seconds() > 43200:
+                return None
+        return row.to_domain()
 
     async def load_all_setups(self, symbol: str | None = None, limit: int = 100) -> list[RetracementSetup]:
         stmt = select(RetracementSetupModel)
