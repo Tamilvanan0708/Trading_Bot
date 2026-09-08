@@ -638,18 +638,18 @@ def test_api_retracement_history_endpoint():
 # ===========================================================================
 
 def test_sidebar_has_retracement_bos_nav_item():
-    """The sidebar must contain the Retracement BOS navigation item."""
+    """The sidebar must contain the Retracement strategy navigation item."""
     import os
     p = os.path.join(ROOT, "app/static/terminal/index.html")
     with open(p, encoding="utf-8") as f:
         html = f.read()
-    assert "#/retracement" in html
-    assert "data-route=\"/retracement\"" in html
-    assert "Retracement BOS" in html
-    # Existing nav items must remain untouched
-    for route in ("/overview", "/live", "/signals", "/structure", "/smc", "/fib",
-                  "/ai", "/candidates", "/research", "/observation", "/paper",
-                  "/notifications", "/health", "/settings"):
+    assert "#/fib-retracement" in html
+    assert "data-route=\"/fib-retracement\"" in html
+    assert "Fib Retracement" in html
+    # Active nav items must remain intact
+    for route in ("/overview", "/live", "/signals", "/paper",
+                  "/smc-fib", "/fib-retracement", "/fib-trend",
+                  "/backtest", "/health", "/settings"):
         assert f"data-route=\"{route}\"" in html, f"missing nav {route}"
 
 
