@@ -470,6 +470,30 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     )
                 )).scalars().first()
 
+                # Orphan-trade cleanup: if the open SMC paper trade's engine has already COMPLETED/RESET
+                # (all engines show is_trade_active=False and NO_SETUP), close it at live price.
+                if existing_open_smc is not None:
+                    any_engine_still_active = any(
+                        (smc_states.get(tf) or {}).get("is_trade_active", False)
+                        for tf in smc_svc.timeframes
+                    )
+                    if not any_engine_still_active:
+                        # Engine has auto-reset; close the stale open trade
+                        entry_chk = existing_open_smc.actual_entry or existing_open_smc.target_entry or 0.0
+                        close_px = live_price if (live_price and live_price > 1000.0) else (existing_open_smc.stop_loss or entry_chk)
+                        if entry_chk > 0 and close_px and close_px > 1000.0:
+                            dir_chk = existing_open_smc.direction or "LONG"
+                            pts_stale = round((close_px - entry_chk) if dir_chk == "LONG" else (entry_chk - close_px), 2)
+                            existing_open_smc.state = "CLOSED"
+                            existing_open_smc.exit_price = close_px
+                            existing_open_smc.exit_reason = "TP_HIT" if pts_stale > 0 else "SL_HIT"
+                            existing_open_smc.closed_at = datetime.now(timezone.utc)
+                            existing_open_smc.realized_pnl = round(pts_stale * (existing_open_smc.lot_size or 0.01) * 100.0, 2)
+                            existing_open_smc.realized_r = round(pts_stale / max(0.1, abs(entry_chk - (existing_open_smc.stop_loss or 0.0))), 2)
+                            await db.commit()
+                            logger.info("[PAPER-AUTO] Orphan-closed stale SMC trade %s (engine reset) @ %.2f", existing_open_smc.signal_id, close_px)
+                            existing_open_smc = None
+
                 for tf_key in smc_svc.timeframes:
                     s_card = smc_states.get(tf_key) or {}
                     if not s_card.get("point_2") or not s_card.get("entry", {}).get("price"):
@@ -540,6 +564,24 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             await db.commit()
                     except Exception:
                         await db.rollback()
+
+                    # Track + close existing OPEN SMC trade if engine signals TP_HIT / SL_HIT / COMPLETED
+                    smc_outcome = s_card.get("outcome")  # "TP_HIT" | "SL_HIT" | None
+                    if existing_open_smc is not None and existing_open_smc.signal_id == sig_id and existing_open_smc.state == "OPEN":
+                        entry_chk = existing_open_smc.actual_entry or existing_open_smc.target_entry or 0.0
+                        if smc_outcome in ("TP_HIT", "SL_HIT") and entry_chk > 0:
+                            exit_reason = smc_outcome
+                            exit_px = tp_px if smc_outcome == "TP_HIT" else sl_px
+                            pts = round((tp_px - entry_chk) if dir_str == "LONG" else (entry_chk - tp_px), 2) if smc_outcome == "TP_HIT" else round((sl_px - entry_chk) if dir_str == "LONG" else (entry_chk - sl_px), 2)
+                            existing_open_smc.state = "CLOSED"
+                            existing_open_smc.exit_price = exit_px
+                            existing_open_smc.exit_reason = exit_reason
+                            existing_open_smc.closed_at = datetime.now(timezone.utc)
+                            existing_open_smc.realized_pnl = round(pts * (existing_open_smc.lot_size or 0.01) * 100.0, 2)
+                            existing_open_smc.realized_r = round(pts / max(0.1, abs(entry_chk - (existing_open_smc.stop_loss or 0.0))), 2)
+                            await db.commit()
+                            logger.info("[PAPER-AUTO] Engine %s closed SMC trade %s @ %.2f (+$%.2f)", smc_outcome, sig_id, exit_px, existing_open_smc.realized_pnl)
+                            existing_open_smc = None  # Allow next setup to open
 
                     # Single Active Trade Rule: Only open trade if no open SMC trade exists!
                     if s_card.get("is_entry_touched") and sig_id not in _in_flight_signals and existing_open_smc is None:
