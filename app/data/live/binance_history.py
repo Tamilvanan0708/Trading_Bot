@@ -112,6 +112,21 @@ class BinanceHistoryProvider(MarketDataProvider):
                 )
                 await asyncio.sleep(delay)
 
+        # Fallback to Binance Spot PAXGUSDT if Futures is geo-restricted (e.g. US cloud hosts like Render)
+        try:
+            logger.info("[BINANCE REST] Futures endpoints blocked/failed; attempting Binance Spot PAXGUSDT fallback.")
+            spot_params = dict(params)
+            spot_params["symbol"] = "PAXGUSDT"
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers={"User-Agent": user_agents[0]}) as client:
+                res = await client.get("https://api.binance.com/api/v3/klines", params=spot_params)
+                if res.status_code == 200:
+                    data = res.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        logger.info("[BINANCE REST] Successfully loaded %d candles via Spot PAXGUSDT fallback.", len(data))
+                        return data
+        except Exception as spot_exc:  # noqa: BLE001
+            logger.warning("[BINANCE REST] Spot PAXGUSDT fallback failed: %s", spot_exc)
+
         raise RuntimeError(f"Binance history fetch failed after {max_retries + 1} attempts: {last_exc}")
 
     async def get_ohlcv(
