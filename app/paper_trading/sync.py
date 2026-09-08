@@ -341,7 +341,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             "strategy": "Fib Retracement",
                                             "layer": l_key,
                                             "direction": f_state.direction,
-                                            "symbol": exec_cfg.mt5_symbol or "XAUUSD",
+                                            "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
                                             "lot_size": trade_lot,
                                             "entry_price": entry_px,
                                             "stop_loss": sl_px,
@@ -862,6 +862,47 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                 select(PaperTradeModel).where(PaperTradeModel.state == "OPEN")
             )).scalars().all()
 
+            # MT5 Bridge Catch-Up: Dispatch any currently OPEN Fib Retracement trades
+            # that have not yet been sent to MT5 (e.g. if the trade opened before MT5 bridge was toggled ON)
+            if exec_cfg.mt5_bridge_enabled:
+                try:
+                    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                    mgr = get_mt5_bridge_manager()
+                    for ot in open_trades:
+                        if not mgr.is_paper_trade_enqueued(ot.id):
+                            sig_s = (ot.signal_id or "").upper()
+                            is_fib_retr = "FIB_RETR" in sig_s or any("RETRACEMENT" in str(l) for l in (ot.state_logs or []))
+                            if is_fib_retr:
+                                ot_entry = ot.actual_entry or ot.target_entry or 0.0
+                                ot_sl = ot.stop_loss or 0.0
+                                ot_tp = ot.take_profit_1 or 0.0
+                                if ot_entry > 0:
+                                    layer_name = "L1"
+                                    for lk in ("L1", "L2", "L3"):
+                                        if lk in sig_s:
+                                            layer_name = lk
+                                            break
+                                    sl_d = round(abs(ot_entry - ot_sl), 2) if ot_sl > 0 else 3.0
+                                    tp_d = round(abs(ot_tp - ot_entry), 2) if ot_tp > 0 else 3.0
+                                    mgr.enqueue_order({
+                                        "id": f"mt5-{ot.id[:8]}",
+                                        "paper_trade_id": ot.id,
+                                        "strategy": "Fib Retracement",
+                                        "layer": layer_name,
+                                        "direction": ot.direction,
+                                        "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                        "lot_size": ot.lot_size or 0.01,
+                                        "entry_price": ot_entry,
+                                        "stop_loss": ot_sl,
+                                        "take_profit_1": ot_tp,
+                                        "sl_points": sl_d,
+                                        "tp_points": tp_d,
+                                        "execution_mode": "POINTS_DISTANCE",
+                                    })
+                                    logger.info("[MT5-BRIDGE] Catch-up dispatched active open trade %s (Fib Retr %s) to MT5", ot.id, layer_name)
+                except Exception as mt5_catch_err:
+                    logger.warning("[MT5-BRIDGE] Catch-up sync error: %s", mt5_catch_err)
+
             for t in open_trades:
                 entry = t.actual_entry or t.target_entry or 0.0
                 if entry <= 0:
@@ -944,7 +985,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                             get_mt5_bridge_manager().enqueue_close(
                                 paper_trade_id=t.id,
-                                symbol=exec_cfg.mt5_symbol or "XAUUSD",
+                                symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
                                 reason=t.exit_reason or "CLOSED",
                             )
                         except Exception as mt5_err:

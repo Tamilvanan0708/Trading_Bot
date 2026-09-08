@@ -104,9 +104,17 @@ class MT5BridgeManager:
                 "recent_executions": self._execution_history[-10:],
             }
 
-    # ------------------------------------------------------------------
-    # Order Dispatching (Strict Fib Retracement Filter & Lot Clamping)
-    # ------------------------------------------------------------------
+    def is_paper_trade_enqueued(self, paper_trade_id: str | None) -> bool:
+        """Check whether a paper trade has already been queued or dispatched to MT5."""
+        if not paper_trade_id:
+            return False
+        with self._lock:
+            for order in self._orders.values():
+                if order.get("paper_trade_id") == str(paper_trade_id):
+                    return True
+            if str(paper_trade_id) in self._paper_trade_to_ticket:
+                return True
+        return False
 
     def enqueue_order(self, order_data: dict[str, Any]) -> dict[str, Any]:
         """
