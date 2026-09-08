@@ -501,8 +501,9 @@ class DualRetracementEngine:
                     setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f}) before entry."
                     return events
 
-                # Update dynamic target if new high forms (before any layer fills)
+                new_high_made = False
                 if candle.high > (setup.current_high_price or 0.0):
+                    new_high_made = True
                     setup.current_high_price = candle.high
                     setup.current_high_timestamp = candle.timestamp
                     # Bounded span for scalping: roll anchor up if span > 35 pts and a higher swing low exists
@@ -516,8 +517,12 @@ class DualRetracementEngine:
                     self._apply_bullish_fib(setup, setup.point_2_price, candle.high)
 
             # 2. Fill layers on pullback touch (3-Tranche Scaling System)
-            #    L1 @ 0.618, L2 @ 0.500, L3 @ 0.382 — all SL @ 0.236.
-            new_fills = self._fill_long_layers(candle)
+            #    A true pullback retracement occurs AFTER the expansion high is formed.
+            #    If this candle set a NEW HIGH (expansion move), the candle's low occurred BEFORE/during
+            #    the expansion push (e.g. bullish candle or wick), so it is not a retracement of the new high.
+            #    Exception: Bearish reversal bar where open was the high (candle.open >= candle.high - 0.05).
+            can_fill = (not new_high_made) or (candle.open >= candle.high - 0.05)
+            new_fills = self._fill_long_layers(candle) if can_fill else []
             for layer in new_fills:
                 events.append(RetracementEvent(
                     setup_id=setup.setup_id,
@@ -566,8 +571,9 @@ class DualRetracementEngine:
                     setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f}) before entry."
                     return events
 
-                # Update dynamic target if new low forms (before any layer fills)
+                new_low_made = False
                 if candle.low < (setup.current_high_price or float("inf")):
+                    new_low_made = True
                     setup.current_high_price = candle.low
                     setup.current_high_timestamp = candle.timestamp
                     # Bounded span for scalping: roll anchor down if span > 35 pts and a lower swing high exists
@@ -581,7 +587,12 @@ class DualRetracementEngine:
                     self._apply_bearish_fib(setup, setup.point_2_price, candle.low)
 
             # 2. Fill layers on pullback touch (SHORT: price rallies UP to the level)
-            new_fills = self._fill_short_layers(candle)
+            #    A true pullback retracement occurs AFTER the expansion low is formed.
+            #    If this candle set a NEW LOW (downward expansion), the candle's high occurred BEFORE/during
+            #    the drop, so it is not a retracement of the new low.
+            #    Exception: Bullish reversal bar where open was the low (candle.open <= candle.low + 0.05).
+            can_fill = (not new_low_made) or (candle.open <= candle.low + 0.05)
+            new_fills = self._fill_short_layers(candle) if can_fill else []
             for layer in new_fills:
                 events.append(RetracementEvent(
                     setup_id=setup.setup_id,

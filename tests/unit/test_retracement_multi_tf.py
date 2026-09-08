@@ -497,3 +497,27 @@ def test_multi_section_has_no_monetary_pnl():
     assert not monetary, f"monetary $ found: {monetary}"
     assert "P&L" not in section
     assert "PTS" in section
+
+
+def test_new_high_bar_does_not_fill_pullback_on_same_bar():
+    """A candle that pushes to a new expansion high must not use its own low
+    (which occurred before the push) to trigger a premature retracement fill."""
+    from app.retracement.dual_engine import DualRetracementEngine
+
+    series = _m15_waiting_series()
+    engine = DualRetracementEngine("XAUUSD", "15m")
+    for c in series:
+        engine.process_candle(c)
+
+    setup = engine.setup
+    assert setup is not None and setup.state == RetracementState.TP_DYNAMIC
+
+    # Push bar with a new high (135.0 > 125.5) and low at 120.0 (below 0.618 level 121.3, but above SL 117.1)
+    last_ts = series[-1].timestamp
+    push = _bar(last_ts + _DT, 125.0, 135.0, 120.0, 133.0)
+    engine.process_candle(push)
+
+    # Must remain in TP_DYNAMIC with zero layers filled because this bar set the new high
+    assert engine.setup.state == RetracementState.TP_DYNAMIC
+    assert len(engine.setup.layers) == 0
+    assert engine.setup.entry_touched is False
