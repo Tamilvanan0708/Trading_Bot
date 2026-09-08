@@ -126,10 +126,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                 active_setup_by_tf: dict[str, str] = {}
                 for ot in existing_open_trades:
                     if ot.signal_id:
-                        # format: FIB_RETR_{TF}_{LAYER}_{ANCHOR}
+                        # format: FIB_RETR_{TF}_{LAYER}_{ANCHOR} or FIB_RETR_{TF}_{LAYER}_{ANCHOR}_{TS}
                         parts = ot.signal_id.split("_")
                         if len(parts) >= 5 and parts[2].lower() in fib_svc.timeframes:
-                            active_setup_by_tf[parts[2].lower()] = parts[4]
+                            active_setup_by_tf[parts[2].lower()] = "_".join(parts[4:])
 
                 allowed_tfs = [tf.lower() for tf in (exec_cfg.fib_retracement_timeframes or ["5m", "15m", "30m", "1h"])]
                 for tf_key in fib_svc.timeframes:
@@ -139,6 +139,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     if not f_state or not getattr(f_state, "layers", None) or not getattr(f_state, "point_2_price", None):
                         continue
 
+                    p2_ts = getattr(f_state, "point_2_timestamp", None)
+                    anchor_ts = int(p2_ts.timestamp()) if (p2_ts and hasattr(p2_ts, "timestamp")) else int(f_state.point_2_price)
+                    current_anchor = f"{int(f_state.point_2_price)}_{anchor_ts}"
+
                     for l_key, layer in f_state.layers.items():
                         ratio_val = 0.618 if l_key == "L1" else (0.500 if l_key == "L2" else 0.382)
                         attr = f"fib_{ratio_val:.3f}".replace(".", "_")
@@ -147,7 +151,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             continue
                         l_state = layer.get("state", "PENDING") if layer else "PENDING"
                         l_tp = float(f_state.fib_1_000 if l_key == "L1" else (f_state.fib_0_618 or 0.0))
-                        sig_id = f"FIB_RETR_{tf_key.upper()}_{l_key}_{int(f_state.point_2_price)}"
+                        sig_id = f"FIB_RETR_{tf_key.upper()}_{l_key}_{current_anchor}"
 
                         # Determine true Stop Loss:
                         base_sl = float(f_state.fib_0_236 or 0.0)
@@ -214,9 +218,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             # Option 1A: Multi-Slot Parallel Execution
                             # Timeframe isolation: an active trade on another timeframe does NOT block tf_key!
                             # Within the same timeframe slot, if a trade with a DIFFERENT anchor is still open, wait.
-                            current_anchor = str(int(f_state.point_2_price))
                             tf_active_anchor = active_setup_by_tf.get(tf_key)
-                            if tf_active_anchor and tf_active_anchor != current_anchor:
+                            if tf_active_anchor and tf_active_anchor != current_anchor and not current_anchor.startswith(tf_active_anchor + "_"):
                                 continue
 
                             existing = (await db.execute(
@@ -396,9 +399,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                                     # 3. Smart Shield Immediate Trigger: When L2 or L3 hits TP, trail L1 SL
                                     if exec_cfg.smart_shield_enabled and l_key in ("L2", "L3"):
-                                        l1_sig_id = f"FIB_RETR_{tf_key.upper()}_L1_{int(f_state.point_2_price)}"
                                         l1_trade = (await db.execute(
-                                            select(PaperTradeModel).where(PaperTradeModel.signal_id == l1_sig_id, PaperTradeModel.state == "OPEN")
+                                            select(PaperTradeModel).where(
+                                                PaperTradeModel.signal_id.like(f"FIB_RETR_{tf_key.upper()}_L1_{int(f_state.point_2_price)}%"),
+                                                PaperTradeModel.state == "OPEN",
+                                            )
                                         )).scalars().first()
                                         if l1_trade:
                                             new_l1_sl = float(f_state.fib_0_618 or 0.0) if exec_cfg.smart_shield_level == "0.618" else float(f_state.fib_0_500 or 0.0)
@@ -442,11 +447,21 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                     p2 = s_card.get("point_2", {}).get("price") or 0.0
                     p1 = s_card.get("point_1", {}).get("price") or 0.0
+                    p2_ts = s_card.get("point_2", {}).get("timestamp") or s_card.get("point_2", {}).get("time")
+                    ts_suffix = ""
+                    if p2_ts:
+                        try:
+                            if isinstance(p2_ts, str):
+                                ts_suffix = f"_{int(datetime.fromisoformat(p2_ts.replace('Z', '+00:00')).timestamp())}"
+                            elif hasattr(p2_ts, "timestamp"):
+                                ts_suffix = f"_{int(p2_ts.timestamp())}"
+                        except Exception:
+                            pass
                     dir_str = str(s_card.get("direction", "SHORT")).upper()
                     entry_px = float(s_card.get("entry", {}).get("price") or 0.0)
                     sl_px = float(s_card.get("sl", {}).get("price") or 0.0)
                     tp_px = float(s_card.get("tp", {}).get("locked") or s_card.get("tp", {}).get("dynamic") or s_card.get("tp", {}).get("price") or 0.0)
-                    sig_id = f"SMC_FIB_{tf_key.upper()}_{int(p2)}"
+                    sig_id = f"SMC_FIB_{tf_key.upper()}_{int(p2)}{ts_suffix}"
                     sig_state = "FILLED" if s_card.get("is_entry_touched") else "PENDING"
 
                     # Sync Signal Model
@@ -637,7 +652,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         continue
 
                     dir_str = "LONG" if eng.direction == SignalDirection.LONG else "SHORT"
-                    sig_id = f"FIB_TREND_{tf_key.upper()}_{dir_str}_{int(eng.point_0_price or 0)}"
+                    p0_ts = getattr(eng, "point_0_ts", None)
+                    p0_ts_suffix = f"_{int(p0_ts.timestamp())}" if (p0_ts and hasattr(p0_ts, "timestamp")) else ""
+                    sig_id = f"FIB_TREND_{tf_key.upper()}_{dir_str}_{int(eng.point_0_price or 0)}{p0_ts_suffix}"
                     t_state = "FILLED" if eng.state in (FibTrendState.TRADE_ACTIVE, FibTrendState.COMPLETED) else "PENDING"
                     t_entry = float(eng.entry_price or eng.trigger_breakout_price or 0.0)
                     t_sl = float(eng.sl_price or eng.fib_0_236 or 0.0)

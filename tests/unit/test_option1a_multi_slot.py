@@ -161,3 +161,74 @@ async def test_paper_trading_parallel_slot_execution(in_memory_db: AsyncSession)
 
     assert "15m" in trade_tfs
     assert "30m" in trade_tfs, "30m paper trade must execute in parallel without cross-timeframe block!"
+
+
+@pytest.mark.asyncio
+async def test_paper_trading_timestamped_anchor_avoids_collision(in_memory_db: AsyncSession):
+    import app.paper_trading.sync as pt_sync
+
+    # Simulate an OLD closed trade from yesterday with anchor price 4418
+    old_trade = PaperTradeModel(
+        signal_id="FIB_RETR_5M_L1_4418",
+        symbol="XAUUSD",
+        direction="BUY",
+        state="CLOSED",
+        lot_size=0.01,
+        risk_amount=8.0,
+        target_entry=4420.0,
+        actual_entry=4420.0,
+        stop_loss=4415.0,
+        take_profit_1=4430.0,
+        take_profit_2=4430.0,
+        take_profit_3=4430.0,
+        opened_at=datetime(2026, 9, 7, 18, 15, tzinfo=timezone.utc),
+        closed_at=datetime(2026, 9, 7, 19, 0, tzinfo=timezone.utc),
+        exit_price=4430.0,
+        exit_reason="TP_HIT",
+    )
+    in_memory_db.add(old_trade)
+    await in_memory_db.commit()
+
+    # Now simulate today's monitor returning 5M active setup with anchor price 4418 but fresh timestamp
+    p2_time = datetime(2026, 9, 8, 2, 5, tzinfo=timezone.utc)
+    from app.retracement.models import RetracementSetup
+    fresh_state = RetracementSetup(
+        direction="LONG",
+        point_1_price=4425.0,
+        point_2_price=4418.0,
+        point_2_timestamp=p2_time,
+        fib_0_618=4421.0,
+        fib_0_500=4420.0,
+        fib_0_382=4419.0,
+        fib_0_236=4416.0,
+        fib_1_000=4426.0,
+        layers={
+            "L1": {"state": "FILLED", "entry_price": 4421.0, "tp": 4426.0},
+            "L2": {"state": "FILLED", "entry_price": 4420.0, "tp": 4426.0},
+            "L3": {"state": "FILLED", "entry_price": 4419.0, "tp": 4426.0},
+        }
+    )
+
+    class FakeMonitor:
+        timeframes = ["5m"]
+        async def advance(self, db):
+            return {"5m": fresh_state}
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: FakeMonitor())
+
+    await sync_strategy_paper_trades(in_memory_db, force=True)
+    monkeypatch.undo()
+
+    # Query all open trades: L1 MUST be executed and not skipped!
+    open_trades = (await in_memory_db.execute(
+        select(PaperTradeModel).where(
+            PaperTradeModel.state == "OPEN",
+            PaperTradeModel.signal_id.like("FIB_RETR_5M_%"),
+        )
+    )).scalars().all()
+
+    open_layers = {t.signal_id.split("_")[3] for t in open_trades}
+    assert "L1" in open_layers, "L1 must be opened and not skipped due to yesterday's 4418 trade!"
+    assert "L2" in open_layers
+    assert "L3" in open_layers
