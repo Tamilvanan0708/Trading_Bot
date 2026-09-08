@@ -230,7 +230,14 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             sl_px = sig_sl
                             tp_px = float(layer.get("tp") or f_state.fib_1_000 or 0.0)
 
-                            if not existing and entry_px > 0:
+                            if not existing and entry_px > 0 and layer.get("state") == "FILLED":
+                                # If live price has already reached TP or SL, do not open a stale trade
+                                if live_price is not None:
+                                    if f_state.direction == "LONG" and (live_price >= tp_px or live_price <= sl_px):
+                                        continue
+                                    if f_state.direction == "SHORT" and (live_price <= tp_px or live_price >= sl_px):
+                                        continue
+
                                 _in_flight_signals.add(sig_id)
                                 try:
                                     # --- AI VALIDATION GATE ---
