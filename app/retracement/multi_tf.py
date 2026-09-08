@@ -30,6 +30,7 @@ strategy rules — each engine remains 100% deterministic over real candles.
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime
 from typing import Any
 
@@ -40,7 +41,7 @@ from app.retracement.dual_engine import DualRetracementEngine
 from app.retracement.models import RetracementSetup, RetracementState
 from app.retracement.repository import RetracementRepository
 
-DEFAULT_TIMEFRAMES = ["5m"]
+DEFAULT_TIMEFRAMES = ["5m", "15m", "30m", "1h"]
 TF_MAP: dict[str, TimeFrame] = {
     "5m": TimeFrame.M5,
     "15m": TimeFrame.M15,
@@ -130,6 +131,9 @@ class RetracementMultiTFMonitor:
 
     async def _bootstrap_from_history(self) -> dict[str, list]:
         """Load real historical candles via Binance REST provider in parallel."""
+        if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("APP_ENV") == "test":
+            return {}
+
         import time
         now = time.time()
         if getattr(self, "_cached_hist_candles", None) and (now - getattr(self, "_last_bootstrap_ts", 0) < 120.0):

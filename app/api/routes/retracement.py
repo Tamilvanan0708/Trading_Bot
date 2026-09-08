@@ -426,7 +426,7 @@ async def advance_forward(symbol: str = "XAUUSD", timeframe: str = "15m"):
 def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict,
                                slots: dict, strategy_label: str) -> dict:
     """Build the unified strategy dashboard payload for either strategy panel with Strict 1-Trade Active Lock."""
-    TIMEFRAMES_ORDER = ["5m"]
+    TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h"]
     raw_cards = {}
     active_trade_tf = None
 
@@ -547,7 +547,7 @@ async def get_smc_fib_dashboard(
     except Exception:  # noqa: BLE001
         pass
 
-    TIMEFRAMES_ORDER = ["5m"]
+    TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h"]
     smc_multi = get_smc_fib_multi_tf_service(symbol)
     try:
         states = await asyncio.wait_for(smc_multi.advance(db), timeout=4.0)

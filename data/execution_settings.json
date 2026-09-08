@@ -7,7 +7,10 @@
   "target_risk_usd": 100.0,
   "fixed_lot_size": 0.05,
   "fib_retracement_timeframes": [
-    "5m"
+    "5m",
+    "15m",
+    "30m",
+    "1h"
   ],
   "smart_shield_enabled": true,
   "smart_shield_level": "0.618",

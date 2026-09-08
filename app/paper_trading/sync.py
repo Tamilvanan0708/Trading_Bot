@@ -131,7 +131,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         if len(parts) >= 5 and parts[2].lower() in fib_svc.timeframes:
                             active_setup_by_tf[parts[2].lower()] = parts[4]
 
-                allowed_tfs = [tf.lower() for tf in (exec_cfg.fib_retracement_timeframes or ["5m"])]
+                allowed_tfs = [tf.lower() for tf in (exec_cfg.fib_retracement_timeframes or ["5m", "15m", "30m", "1h"])]
                 for tf_key in fib_svc.timeframes:
                     if tf_key.lower() not in allowed_tfs:
                         continue
