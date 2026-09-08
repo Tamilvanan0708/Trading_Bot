@@ -3110,11 +3110,19 @@ function renderPaperTradeRows(trades, currSym = "₹", leverage = 500) {
       }
     }
 
+    const tfVal = String(t.timeframe || (t.signal_id && t.signal_id.includes("_1H_") ? "1H" : (t.signal_id && t.signal_id.includes("_30M_") ? "30M" : (t.signal_id && t.signal_id.includes("_15M_") ? "15M" : "5M")))).toUpperCase();
+    let tfBadgeStyle = "background:rgba(33,150,243,0.15);color:#2196f3;border:1px solid #2196f3;";
+    if (tfVal === "15M") tfBadgeStyle = "background:rgba(0,188,212,0.15);color:#00e5ff;border:1px solid #00e5ff;";
+    else if (tfVal === "30M") tfBadgeStyle = "background:rgba(255,152,0,0.15);color:#ff9800;border:1px solid #ff9800;";
+    else if (tfVal === "1H") tfBadgeStyle = "background:rgba(156,39,176,0.15);color:#ba68c8;border:1px solid #ba68c8;";
+    else if (tfVal === "4H") tfBadgeStyle = "background:rgba(233,30,99,0.15);color:#f06292;border:1px solid #f06292;";
+    const tfBadge = `<span class="badge" style="${tfBadgeStyle}font-weight:700;font-size:10px;padding:2px 6px;letter-spacing:0.5px" title="Timeframe: ${tfVal}">${tfVal}</span>`;
+
     const rrStr = t.risk_reward ? `1:${Number(t.risk_reward).toFixed(1)}` : '1:1.8';
 
     return `<tr class="${trancheClass} ${outcomeRowClass}">
       <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
-      <td>${stratBadge} <span class="badge badge-dim" style="font-size:10px">${t.layer || ''}</span></td>
+      <td>${stratBadge} ${tfBadge} <span class="badge badge-dim" style="font-size:10px">${t.layer || ''}</span></td>
       <td>${UI.dirBadge(t.direction)}</td>
       <td class="num font-mono" style="font-weight:600">
         <div>${lotVal.toFixed(2)} Lot</div>
@@ -3165,6 +3173,7 @@ Routes["/paper"] = (mount) => {
     let activeStrat = "ALL";
     let activeOutcome = "";
     let activeDir = "";
+    let activeTf = "";
     let searchQuery = "";
 
     function getFilteredTrades() {
@@ -3184,8 +3193,11 @@ Routes["/paper"] = (mount) => {
 
         if (activeDir && String(t.direction || "").toUpperCase() !== activeDir) return false;
 
+        const tTf = String(t.timeframe || (t.signal_id && t.signal_id.includes("_1H_") ? "1H" : (t.signal_id && t.signal_id.includes("_30M_") ? "30M" : (t.signal_id && t.signal_id.includes("_15M_") ? "15M" : "5M")))).toUpperCase();
+        if (activeTf && tTf !== activeTf) return false;
+
         if (q) {
-          const str = `${t.id || ''} ${t.strategy || ''} ${t.layer || ''} ${t.direction || ''} ${t.entry_price || ''} ${t.status || ''}`.toLowerCase();
+          const str = `${t.id || ''} ${t.strategy || ''} ${tTf} ${t.layer || ''} ${t.direction || ''} ${t.entry_price || ''} ${t.status || ''}`.toLowerCase();
           if (!str.includes(q)) return false;
         }
         return true;
@@ -3230,7 +3242,7 @@ Routes["/paper"] = (mount) => {
         UI.toast("Export", "No paper trades to export.", "amber");
         return;
       }
-      const headers = ["Opened_At", "Strategy", "Layer", "Direction", "Lots", "Used_Margin", "Entry_Price", "Exit_Price", "Running_Pts", "PnL", "Risk_Reward", "SL", "TP1", "TP2", "Status"];
+      const headers = ["Opened_At", "Strategy", "Timeframe", "Layer", "Direction", "Lots", "Used_Margin", "Entry_Price", "Exit_Price", "Running_Pts", "PnL", "Risk_Reward", "SL", "TP1", "TP2", "Status"];
       const lines = [headers.join(",")];
       list.forEach(t => {
         const entry = t.entry_price || t.actual_entry || t.target_entry || "";
@@ -3241,9 +3253,11 @@ Routes["/paper"] = (mount) => {
         const rr = t.risk_reward ? `1:${Number(t.risk_reward).toFixed(1)}` : "1:1.8";
         const lotVal = Number(t.lot_size != null ? t.lot_size : 0.01);
         const marginReq = ((lotVal * 100.0 * (Number(entry) || 4435.0)) / leverage).toFixed(2);
+        const tTf = String(t.timeframe || (t.signal_id && t.signal_id.includes("_1H_") ? "1H" : (t.signal_id && t.signal_id.includes("_30M_") ? "30M" : (t.signal_id && t.signal_id.includes("_15M_") ? "15M" : "5M")))).toUpperCase();
         lines.push([
           `"${t.opened_at || t.created_at || ""}"`,
           `"${t.strategy || ""}"`,
+          `"${tTf}"`,
           t.layer || "",
           t.direction || "LONG",
           lotVal.toFixed(2),
@@ -3343,6 +3357,15 @@ Routes["/paper"] = (mount) => {
           updateTableView();
         });
       });
+
+      // Wire timeframe select
+      const tfSel = mount.querySelector("#paper-filter-tf");
+      if (tfSel) {
+        tfSel.addEventListener("change", (e) => {
+          activeTf = e.target.value;
+          updateTableView();
+        });
+      }
 
       // Wire outcome select
       const outSel = mount.querySelector("#paper-filter-outcome");
@@ -3483,6 +3506,14 @@ Routes["/paper"] = (mount) => {
 
         <!-- Filter Controls -->
         <div class="row" style="gap:8px;flex-wrap:wrap">
+          <select class="input" id="paper-filter-tf" style="min-width:115px">
+            <option value="">All Timeframes</option>
+            <option value="5M">⏱️ 5M</option>
+            <option value="15M">⏱️ 15M</option>
+            <option value="30M">⏱️ 30M</option>
+            <option value="1H">⏱️ 1H</option>
+            <option value="4H">⏱️ 4H</option>
+          </select>
           <select class="input" id="paper-filter-outcome" style="min-width:125px">
             <option value="">All Outcomes</option>
             <option value="WIN">🟢 Wins (Profit)</option>
@@ -3494,7 +3525,7 @@ Routes["/paper"] = (mount) => {
             <option value="LONG">▲ LONG</option>
             <option value="SHORT">▼ SHORT</option>
           </select>
-          <input class="input" id="paper-search" placeholder="Search price, layer…" style="min-width:150px">
+          <input class="input" id="paper-search" placeholder="Search price, layer, TF…" style="min-width:150px">
           <button class="btn btn-sm" id="btn-export-paper-csv" title="Export paper trades to CSV">📥 Export CSV</button>
           <button class="btn btn-sm" id="btn-repair-paper" style="border-color:#388e3c;color:#81c784" title="Repair false SL losses by applying Smart Shield trailing">🔧 Repair SL</button>
           <button class="btn btn-sm" id="btn-reset-paper" style="border-color:#e53935;color:#ef9a9a;background:rgba(229,57,53,0.1);font-weight:700" title="Completely clear paper trade history and start fresh with ₹10,000 Cent Account">🔄 Reset Account</button>
@@ -3506,7 +3537,7 @@ Routes["/paper"] = (mount) => {
         <thead>
           <tr>
             <th>Opened</th>
-            <th>Strategy / Layer</th>
+            <th>Strategy / TF / Layer</th>
             <th>Direction</th>
             <th>Lots & Margin</th>
             <th>Entry Price</th>

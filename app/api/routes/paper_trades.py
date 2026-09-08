@@ -35,6 +35,24 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
 
     sig = (t.signal_id or "").upper()
     logs_str = str(t.state_logs or "").upper()
+
+    # Determine Timeframe (5M, 15M, 30M, 1H, 2H, 4H, etc.)
+    tf = None
+    if t.state_logs and isinstance(t.state_logs, list):
+        for log in t.state_logs:
+            if isinstance(log, dict) and log.get("timeframe"):
+                tf = str(log["timeframe"]).upper()
+                break
+    if not tf and sig:
+        for candidate in ["15M", "30M", "1H", "2H", "4H", "5M", "1D"]:
+            if f"_{candidate}_" in sig or f"_{candidate}" in sig or sig.startswith(f"{candidate}_"):
+                tf = candidate
+                break
+    if not tf and getattr(t, "signal", None) and getattr(t.signal, "timeframe", None):
+        tf = str(t.signal.timeframe).upper()
+    if not tf:
+        tf = "5M"
+
     if "FIB_TREND" in sig or "TREND" in sig or "TREND" in logs_str:
         strat_name = "FIB GO WITH TREND"
         layer_name = "Breakout (0.618)"
@@ -60,6 +78,7 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
         "signal_id": t.signal_id,
         "symbol": t.symbol,
         "strategy": strat_name,
+        "timeframe": tf,
         "layer": layer_name,
         "direction": t.direction,
         "state": t.state,
