@@ -289,8 +289,10 @@ async def repair_paper_trades(db: AsyncSession = Depends(get_db_session)):
     for t in trades:
         sig = t.signal_id or ""
         if "FIB_RETR" in sig and "_L1_" in sig and t.state == "CLOSED" and t.exit_reason == "SL_HIT":
-            base_anchor = sig.split("_L1_")[-1]
-            l2_sig = f"FIB_RETR_5M_L2_{base_anchor}"
+            parts = sig.split("_L1_")
+            tf_prefix = parts[0]  # e.g. FIB_RETR_5M, FIB_RETR_15M, FIB_RETR_30M, FIB_RETR_1H
+            base_anchor = parts[1]
+            l2_sig = f"{tf_prefix}_L2_{base_anchor}"
             l2_trade = next((other for other in trades if other.signal_id == l2_sig), None)
 
             if l2_trade and l2_trade.exit_reason == "TP_HIT":

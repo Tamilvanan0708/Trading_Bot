@@ -109,21 +109,19 @@ class BacktestEngine:
                         trade.exit_time = curr_bar.timestamp
                         trade.exit_reason = "STOP_LOSS_HIT"
                         trade.state = TradeState.STOP_LOSS_HIT
-                        loss_per_unit = trade.entry_price - effective_sl
+                        loss_per_unit = effective_sl - trade.entry_price
                         trade.pnl_usd = round(trade.lot_size * loss_per_unit * 100.0 - txn_cost, 2)
                         trade.pnl_r = -1.0
                         closed = True
-                    elif curr_bar.high >= effective_tp3:
-                        trade.exit_price = effective_tp3
+                    elif curr_bar.high >= effective_tp2:
+                        trade.exit_price = effective_tp2
                         trade.exit_time = curr_bar.timestamp
-                        trade.exit_reason = "TP3_HIT"
-                        trade.state = TradeState.TP3_HIT
+                        trade.exit_reason = "TP2_HIT"
+                        trade.state = TradeState.TP2_HIT
                         dist = trade.exit_price - trade.entry_price
                         trade.pnl_usd = round(trade.lot_size * dist * 100.0 - txn_cost, 2)
                         trade.pnl_r = round(dist / max(0.1, trade.entry_price - trade.stop_loss), 2)
                         closed = True
-                    elif curr_bar.high >= effective_tp2 and trade.state != TradeState.TP2_HIT:
-                        trade.state = TradeState.TP2_HIT
                     elif curr_bar.high >= effective_tp1 and trade.state == TradeState.ENTRY_HIT:
                         trade.state = TradeState.TP1_HIT
 
@@ -138,21 +136,19 @@ class BacktestEngine:
                         trade.exit_time = curr_bar.timestamp
                         trade.exit_reason = "STOP_LOSS_HIT"
                         trade.state = TradeState.STOP_LOSS_HIT
-                        loss_per_unit = effective_sl - trade.entry_price
+                        loss_per_unit = trade.entry_price - effective_sl
                         trade.pnl_usd = round(trade.lot_size * loss_per_unit * 100.0 - txn_cost, 2)
                         trade.pnl_r = -1.0
                         closed = True
-                    elif curr_bar.low <= effective_tp3:
-                        trade.exit_price = effective_tp3
+                    elif curr_bar.low <= effective_tp2:
+                        trade.exit_price = effective_tp2
                         trade.exit_time = curr_bar.timestamp
-                        trade.exit_reason = "TP3_HIT"
-                        trade.state = TradeState.TP3_HIT
+                        trade.exit_reason = "TP2_HIT"
+                        trade.state = TradeState.TP2_HIT
                         dist = trade.entry_price - trade.exit_price
                         trade.pnl_usd = round(trade.lot_size * dist * 100.0 - txn_cost, 2)
                         trade.pnl_r = round(dist / max(0.1, trade.stop_loss - trade.entry_price), 2)
                         closed = True
-                    elif curr_bar.low <= effective_tp2 and trade.state != TradeState.TP2_HIT:
-                        trade.state = TradeState.TP2_HIT
                     elif curr_bar.low <= effective_tp1 and trade.state == TradeState.ENTRY_HIT:
                         trade.state = TradeState.TP1_HIT
 
