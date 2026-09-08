@@ -105,10 +105,12 @@ def _appended_high_leg(candles, target=135.0, confirm=True):
     new_leg, _ = _leg(last_ts, candles[-1].close, target, bars=5, spread=0.5, gap=0.3)
     if not confirm:
         return candles + new_leg
+    # Confirming bars must have highs STRICTLY below the peak's high (target + 0.5)
+    # so that detect_swings recognises the peak bar as a confirmed swing HIGH.
     confirm_bars = [
-        _bar(new_leg[-1].timestamp + _DT, target, target + 0.5, target - 1.0, target - 1.0),
-        _bar(new_leg[-1].timestamp + 2 * _DT, target - 1.0, target - 0.5, target - 2.0, target - 1.5),
-        _bar(new_leg[-1].timestamp + 3 * _DT, target - 1.5, target - 1.2, target - 2.5, target - 2.0),
+        _bar(new_leg[-1].timestamp + _DT, target - 1.0, target - 0.5, target - 2.0, target - 1.5),
+        _bar(new_leg[-1].timestamp + 2 * _DT, target - 1.5, target - 1.2, target - 3.0, target - 2.0),
+        _bar(new_leg[-1].timestamp + 3 * _DT, target - 2.0, target - 1.8, target - 3.5, target - 2.5),
     ]
     return candles + new_leg + confirm_bars
 
