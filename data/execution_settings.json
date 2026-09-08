@@ -4,8 +4,8 @@
   "risk_mode": "percent",
   "risk_percent": 1.0,
   "account_balance": 10000.0,
-  "target_risk_usd": 100.0,
-  "fixed_lot_size": 0.05,
+  "target_risk_usd": 12.5,
+  "fixed_lot_size": 0.02,
   "fib_retracement_timeframes": [
     "5m",
     "15m",
