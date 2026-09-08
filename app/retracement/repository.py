@@ -111,8 +111,9 @@ class RetracementRepository:
         if timeframe is not None:
             stmt = stmt.where(RetracementSetupModel.timeframe == timeframe)
         stmt = stmt.where(RetracementSetupModel.state.notin_(["COMPLETED", "INVALIDATED"]))
+        stmt = stmt.order_by(RetracementSetupModel.updated_at.desc()).limit(1)
         res = await self.session.execute(stmt)
-        row = res.scalar_one_or_none()
+        row = res.scalars().first()
         if not row:
             return None
         # Reject stale ghost setups older than 12 hours
