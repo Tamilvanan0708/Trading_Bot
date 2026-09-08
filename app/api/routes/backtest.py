@@ -110,11 +110,14 @@ async def run_strategy_backtest(req: StrategyBacktestRequest):
     from app.backtesting.strategy_simulator import StrategyBacktester
 
     def _parse_dt(d_str: str, is_end: bool = False) -> datetime:
+        from datetime import timedelta
         cleaned = d_str.strip().split("T")[0]
-        dt = datetime.strptime(cleaned, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        # User inputs dates in Indian Standard Time (IST, UTC+5:30)
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        dt = datetime.strptime(cleaned, "%Y-%m-%d").replace(tzinfo=ist_tz)
         if is_end:
             dt = dt.replace(hour=23, minute=59, second=59)
-        return dt
+        return dt.astimezone(timezone.utc)
 
     try:
         s_dt = _parse_dt(req.start_date, is_end=False)

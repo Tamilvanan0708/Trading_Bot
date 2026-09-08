@@ -4683,7 +4683,7 @@ Routes["/backtest"] = (mount) => {
 
       return `<tr>
         <td class="muted">${i + 1}</td>
-        <td><b>${t.entry_time ? t.entry_time.replace("T", " ").replace("+00:00", "") : "—"}</b></td>
+        <td><b>${UI.fmtTs(t.entry_time)}</b></td>
         <td><span class="badge ${stratBadgeCls}" style="font-size:10px;font-weight:700">${UI.esc(t.strategy)}</span></td>
         <td><b>${UI.esc(t.timeframe)}</b></td>
         <td>${dirBadge}</td>
@@ -4827,7 +4827,7 @@ Routes["/backtest"] = (mount) => {
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>ENTRY TIME (UTC)</th>
+                  <th>ENTRY TIME (IST)</th>
                   <th>STRATEGY</th>
                   <th>TF</th>
                   <th>DIR</th>

@@ -760,6 +760,25 @@ class DualRetracementEngine:
                 ))
                 return events
 
+        # Per-layer trailing SL checks (e.g. Smart Shield on L1)
+        for layer in setup.layers.values():
+            if layer["state"] != "FILLED" or layer.get("sl") is None:
+                continue
+            l_sl = layer["sl"]
+            layer_sl_hit = (candle.low <= l_sl) if setup.direction == "LONG" else (candle.high >= l_sl)
+            if layer_sl_hit:
+                layer["state"] = "SL_HIT"
+                layer["exit_price"] = l_sl
+                events.append(RetracementEvent(
+                    setup_id=setup.setup_id,
+                    event_type=RetracementEventType.SL_HIT,
+                    state_before=RetracementState.TRADE_ACTIVE,
+                    state_after=RetracementState.TRADE_ACTIVE,
+                    timestamp=candle.timestamp,
+                    price=l_sl,
+                    metadata={"layer": layer["layer"], "shield": True},
+                ))
+
         # Individual TP checks per layer + Smart Shield.
         if setup.direction == "LONG":
             for layer in setup.layers.values():
@@ -771,6 +790,7 @@ class DualRetracementEngine:
                     # ── SMART SHIELD: 0.618 ENTRY BREAKEVEN / 0.500 BUFFER SHIELD ─────
                     # When L2 or L3 hit TP (bounced back to 0.618):
                     #   → Move L1 Stop Loss to 0.618 (Entry Breakeven) or 0.500 (Buffer)
+                    #   NOTE: Do NOT overwrite setup.sl_price (0.236 invalidation level)!
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
                         shield_lvl = self.smart_shield_level
                         if not shield_lvl:
@@ -779,9 +799,8 @@ class DualRetracementEngine:
                             except Exception:
                                 shield_lvl = "0.618"
                         target_level = setup.fib_0_618 if shield_lvl == "0.618" else setup.fib_0_500
-                        if target_level is not None and setup.sl_price < target_level:
+                        if target_level is not None and (setup.layers["L1"].get("sl") is None or setup.layers["L1"]["sl"] < target_level):
                             setup.layers["L1"]["sl"] = round(target_level, 2)
-                            setup.sl_price = target_level
                             setup.layers["L1"]["shield_stage"] = 1
                             logger.info(
                                 "[SMART SHIELD] L%s TP hit → L1 SL raised to %s ($%.2f)",
@@ -798,6 +817,7 @@ class DualRetracementEngine:
                     # ── SMART SHIELD: 0.618 ENTRY BREAKEVEN / 0.500 BUFFER SHIELD ─────
                     # When L2 or L3 hit TP (bounced back to 0.618):
                     #   → Move L1 Stop Loss to 0.618 (Entry Breakeven) or 0.500 (Buffer)
+                    #   NOTE: Do NOT overwrite setup.sl_price (0.236 invalidation level)!
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
                         shield_lvl = self.smart_shield_level
                         if not shield_lvl:
@@ -806,9 +826,8 @@ class DualRetracementEngine:
                             except Exception:
                                 shield_lvl = "0.618"
                         target_level = setup.fib_0_618 if shield_lvl == "0.618" else setup.fib_0_500
-                        if target_level is not None and setup.sl_price > target_level:
+                        if target_level is not None and (setup.layers["L1"].get("sl") is None or setup.layers["L1"]["sl"] > target_level):
                             setup.layers["L1"]["sl"] = round(target_level, 2)
-                            setup.sl_price = target_level
                             setup.layers["L1"]["shield_stage"] = 1
                             logger.info(
                                 "[SMART SHIELD] L%s TP hit → L1 SL lowered to %s ($%.2f)",
@@ -818,16 +837,17 @@ class DualRetracementEngine:
         # Setup completes only when EVERY filled layer has resolved (TP/SL/escape).
         open_layers = [l for l in setup.layers.values() if l["state"] == "FILLED"]
         if not open_layers and setup.layers:
+            has_tp = any(l.get("state") == "TP_HIT" for l in setup.layers.values())
             setup.state = RetracementState.COMPLETED
-            setup.outcome = "TP_HIT"
-            setup.completion_reason = "All layers reached their take profit targets."
+            setup.outcome = "TP_HIT" if has_tp else "SL_HIT"
+            setup.completion_reason = "All layers reached their targets or resolved."
             events.append(RetracementEvent(
                 setup_id=setup.setup_id,
-                event_type=RetracementEventType.TP_HIT,
+                event_type=RetracementEventType.TP_HIT if has_tp else RetracementEventType.SL_HIT,
                 state_before=RetracementState.TRADE_ACTIVE,
                 state_after=RetracementState.COMPLETED,
                 timestamp=candle.timestamp,
-                price=setup.locked_tp,
+                price=setup.locked_tp or candle.close,
             ))
 
         return events

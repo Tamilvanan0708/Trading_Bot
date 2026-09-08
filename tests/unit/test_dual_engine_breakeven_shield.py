@@ -52,8 +52,9 @@ def test_long_breakeven_shield_on_l2_tp():
     assert setup.layers["L2"]["state"] == "TP_HIT"
     # In 0.618 mode, L1 SL moved to 0.618 Entry Breakeven (2061.80)
     assert setup.layers["L1"]["sl"] == setup.fib_0_618
-    assert setup.sl_price == setup.fib_0_618
-    assert setup.sl_price == 2061.80
+    # Structural setup SL must remain at 0.236 (2023.60) to protect multi-tranche setup!
+    assert setup.sl_price == setup.fib_0_236
+    assert setup.sl_price == 2023.60
 
     # 2. Test 0.500 Buffer mode
     engine_buf = DualRetracementEngine(symbol="XAUUSD", timeframe="5m", smart_shield_level="0.500")
@@ -86,7 +87,8 @@ def test_long_breakeven_shield_on_l2_tp():
     engine_buf._track_active_trade(c1)
     assert setup_buf.layers["L2"]["state"] == "TP_HIT"
     assert setup_buf.layers["L1"]["sl"] == setup_buf.fib_0_500
-    assert setup_buf.sl_price == 2050.00
+    assert setup_buf.sl_price == setup_buf.fib_0_236
+    assert setup_buf.sl_price == 2023.60
 
 
 def test_short_breakeven_shield_on_l2_tp():
@@ -131,8 +133,9 @@ def test_short_breakeven_shield_on_l2_tp():
     assert setup.layers["L2"]["state"] == "TP_HIT"
     # In 0.618 mode, L1 SL lowered to 0.618 Entry Breakeven (2038.20)
     assert setup.layers["L1"]["sl"] == setup.fib_0_618
-    assert setup.sl_price == setup.fib_0_618
-    assert setup.sl_price == 2038.20
+    # Structural setup SL must remain at 0.236 (2076.40) to protect multi-tranche setup!
+    assert setup.sl_price == setup.fib_0_236
+    assert setup.sl_price == 2076.40
 
     # 2. Test 0.500 Buffer mode
     engine_buf = DualRetracementEngine(symbol="XAUUSD", timeframe="5m", smart_shield_level="0.500")
@@ -165,7 +168,8 @@ def test_short_breakeven_shield_on_l2_tp():
     engine_buf._track_active_trade(c1)
     assert setup_buf.layers["L2"]["state"] == "TP_HIT"
     assert setup_buf.layers["L1"]["sl"] == setup_buf.fib_0_500
-    assert setup_buf.sl_price == 2050.00
+    assert setup_buf.sl_price == setup_buf.fib_0_236
+    assert setup_buf.sl_price == 2076.40
 
 
 def test_pre_entry_sl_breach_invalidates_setup():
@@ -239,4 +243,72 @@ def test_opposite_bos_reverses_direction():
     assert engine.setup.state == RetracementState.TP_DYNAMIC
     assert len(engine._archived_setups) >= 1
     assert engine._archived_setups[-1].setup_id == "stale_short"
+
+
+def test_l3_fills_after_l2_tp_and_shield_moves_l1():
+    """Verify that when L2 hits TP and Smart Shield trails L1 SL to 0.618,
+    a subsequent pullback to 0.382 correctly fills L3 without prematurely aborting the setup.
+    """
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="5m", smart_shield_level="0.618")
+    setup = RetracementSetup(
+        setup_id="test_l3_after_shield",
+        strategy="RETRACEMENT_BOS_V1",
+        symbol="XAUUSD",
+        direction="LONG",
+        state=RetracementState.TRADE_ACTIVE,
+        low_price=2000.0,
+        current_high_price=2100.0,
+        point_1_price=2000.0,
+        point_2_price=2100.0,
+    )
+    engine._apply_bullish_fib(setup, 2000.0, 2100.0)
+    engine.setup = setup
+
+    # fib_0_618 = 2061.80 (L1 entry, L2 TP)
+    # fib_0_500 = 2050.00 (L2 entry)
+    # fib_0_382 = 2038.20 (L3 entry)
+    # fib_0_236 = 2023.60 (Structural SL)
+    # fib_1_000 = 2100.00 (L1 TP)
+    setup.layers = {
+        "L1": {
+            "layer": "L1", "ratio": 0.618, "entry_price": setup.fib_0_618,
+            "tp": setup.fib_1_000, "sl": setup.fib_0_236, "state": "FILLED",
+            "filled_at": "2026-07-01T00:00:00Z", "lots": 0.01
+        },
+        "L2": {
+            "layer": "L2", "ratio": 0.500, "entry_price": setup.fib_0_500,
+            "tp": setup.fib_0_618, "sl": setup.fib_0_236, "state": "FILLED",
+            "filled_at": "2026-07-01T00:05:00Z", "lots": 0.01
+        }
+    }
+    setup.sl_price = setup.fib_0_236
+
+    # 1. Price hits L2 TP at 2062.00 (>= 2061.80)
+    c1 = _candle(1000, 2055.0, 2062.0, 2054.0, 2060.0)
+    engine._track_active_trade(c1)
+    assert setup.layers["L2"]["state"] == "TP_HIT"
+    assert setup.layers["L1"]["sl"] == 2061.80
+    assert setup.sl_price == 2023.60  # Setup SL must NOT have changed!
+
+    # 2. Next candle drops to 2038.00 (touching L3 @ 2038.20), low > 2023.60 (0.236 holds)
+    c2 = _candle(1300, 2060.0, 2060.0, 2038.0, 2040.0)
+    engine._track_active_trade(c2)
+
+    # L3 must be filled!
+    assert "L3" in setup.layers
+    assert setup.layers["L3"]["state"] == "FILLED"
+    assert setup.layers["L3"]["entry_price"] == 2038.20
+    # L1 had trailed SL at 2061.80, so it stops out at breakeven
+    assert setup.layers["L1"]["state"] == "SL_HIT"
+    # Setup must STILL be active because L3 is open!
+    assert setup.state == RetracementState.TRADE_ACTIVE
+
+    # 3. Next candle rallies back to 2062.00 (>= L3 TP of 2061.80)
+    c3 = _candle(1600, 2040.0, 2062.0, 2040.0, 2061.0)
+    engine._track_active_trade(c3)
+    assert setup.layers["L3"]["state"] == "TP_HIT"
+    # Now all filled layers (L1 SL_HIT at BE, L2 TP_HIT, L3 TP_HIT) resolved -> setup completed with TP_HIT!
+    assert setup.state == RetracementState.COMPLETED
+    assert setup.outcome == "TP_HIT"
+
 
