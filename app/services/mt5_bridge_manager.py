@@ -158,7 +158,7 @@ class MT5BridgeManager:
 
         order_payload = {
             "id": order_id,
-            "symbol": str(order_data.get("symbol") or exec_cfg.mt5_symbol or "XAUUSD").upper(),
+            "symbol": str(order_data.get("symbol") or exec_cfg.mt5_symbol or "XAUUSD-VIP").upper(),
             "action": str(order_data.get("direction") or order_data.get("action") or "BUY").upper(),
             "lot_size": clamped_lot,
             "entry_price": entry_px,
@@ -218,7 +218,7 @@ class MT5BridgeManager:
             "ticket": int(target_ticket) if target_ticket else 0,
             "paper_trade_id": paper_trade_id,
             "direction": str(direction or "").upper(),
-            "symbol": str(symbol or exec_cfg.mt5_symbol or "XAUUSD").upper(),
+            "symbol": str(symbol or exec_cfg.mt5_symbol or "XAUUSD-VIP").upper(),
             "reason": reason,
             "magic_number": exec_cfg.mt5_magic_number,
             "created_at": time.time(),
@@ -263,7 +263,7 @@ class MT5BridgeManager:
             "ticket": int(target_ticket) if target_ticket else 0,
             "paper_trade_id": paper_trade_id,
             "direction": str(direction or "").upper(),
-            "symbol": str(symbol or exec_cfg.mt5_symbol or "XAUUSD").upper(),
+            "symbol": str(symbol or exec_cfg.mt5_symbol or "XAUUSD-VIP").upper(),
             "stop_loss": float(new_sl) if new_sl is not None else 0.0,
             "take_profit": float(new_tp) if new_tp is not None else 0.0,
             "magic_number": exec_cfg.mt5_magic_number,

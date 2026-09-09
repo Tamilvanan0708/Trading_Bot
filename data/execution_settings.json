@@ -19,7 +19,7 @@
   "strategy_smc_fib": true,
   "strategy_fib_trend": false,
   "mt5_bridge_enabled": true,
-  "mt5_symbol": "XAUUSD",
+  "mt5_symbol": "XAUUSD-VIP",
   "mt5_magic_number": 777888,
   "mt5_allowed_strategy": "Fib Retracement"
 }

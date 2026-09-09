@@ -87,8 +87,8 @@ class ExecutionSettings(BaseModel):
         description="Enable live execution to MetaTrader 5 via MQL5 EA bridge"
     )
     mt5_symbol: str = Field(
-        default="XAUUSD",
-        description="Broker symbol name for Gold (e.g. XAUUSD, XAUUSDm, XAUUSD.stp)"
+        default="XAUUSD-VIP",
+        description="Broker symbol name for Gold (e.g. XAUUSD-VIP, XAUUSD, XAUUSDm)"
     )
     mt5_magic_number: int = Field(
         default=777888,

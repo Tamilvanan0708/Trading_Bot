@@ -165,11 +165,20 @@ void ExecuteIncomingOrder(string json)
    
    if(order_id == "" || action == "") return;
    
-   // Resolve chart/broker symbol
+   // Resolve chart/broker symbol: fallback to chart symbol if requested symbol has no market quotes
    string trade_symbol = (symbol != "") ? symbol : g_symbol;
    if(!SymbolInfoInteger(trade_symbol, SYMBOL_SELECT))
    {
       SymbolSelect(trade_symbol, true);
+   }
+   if(SymbolInfoDouble(trade_symbol, SYMBOL_ASK) <= 0.0 || SymbolInfoDouble(trade_symbol, SYMBOL_BID) <= 0.0)
+   {
+      PrintFormat("⚠️ [XAU_AI_Bridge] Symbol '%s' has no market quotes! Falling back to chart symbol '%s'...", trade_symbol, g_symbol);
+      trade_symbol = g_symbol;
+      if(!SymbolInfoInteger(trade_symbol, SYMBOL_SELECT))
+      {
+         SymbolSelect(trade_symbol, true);
+      }
    }
 
    // 1. Position Close Dispatch
