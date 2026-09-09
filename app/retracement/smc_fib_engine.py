@@ -172,24 +172,12 @@ class SMCFibEngine:
 
         # Check for Bullish BOS (Price broke above previous confirmed swing high)
         if candle.close > last_high.price and last_high.index < len(self._history) - 1:
-            # Bullish anchor = LOWEST swing low of the current swing leg
-            if len(confirmed_highs) >= 2:
-                prev_high = confirmed_highs[-2]
-                leg_lows = [
-                    s for s in confirmed_lows
-                    if prev_high.index <= s.index and (len(self._history) - 1 - s.index) <= lookback_bars
-                ]
-            else:
-                leg_lows = []
-
-            if leg_lows:
-                anchor_low = min(leg_lows, key=lambda s: s.price)
-            else:
-                lows_before_bos = [
-                    s for s in confirmed_lows
-                    if s.index <= last_high.index and (last_high.index - s.index) <= lookback_bars
-                ]
-                anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_low
+            # Bullish anchor = LOWEST swing low that originated this impulse
+            lows_before_bos = [
+                s for s in confirmed_lows
+                if (len(self._history) - 1 - s.index) <= lookback_bars and s.price < last_high.price
+            ]
+            anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_low
 
             self._initiate_setup(
                 direction=SignalDirection.LONG,
@@ -201,24 +189,12 @@ class SMCFibEngine:
             )
         # Check for Bearish BOS (Price broke below previous confirmed swing low)
         elif candle.close < last_low.price and last_low.index < len(self._history) - 1:
-            # Bearish anchor = HIGHEST swing high of the current swing leg
-            if len(confirmed_lows) >= 2:
-                prev_low = confirmed_lows[-2]
-                leg_highs = [
-                    s for s in confirmed_highs
-                    if prev_low.index <= s.index and (len(self._history) - 1 - s.index) <= lookback_bars
-                ]
-            else:
-                leg_highs = []
-
-            if leg_highs:
-                anchor_high = max(leg_highs, key=lambda s: s.price)
-            else:
-                highs_before_bos = [
-                    s for s in confirmed_highs
-                    if s.index <= last_low.index and (last_low.index - s.index) <= lookback_bars
-                ]
-                anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_high
+            # Bearish anchor = HIGHEST swing high that originated this impulse
+            highs_before_bos = [
+                s for s in confirmed_highs
+                if (len(self._history) - 1 - s.index) <= lookback_bars and s.price > last_low.price
+            ]
+            anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_high
 
             self._initiate_setup(
                 direction=SignalDirection.SHORT,
