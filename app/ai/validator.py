@@ -121,12 +121,13 @@ class AIValidator:
         or the legacy OpenAI-compatible key) has a key/base URL set."""
         s = self.settings
         return bool(
-            getattr(s, "GROQ_API_KEY", "")
+            getattr(s, "OPENAI_API_KEY", "")
+            or getattr(s, "AI_API_KEY", "")
             or getattr(s, "GEMINI_API_KEY", "")
+            or getattr(s, "GROQ_API_KEY", "")
             or getattr(s, "OPENROUTER_API_KEY", "")
             or getattr(s, "OLLAMA_BASE_URL", "")
             or getattr(s, "BAI_API_KEY", "")
-            or getattr(s, "AI_API_KEY", "")
             or getattr(s, "AI_API_BASE_URL", "")
         )
 

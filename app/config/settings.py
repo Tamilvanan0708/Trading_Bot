@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     #              | "openrouter" | "ollama" | "bai"    # AI Provider Selection
     AI_PROVIDER: Literal["mock", "auto", "groq", "gemini", "openrouter", "ollama", "bai", "openai"] = "auto"
     AI_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
     AI_API_BASE_URL: str = ""
     AI_MODEL: str = "gpt-4o-mini"
     AI_TEMPERATURE: float = Field(default=0.1, ge=0.0, le=2.0)

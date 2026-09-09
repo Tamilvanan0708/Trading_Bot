@@ -830,10 +830,11 @@ class LiveMarketDataService:
 
         now = datetime.now(timezone.utc)
         fresh = False
-        latest_ts = getattr(latest_tick, "timestamp", None)
-        is_live_streaming = connected and latest_ts is not None and (now - latest_ts).total_seconds() < 300
         if newest is not None:
-            fresh = ((now - newest) <= timedelta(minutes=self.settings.LIVE_HISTORY_MAX_AGE_MINUTES)) or is_live_streaming
+            # Freshness is judged by the CLOSED HISTORY age only. Live tick
+            # streaming must not launder stale history into "fresh" — the
+            # strategy engines and the admission gate act on closed candles.
+            fresh = (now - newest) <= timedelta(minutes=self.settings.LIVE_HISTORY_MAX_AGE_MINUTES)
 
         historical_available = count >= self.settings.LIVE_HISTORY_MIN_CANDLES
 

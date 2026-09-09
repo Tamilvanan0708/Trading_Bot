@@ -479,15 +479,18 @@ class BAIProvider(OpenAICompatibleProvider):
 
 
 class LegacyOpenAIProvider(OpenAICompatibleProvider):
-    """Backward-compatible provider using AI_API_KEY against an
-    OpenAI-compatible endpoint (overrideable via AI_API_BASE_URL)."""
+    """OpenAI Provider using OPENAI_API_KEY or AI_API_KEY with gpt-4o-mini."""
     name = "OPENAI"
     default_model = "gpt-4o-mini"
     @classmethod
     def _base_url(cls, settings):
-        return getattr(settings, "AI_API_BASE_URL", "") or "https://api.openai.com/v1"
+        url = (getattr(settings, "AI_API_BASE_URL", "") or "").strip()
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
+        return "https://api.openai.com/v1"
     @classmethod
-    def _api_key(cls, settings): return getattr(settings, "AI_API_KEY", "")
+    def _api_key(cls, settings):
+        return getattr(settings, "OPENAI_API_KEY", "") or getattr(settings, "AI_API_KEY", "")
 
 
 class GeminiProvider(BaseAIProvider):
@@ -620,8 +623,9 @@ class OllamaProvider(BaseAIProvider):
 
 # Priority order for the auto chain (lower index = higher priority)
 _AUTO_CHAIN: list[type[BaseAIProvider]] = [
-    GroqProvider,
     GeminiProvider,
+    LegacyOpenAIProvider,
+    GroqProvider,
     OpenRouterProvider,
     OllamaProvider,
     BAIProvider,

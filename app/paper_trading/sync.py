@@ -108,6 +108,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
             live_price = None
 
         tg = TelegramService()
+        # Per-timeframe snapshot prices reported by the Fib monitors themselves
+        # (authoritative context for resolving FIB_RETR trades in the sweep below).
+        fib_tf_price: dict[str, float] = {}
         validator = get_ai_validator()
         if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("APP_ENV") == "test":
             # Tests must never reach paid LLM providers through the background
@@ -120,6 +123,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
             try:
                 fib_svc = get_retracement_multi_tf_service("XAUUSD")
                 fib_states = await fib_svc.advance(db)
+
+                try:
+                    _fib_slots = getattr(fib_svc, "slots", None)
+                    _fib_global = getattr(fib_svc, "live_price", None)
+                    if isinstance(_fib_slots, dict):
+                        for _tf, _slot in _fib_slots.items():
+                            _p = getattr(_slot, "live_price", None) or _fib_global
+                            if _p:
+                                fib_tf_price[str(_tf).lower()] = float(_p)
+                except Exception:  # noqa: BLE001
+                    pass
 
                 # Option 1A: Multi-Slot Parallel Execution — track open trades per timeframe slot
                 existing_open_trades = (await db.execute(
@@ -1059,6 +1073,25 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                 if entry <= 0:
                     continue
 
+                price_px = live_price
+                sig_upper = (t.signal_id or "").upper()
+                if sig_upper.startswith("FIB_RETR_"):
+                    # Engine-tracked tranche: resolve ONLY against the monitor's
+                    # own snapshot price for that timeframe. The process-global
+                    # feed price (possibly from unrelated data/instruments or a
+                    # polluted test singleton) must never double-resolve these —
+                    # the layer loop in the Fib section owns their lifecycle.
+                    _parts = sig_upper.split("_")
+                    price_px = fib_tf_price.get(_parts[2].lower(), None) if len(_parts) >= 3 else None
+                    if price_px is None:
+                        continue
+
+                # Regime guard: the feed price may belong to a different
+                # instrument/session than this trade (symbol switch). Never
+                # resolve TP/SL with a price outside the trade's neighborhood.
+                if not (0.5 * entry <= price_px <= 2.0 * entry):
+                    continue
+
                 closed = False
                 pts = 0.0
 
@@ -1067,16 +1100,16 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                 if t.direction == "LONG":
                     # For Trend trades: If TP1 reached, shift SL to Breakeven
-                    if is_trend and t.take_profit_1 and live_price >= t.take_profit_1:
+                    if is_trend and t.take_profit_1 and price_px >= t.take_profit_1:
                         if t.stop_loss is None or t.stop_loss < entry:
                             t.stop_loss = round(entry, 2)
                             logs = list(t.state_logs or [])
                             if not any(isinstance(l, dict) and l.get("event") == "BREAKEVEN_LOCKED" for l in logs):
-                                logs.append({"event": "BREAKEVEN_LOCKED", "price": live_price, "time": datetime.now(timezone.utc).isoformat()})
+                                logs.append({"event": "BREAKEVEN_LOCKED", "price": price_px, "time": datetime.now(timezone.utc).isoformat()})
                                 t.state_logs = logs
                                 logger.info("[PAPER-AUTO] Trend trade %s hit TP1 (%.2f) -> Stop Loss moved to Breakeven (%.2f)", t.id, t.take_profit_1, t.stop_loss)
 
-                    if final_tp and live_price >= final_tp:
+                    if final_tp and price_px >= final_tp:
                         t.state = "CLOSED"
                         t.exit_price = final_tp
                         t.exit_reason = "TP_HIT"
@@ -1086,7 +1119,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
                         closed = True
                         logger.info("[PAPER-AUTO] Closed LONG trade %s at TP: %.2f (+$%.2f)", t.id, t.exit_price, t.realized_pnl)
-                    elif t.stop_loss and live_price <= t.stop_loss and live_price > 1000.0:
+                    elif t.stop_loss and price_px <= t.stop_loss:
                         t.state = "CLOSED"
                         t.exit_price = t.stop_loss
                         t.exit_reason = "BREAKEVEN_HIT" if t.stop_loss >= entry else "SL_HIT"
@@ -1098,16 +1131,16 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         logger.info("[PAPER-AUTO] Closed LONG trade %s at %s: %.2f ($%.2f)", t.id, t.exit_reason, t.exit_price, t.realized_pnl)
                 elif t.direction == "SHORT":
                     # For Trend trades: If TP1 reached, shift SL to Breakeven
-                    if is_trend and t.take_profit_1 and live_price <= t.take_profit_1 and live_price > 1000.0:
+                    if is_trend and t.take_profit_1 and price_px <= t.take_profit_1:
                         if t.stop_loss is None or t.stop_loss > entry:
                             t.stop_loss = round(entry, 2)
                             logs = list(t.state_logs or [])
                             if not any(isinstance(l, dict) and l.get("event") == "BREAKEVEN_LOCKED" for l in logs):
-                                logs.append({"event": "BREAKEVEN_LOCKED", "price": live_price, "time": datetime.now(timezone.utc).isoformat()})
+                                logs.append({"event": "BREAKEVEN_LOCKED", "price": price_px, "time": datetime.now(timezone.utc).isoformat()})
                                 t.state_logs = logs
                                 logger.info("[PAPER-AUTO] Trend trade %s hit TP1 (%.2f) -> Stop Loss moved to Breakeven (%.2f)", t.id, t.take_profit_1, t.stop_loss)
 
-                    if final_tp and live_price <= final_tp and live_price > 1000.0:
+                    if final_tp and price_px <= final_tp:
                         t.state = "CLOSED"
                         t.exit_price = final_tp
                         t.exit_reason = "TP_HIT"
@@ -1117,7 +1150,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         t.realized_r = round(pts / max(0.1, abs(entry - (t.stop_loss or 0.0))), 2)
                         closed = True
                         logger.info("[PAPER-AUTO] Closed SHORT trade %s at TP: %.2f (+$%.2f)", t.id, t.exit_price, t.realized_pnl)
-                    elif t.stop_loss and live_price >= t.stop_loss and live_price > 1000.0:
+                    elif t.stop_loss and price_px >= t.stop_loss:
                         t.state = "CLOSED"
                         t.exit_price = t.stop_loss
                         t.exit_reason = "BREAKEVEN_HIT" if t.stop_loss <= entry else "SL_HIT"
