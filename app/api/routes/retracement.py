@@ -527,32 +527,28 @@ async def get_fib_retracement_dashboard(
 
     ai_guardian = {}
     try:
-        from app.database.models import AIValidationModel, SignalModel
-        q = (
-            select(AIValidationModel, SignalModel)
-            .join(SignalModel, AIValidationModel.signal_id == SignalModel.id)
-            .where(SignalModel.strategy.in_(("FIB_WITH_RETRACEMENT", "RETRACEMENT")))
-            .order_by(AIValidationModel.created_at.desc())
-            .limit(10)
-        )
-        res = (await db.execute(q)).all()
-        for ai_val, sig in res:
-            tf = (sig.timeframe or "5m").lower()
-            if tf not in ai_guardian:
-                ai_guardian[tf] = {
-                    "signal_id": sig.id,
-                    "timeframe": tf,
-                    "direction": sig.direction,
-                    "status": ai_val.status,
-                    "confidence": ai_val.confidence,
-                    "explanation": ai_val.explanation,
-                    "identified_risks": ai_val.identified_risks or [],
-                    "model": ai_val.model,
-                    "provider": ai_val.provider,
-                    "created_at": ai_val.created_at.isoformat() if ai_val.created_at else None,
-                }
+        from app.database.repository import Repository
+        recent_sigs = await Repository(db).list_recent_signals(limit=30)
+        for sig in recent_sigs:
+            strat_u = (sig.strategy or "").upper()
+            if "FIB" in strat_u or "RETRACEMENT" in strat_u:
+                tf = (sig.timeframe or "5m").lower()
+                ai_val = getattr(sig, "ai_validation", None)
+                if ai_val and tf not in ai_guardian:
+                    ai_guardian[tf] = {
+                        "signal_id": sig.id,
+                        "timeframe": tf,
+                        "direction": sig.direction,
+                        "status": ai_val.status,
+                        "confidence": ai_val.confidence,
+                        "explanation": ai_val.explanation,
+                        "identified_risks": ai_val.identified_risks or [],
+                        "model": ai_val.model,
+                        "provider": ai_val.provider,
+                        "created_at": ai_val.created_at.isoformat() if ai_val.created_at else None,
+                    }
     except Exception as ai_e:
-        logger.debug("[STRATEGY] Error fetching AI guardian for Fib: %s", ai_e)
+        logger.warning("[STRATEGY] Error fetching AI guardian for Fib: %s", ai_e)
     dash["ai_guardian"] = ai_guardian
     return dash
 
@@ -611,32 +607,28 @@ async def get_smc_fib_dashboard(
 
     ai_guardian = {}
     try:
-        from app.database.models import AIValidationModel, SignalModel
-        q = (
-            select(AIValidationModel, SignalModel)
-            .join(SignalModel, AIValidationModel.signal_id == SignalModel.id)
-            .where(SignalModel.strategy == "SMC_WITH_FIB")
-            .order_by(AIValidationModel.created_at.desc())
-            .limit(10)
-        )
-        res = (await db.execute(q)).all()
-        for ai_val, sig in res:
-            tf = (sig.timeframe or "5m").lower()
-            if tf not in ai_guardian:
-                ai_guardian[tf] = {
-                    "signal_id": sig.id,
-                    "timeframe": tf,
-                    "direction": sig.direction,
-                    "status": ai_val.status,
-                    "confidence": ai_val.confidence,
-                    "explanation": ai_val.explanation,
-                    "identified_risks": ai_val.identified_risks or [],
-                    "model": ai_val.model,
-                    "provider": ai_val.provider,
-                    "created_at": ai_val.created_at.isoformat() if ai_val.created_at else None,
-                }
+        from app.database.repository import Repository
+        recent_sigs = await Repository(db).list_recent_signals(limit=30)
+        for sig in recent_sigs:
+            strat_u = (sig.strategy or "").upper()
+            if "SMC" in strat_u:
+                tf = (sig.timeframe or "5m").lower()
+                ai_val = getattr(sig, "ai_validation", None)
+                if ai_val and tf not in ai_guardian:
+                    ai_guardian[tf] = {
+                        "signal_id": sig.id,
+                        "timeframe": tf,
+                        "direction": sig.direction,
+                        "status": ai_val.status,
+                        "confidence": ai_val.confidence,
+                        "explanation": ai_val.explanation,
+                        "identified_risks": ai_val.identified_risks or [],
+                        "model": ai_val.model,
+                        "provider": ai_val.provider,
+                        "created_at": ai_val.created_at.isoformat() if ai_val.created_at else None,
+                    }
     except Exception as ai_e:
-        logger.debug("[STRATEGY] Error fetching AI guardian for SMC: %s", ai_e)
+        logger.warning("[STRATEGY] Error fetching AI guardian for SMC: %s", ai_e)
 
     return {
         "strategy": "SMC_WITH_FIB",
