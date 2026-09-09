@@ -179,12 +179,27 @@ class DualRetracementEngine:
                 if c_range > 0 and (abs(candle.close - candle.open) / c_range) < 0.20:
                     return []
 
-                # Anchor Low: lowest confirmed swing low before the BOS swing that initiated the leg
-                lows_before_bos = [
-                    s for s in confirmed_lows
-                    if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
-                ]
-                anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+                # Anchor Low: lowest confirmed swing low of the current BOS leg.
+                # If there are previous confirmed swing highs, isolate the swing lows formed
+                # after the previous structure high to prevent reaching back into earlier completed BOS legs.
+                if len(confirmed_highs) >= 2:
+                    prev_sh = confirmed_highs[-2]
+                    leg_lows = [
+                        s for s in confirmed_lows
+                        if prev_sh.index <= s.index and (len(self._candles) - 1 - s.index) <= lookback_bars
+                    ]
+                else:
+                    leg_lows = []
+
+                if leg_lows:
+                    anchor_low = min(leg_lows, key=lambda s: s.price)
+                else:
+                    lows_before_bos = [
+                        s for s in confirmed_lows
+                        if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
+                    ]
+                    anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+
                 p2_low = anchor_low.price
                 p2_ts = anchor_low.timestamp
 
@@ -223,12 +238,27 @@ class DualRetracementEngine:
                 if c_range > 0 and (abs(candle.close - candle.open) / c_range) < 0.20:
                     return []
 
-                # Anchor High: highest confirmed swing high before the BOS swing that initiated the leg
-                highs_before_bos = [
-                    s for s in confirmed_highs
-                    if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
-                ]
-                anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+                # Anchor High: highest confirmed swing high of the current BOS leg.
+                # If there are previous confirmed swing lows, isolate the swing highs formed
+                # after the previous structure low to prevent reaching back into earlier completed BOS legs.
+                if len(confirmed_lows) >= 2:
+                    prev_sl = confirmed_lows[-2]
+                    leg_highs = [
+                        s for s in confirmed_highs
+                        if prev_sl.index <= s.index and (len(self._candles) - 1 - s.index) <= lookback_bars
+                    ]
+                else:
+                    leg_highs = []
+
+                if leg_highs:
+                    anchor_high = max(leg_highs, key=lambda s: s.price)
+                else:
+                    highs_before_bos = [
+                        s for s in confirmed_highs
+                        if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
+                    ]
+                    anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+
                 p2_high = anchor_high.price
                 p2_ts = anchor_high.timestamp
 
@@ -314,10 +344,18 @@ class DualRetracementEngine:
                 if len(self._candles) >= 2 and self._candles[-2].close > last_sh.price:
                     return []
                 if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-                    lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
-                    if not lows_before:
-                        return []
-                    anchor_low = min(lows_before, key=lambda s: s.price)
+                    # Look for swing lows formed AFTER the previous BOS timestamp to isolate the current leg
+                    recent_lows = [
+                        s for s in confirmed_lows
+                        if s.timestamp >= setup.bos_timestamp and s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
+                    ]
+                    if recent_lows:
+                        anchor_low = min(recent_lows, key=lambda s: s.price)
+                    else:
+                        lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
+                        if not lows_before:
+                            return []
+                        anchor_low = min(lows_before, key=lambda s: s.price)
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,
@@ -354,10 +392,17 @@ class DualRetracementEngine:
                 if len(self._candles) >= 2 and self._candles[-2].close < last_sl.price:
                     return []
                 if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-                    highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
-                    if not highs_before:
-                        return []
-                    anchor_high = max(highs_before, key=lambda s: s.price)
+                    recent_highs = [
+                        s for s in confirmed_highs
+                        if s.timestamp >= setup.bos_timestamp and s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
+                    ]
+                    if recent_highs:
+                        anchor_high = max(recent_highs, key=lambda s: s.price)
+                    else:
+                        highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
+                        if not highs_before:
+                            return []
+                        anchor_high = max(highs_before, key=lambda s: s.price)
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,
@@ -427,8 +472,20 @@ class DualRetracementEngine:
             if len(self._candles) >= 2 and self._candles[-2].close > last_sh.price:
                 return []
             if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-                lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
-                anchor_low = min(lows_before, key=lambda s: s.price) if lows_before else confirmed_lows[-1]
+                if len(confirmed_highs) >= 2:
+                    prev_sh = confirmed_highs[-2]
+                    leg_lows = [
+                        s for s in confirmed_lows
+                        if prev_sh.index <= s.index and (len(self._candles) - 1 - s.index) <= lookback_bars
+                    ]
+                else:
+                    leg_lows = []
+
+                if leg_lows:
+                    anchor_low = min(leg_lows, key=lambda s: s.price)
+                else:
+                    lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
+                    anchor_low = min(lows_before, key=lambda s: s.price) if lows_before else confirmed_lows[-1]
 
                 setup.state = RetracementState.INVALIDATED
                 setup.invalidation_reason = f"Reversed by Bullish BOS at {candle.close:.2f}."
@@ -469,8 +526,20 @@ class DualRetracementEngine:
             if len(self._candles) >= 2 and self._candles[-2].close < last_sl.price:
                 return []
             if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-                highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
-                anchor_high = max(highs_before, key=lambda s: s.price) if highs_before else confirmed_highs[-1]
+                if len(confirmed_lows) >= 2:
+                    prev_sl = confirmed_lows[-2]
+                    leg_highs = [
+                        s for s in confirmed_highs
+                        if prev_sl.index <= s.index and (len(self._candles) - 1 - s.index) <= lookback_bars
+                    ]
+                else:
+                    leg_highs = []
+
+                if leg_highs:
+                    anchor_high = max(leg_highs, key=lambda s: s.price)
+                else:
+                    highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
+                    anchor_high = max(highs_before, key=lambda s: s.price) if highs_before else confirmed_highs[-1]
 
                 setup.state = RetracementState.INVALIDATED
                 setup.invalidation_reason = f"Reversed by Bearish BOS at {candle.close:.2f}."

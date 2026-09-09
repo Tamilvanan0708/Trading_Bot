@@ -312,3 +312,56 @@ def test_l3_fills_after_l2_tp_and_shield_moves_l1():
     assert setup.outcome == "TP_HIT"
 
 
+def test_bullish_bos_anchors_to_immediate_higher_low_not_older_low():
+    """Verify that when a series has a previous BOS (from an older low) followed by
+    a higher low and a new BOS, the anchor low (Point 2 / 0.000) is anchored to the
+    current leg's higher low (e.g. 4374.24) and NOT the older low (4371.09).
+    """
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="5m", left_bars=2, right_bars=2)
+
+    candles = []
+    t = 10000
+
+    # 20 flat base candles around 4373
+    for i in range(20):
+        candles.append(_candle(t + i * 300, 4373.0, 4374.0, 4372.0, 4373.0))
+
+    # Swing Low 1 at index 20: 4371.09
+    candles.append(_candle(t + 20 * 300, 4372.0, 4373.0, 4371.09, 4372.0))
+
+    # Rally to Swing High 1 at index 24: 4378.00
+    candles.append(_candle(t + 21 * 300, 4372.0, 4374.0, 4372.0, 4373.5))
+    candles.append(_candle(t + 22 * 300, 4373.5, 4376.0, 4373.0, 4375.0))
+    candles.append(_candle(t + 23 * 300, 4375.0, 4377.0, 4374.5, 4376.5))
+    candles.append(_candle(t + 24 * 300, 4376.5, 4378.00, 4376.0, 4377.5))  # SH 1
+
+    # Pullback to Swing Low 2 (Higher Low) at index 27: 4374.24
+    candles.append(_candle(t + 25 * 300, 4377.5, 4377.5, 4375.5, 4376.0))
+    candles.append(_candle(t + 26 * 300, 4376.0, 4376.0, 4374.5, 4375.0))
+    candles.append(_candle(t + 27 * 300, 4375.0, 4375.5, 4374.24, 4375.0))  # SL 2 (HL)
+    candles.append(_candle(t + 28 * 300, 4375.0, 4377.0, 4375.0, 4376.5))
+    candles.append(_candle(t + 29 * 300, 4376.5, 4379.0, 4376.0, 4378.5))
+
+    # Rally to Swing High 2 at index 32: 4384.14
+    candles.append(_candle(t + 30 * 300, 4378.5, 4381.0, 4378.0, 4380.5))
+    candles.append(_candle(t + 31 * 300, 4380.5, 4383.0, 4380.0, 4382.5))
+    candles.append(_candle(t + 32 * 300, 4382.5, 4384.14, 4382.0, 4383.5))  # SH 2
+    candles.append(_candle(t + 33 * 300, 4383.5, 4383.8, 4381.0, 4382.0))
+    candles.append(_candle(t + 34 * 300, 4382.0, 4383.5, 4381.5, 4382.5))
+
+    for c in candles:
+        engine.process_candle(c)
+
+    # Breakout candle closing above 4384.14 (BOS 2)
+    breakout = _candle(t + 35 * 300, 4382.5, 4393.75, 4382.0, 4390.50)
+    engine.process_candle(breakout)
+
+    assert engine.setup is not None
+    assert engine.setup.direction == "LONG"
+    assert engine.setup.bos_price == 4384.14
+    # Anchor Low MUST be the immediate Higher Low (4374.24), NOT the older 4371.09
+    assert engine.setup.point_2_price == 4374.24
+    assert engine.setup.fib_0 == 4374.24
+
+
+
