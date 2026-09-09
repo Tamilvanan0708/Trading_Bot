@@ -407,9 +407,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         ai_res = await validator.validate(val_sig)
                                         ai_short = f"{ai_res.status.value} ({ai_res.confidence:.0f}% Conf)"
                                         ai_verdict = f"{ai_res.status.value} (conf={ai_res.confidence:.0f}%) — {ai_res.explanation}"
+
+                                        # Persist authoritative AI validation record
+                                        try:
+                                            await repo.save_ai_validation({
+                                                "signal_id": sig_id,
+                                                "status": ai_res.status.value,
+                                                "confidence": float(ai_res.confidence),
+                                                "explanation": str(ai_res.explanation),
+                                                "identified_risks": list(getattr(ai_res, "identified_risks", []) or []),
+                                                "missing_confirmations": list(getattr(ai_res, "missing_confirmations", []) or []),
+                                                "provider": getattr(ai_res, "provider", None),
+                                                "model": getattr(ai_res, "model", None),
+                                                "reason_code": getattr(ai_res, "reason_code", None),
+                                            })
+                                            await db.commit()
+                                        except Exception as ai_save_err:
+                                            logger.debug("[AI-GATE] Failed to persist AI validation: %s", ai_save_err)
+
                                         if ai_res.status.value == "REJECT":
                                             logger.warning("[AI-GATE] Fib Retracement %s REJECTED by AI Validator: %s", sig_id, ai_res.explanation)
                                             ai_approved = False
+                                            try:
+                                                await repo.update_signal_outcome(sig_id, {"outcome": "AI_REJECTED"})
+                                                await db.commit()
+                                            except Exception:
+                                                pass
                                     except Exception as ai_err:  # noqa: BLE001
                                         logger.warning("[AI-GATE] AI Validation check error: %s", ai_err)
                                         ai_short = "APPROVED (95% Conf)"
@@ -829,9 +852,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     ai_res = await validator.validate(val_sig)
                                     ai_short = f"{ai_res.status.value} ({ai_res.confidence:.0f}% Conf)"
                                     ai_verdict = f"{ai_res.status.value} (conf={ai_res.confidence:.0f}%) — {ai_res.explanation}"
+
+                                    # Persist authoritative AI validation record
+                                    try:
+                                        await repo.save_ai_validation({
+                                            "signal_id": sig_id,
+                                            "status": ai_res.status.value,
+                                            "confidence": float(ai_res.confidence),
+                                            "explanation": str(ai_res.explanation),
+                                            "identified_risks": list(getattr(ai_res, "identified_risks", []) or []),
+                                            "missing_confirmations": list(getattr(ai_res, "missing_confirmations", []) or []),
+                                            "provider": getattr(ai_res, "provider", None),
+                                            "model": getattr(ai_res, "model", None),
+                                            "reason_code": getattr(ai_res, "reason_code", None),
+                                        })
+                                        await db.commit()
+                                    except Exception as ai_save_err:
+                                        logger.debug("[AI-GATE] Failed to persist AI validation: %s", ai_save_err)
+
                                     if ai_res.status.value == "REJECT":
                                         logger.warning("[AI-GATE] SMC With Fib %s REJECTED by AI Validator: %s", sig_id, ai_res.explanation)
                                         ai_approved = False
+                                        try:
+                                            await repo.update_signal_outcome(sig_id, {"outcome": "AI_REJECTED"})
+                                            await db.commit()
+                                        except Exception:
+                                            pass
                                 except Exception as ai_err:  # noqa: BLE001
                                     logger.warning("[AI-GATE] AI Validation check error: %s", ai_err)
                                     ai_short = "APPROVED (95% Conf)"

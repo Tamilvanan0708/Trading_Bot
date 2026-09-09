@@ -314,6 +314,128 @@ function ovHtml(id, html) {
   if (el && el.innerHTML !== html) el.innerHTML = html;
 }
 
+// Maps aggregated /overview data_status to an honest feed label. A down or
+// cache-fed stream is never presented as live. Values match VALID_DATA_STATUSES.
+const _OV_STATUS_TEXT = {
+  HEALTHY: "LIVE",
+  HISTORICAL: "FEED DEGRADED",
+  HISTORICAL_CACHE: "HISTORICAL CACHE",
+  NO_DATA: "NO DATA",
+};
+const _OV_STATUS_CLS = {
+  HEALTHY: "badge badge-green",
+  HISTORICAL: "badge badge-red",
+  HISTORICAL_CACHE: "badge badge-blue",
+  NO_DATA: "badge badge-dim",
+};
+function _ovStatusText(status) { return _OV_STATUS_TEXT[status] || String(status || "NO DATA"); }
+function _ovStatusCls(status) { return _OV_STATUS_CLS[status] || "badge badge-dim"; }
+
+const _OV_TREND_CLS = {
+  BULLISH: "up", BEARISH: "down", NEUTRAL: "", RANGING: "", NO_DATA: "muted",
+};
+
+// Patch the market pulse card + feed/data-status + market-update strip.
+function patchOverviewMarket(ov) {
+  const ds = ov.data_status || "NO_DATA";
+  ovHtml("ov-ds", `<span class="${_ovStatusCls(ds)}">${_ovStatusText(ds)}</span>`);
+  ovSet("ov-updated", ds === "HEALTHY" ? "LIVE FEED" : _ovStatusText(ds));
+
+  const mu = ov.market_update || {};
+  if (mu.last_update || mu.last_candle) {
+    ovHtml("ov-mu-body",
+      `<b style="color:var(--text)">MARKET UPDATE</b> · ${_ovStatusText(mu.data_source || ds)}` +
+      ` · ${Number(mu.candle_count || 0)} candles · tf ${mu.timeframe || "15m"}` +
+      ` · last ${mu.last_candle || mu.last_update || "—"}` +
+      (mu.provider ? ` · ${mu.provider}` : ""));
+  } else {
+    ovHtml("ov-mu-body", `Market update: ${_ovStatusText(ds)}.`);
+  }
+}
+
+// Patch the multi-timeframe direction board (5m/15m/30m/1h/4h).
+function patchOverviewMtf(ov) {
+  const mtf = ov.mtf || {};
+  const cells = OV_TFS.map(([label, key]) => {
+    const info = mtf[key] || {};
+    const trend = info.trend || "NO_DATA";
+    const cls = _OV_TREND_CLS[trend] != null ? _OV_TREND_CLS[trend] : "";
+    return `<div class="${cls}" style="display:inline-block;margin-right:8px" title="${(info.summary || "").replace(/"/g, "")}">${label} <b>${trend}</b></div>`;
+  }).join("");
+  ovHtml("ov-mtf", cells);
+}
+
+// Patch the regime board.
+function patchOverviewRegime(ov) {
+  const reg = ov.regime || {};
+  ovSet("ov-regime", `${reg.regime || "UNKNOWN"} · ${reg.trend || "NEUTRAL"}`);
+}
+
+// Patch the deterministic signal direction.
+function patchOverviewSignal(ov) {
+  const sig = ov.signal || {};
+  const status = sig.status || "DATA_UNAVAILABLE";
+  const dir = sig.direction || "NO_TRADE";
+  const cls = status === "LONG" ? "up" : status === "SHORT" ? "down" : "muted";
+  const el = document.getElementById("ov-signal-dir");
+  if (el) {
+    el.textContent = `${status} / ${dir}`;
+    el.style.color = status === "LONG" ? "var(--green)" : status === "SHORT" ? "var(--red)" : "var(--text-muted)";
+  }
+  const ai = ov.ai_validation || {};
+  ovSet("ov-ai-status", `${ai.status || "WAITING"}${ai.confidence != null ? ` ${Math.round(ai.confidence)}%` : ""}`);
+}
+
+// Patch the safety gate headline from the real settings/system state.
+function patchOverviewSafety(ov) {
+  const safe = ov.safety || {};
+  const headline = safe.status || "SIGNALS_BLOCKED";
+  const gates = Array.isArray(safe.gates) ? safe.gates : [];
+  const passed = gates.filter((g) => g && g.pass).length;
+  const el = document.getElementById("ov-safety");
+  if (el) {
+    el.innerHTML = `${headline} <span class="muted">(${passed}/${gates.length})</span>`;
+    el.style.color = headline === "SIGNALS_ENABLED" ? "var(--green)" : "var(--red)";
+  }
+  const aiBadge = document.getElementById("ov-ai-badge");
+  if (aiBadge) {
+    const blocked = headline === "SIGNALS_BLOCKED" || headline === "PAPER_TRADING_BLOCKED";
+    aiBadge.className = `badge ${blocked ? "badge-red" : "badge-green"}`;
+    aiBadge.textContent = blocked ? "🧠 SAFETY: BLOCKED" : "🧠 SAFETY: TRADING";
+  }
+}
+
+// Patch the live health service checklist.
+function patchOverviewHealth(ov) {
+  const health = ov.health || {};
+  const services = Array.isArray(health.services) ? health.services : [];
+  const dot = (ok) => `<span class="dot ${ok ? "dot-green" : "dot-red"}"></span>`;
+  const body = services.length
+    ? services.map((s) => `${dot(s.healthy)} ${s.name}`).join(" &nbsp; ")
+    : '<span class="muted">No health data.</span>';
+  ovHtml("ov-health-list", body);
+}
+
+// Patch the SMC / Fibonacci status chips from the aggregated /overview payload.
+// (The detailed 5M strategy cards are patched separately from the strategy
+// endpoints inside loadOverview; this only reflects authoritative status.)
+const _OV_SETUP_CLS = {
+  ACTIVE: "badge badge-green", GOLDEN_ZONE_ACTIVE: "badge badge-green",
+  NO_VALID_SMC_SETUP: "badge badge-dim", NO_RETRACEMENT_SETUP: "badge badge-dim",
+  SMC_DATA_STALE: "badge badge-red", NO_DATA: "badge badge-dim",
+};
+function patchOverviewSmc(ov) {
+  const smc = ov.smc || {};
+  const st = smc.status || "NO_DATA";
+  ovHtml("ov-smc-status", `<span class="${_OV_SETUP_CLS[st] || "badge badge-dim"}">${st}</span>`);
+}
+function patchOverviewFib(ov) {
+  const fib = ov.fibonacci || {};
+  const st = fib.status || "NO_DATA";
+  ovHtml("ov-fib-status", `<span class="${_OV_SETUP_CLS[st] || "badge badge-dim"}">${st}</span>`);
+}
+
+
 function buildOverviewShell() {
   return `
   <div class="stack">
@@ -333,6 +455,20 @@ function buildOverviewShell() {
         <span class="badge badge-red">REAL MONEY DISABLED</span>
       </div>
     </div>
+
+    <!-- Command Center status strip (aggregated /overview, patched incrementally) -->
+    <div class="row-between" style="flex-wrap:wrap;gap:10px;padding:8px 10px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;font-size:11px;align-items:center">
+      <span class="badge badge-green" id="ov-ds">LIVE</span>
+      <span>REGIME: <b id="ov-regime" style="color:var(--text-bright)">—</b></span>
+      <span>MTF: <span id="ov-mtf" style="font-family:var(--font-num)">—</span></span>
+      <span>SIGNAL: <b id="ov-signal-dir" style="color:var(--text-muted)">NO_TRADE</b></span>
+      <span>AI: <b id="ov-ai-status" style="color:var(--text-muted)">WAITING</b></span>
+      <span>SAFETY: <b id="ov-safety" style="color:var(--text-muted)">—</b></span>
+      <span>SMC: <b id="ov-smc-status" style="color:var(--text-muted)">NO_DATA</b></span>
+      <span>FIB: <b id="ov-fib-status" style="color:var(--text-muted)">NO_DATA</b></span>
+      <span id="ov-health-list" class="muted">—</span>
+    </div>
+    <div id="ov-mu-body" class="muted" style="font-size:10px;color:var(--text-dim);padding:2px 10px">Market update: awaiting first poll.</div>
 
     <!-- Row 1: Live Market Ticker & Live Position Widget -->
     <div class="grid grid-2">
@@ -564,6 +700,16 @@ async function loadOverview() {
     const pt = ptRes.status === "fulfilled" ? ptRes.value : [];
     const acct = acctRes.status === "fulfilled" ? acctRes.value : {};
 
+    // Authoritative aggregated /overview sections — incremental DOM patches.
+    patchOverviewMarket(ov);
+    patchOverviewRegime(ov);
+    patchOverviewMtf(ov);
+    patchOverviewSignal(ov);
+    patchOverviewSafety(ov);
+    patchOverviewHealth(ov);
+    patchOverviewSmc(ov);
+    patchOverviewFib(ov);
+
     // 1. Live Price & 24h High/Low
     const m = ov.market || {};
     const px = m.price != null ? Number(m.price) : (AppState.price || 4375.0);
@@ -794,147 +940,167 @@ async function loadOverview() {
 };
 
 
-/* ================= LIVE MARKET (TRADINGVIEW EMBED) ================= */
+/* ================= LIVE MARKET (SSE + incremental native chart) ================= */
 Routes["/live"] = (mount) => {
   const TFS = ["5m", "15m", "30m", "1h", "4h"];
-  let currentTF = "5m";
+  const SYMBOL = "XAUUSD";
+  let currentTF = "15m";
+  let _liveSeq = 0;          // stale-response guard: drop older async results
+  let _liveES = null;        // active EventSource (closed on switch/navigate)
+  let _livePollTimer = null;
+  let _liveCandles = [];
 
-  const TF_MAP = {
-    "5m": "5",
-    "15m": "15",
-    "30m": "30",
-    "1h": "60",
-    "4h": "240"
+  // data_status (backend truth) -> honest badge text/class.
+  const LIVE_STATUS = {
+    HEALTHY:            { text: "LIVE",             cls: "badge badge-green", banner: "live" },
+    HISTORICAL:         { text: "FEED DEGRADED",    cls: "badge badge-red",   banner: "degraded" },
+    HISTORICAL_CACHE:   { text: "HISTORICAL CACHE", cls: "badge badge-blue",  banner: "cache" },
+    NO_DATA:            { text: "NO DATA",          cls: "badge badge-dim",   banner: "" },
   };
 
-  function btnHtml(t) {
-    const isAct = t === currentTF;
-    return `<button class="btn ${isAct ? "btn-primary" : "btn-ghost"}" data-tf="${t}" style="${isAct ? 'font-weight:700;box-shadow:0 0 10px rgba(59,130,246,0.5)' : ''}">${t.toUpperCase()}</button>`;
-  }
-
-  function renderTVChart(tf) {
-    currentTF = tf;
-    const interval = TF_MAP[tf] || "5";
-    const box = document.getElementById("tradingview_chart_container");
-    if (!box) return;
-
-    // Update buttons
-    document.querySelectorAll(".btn[data-tf]").forEach(b => {
-      const isAct = b.dataset.tf === tf;
-      b.className = `btn ${isAct ? "btn-primary" : "btn-ghost"}`;
-      b.style.fontWeight = isAct ? "700" : "400";
-      b.style.boxShadow = isAct ? "0 0 10px rgba(59,130,246,0.5)" : "none";
-    });
-
-    const tfLabel = document.getElementById("live-tf-label");
-    if (tfLabel) tfLabel.textContent = tf.toUpperCase();
-
-    // Render TradingView Widget
-    box.innerHTML = "";
-    const innerId = "tv_chart_" + Date.now();
-    const div = document.createElement("div");
-    div.id = innerId;
-    div.style.width = "100%";
-    div.style.height = "100%";
-    box.appendChild(div);
-
-    if (window.TradingView && window.TradingView.widget) {
-      try {
-        new window.TradingView.widget({
-          autosize: true,
-          symbol: "BINANCE:XAUUSDT.P",
-          interval: interval,
-          timezone: "Etc/UTC",
-          theme: "dark",
-          style: "1",
-          locale: "en",
-          toolbar_bg: "#131722",
-          enable_publishing: false,
-          allow_symbol_change: true,
-          hide_side_toolbar: false,
-          container_id: innerId,
-          withdateranges: true,
-          save_image: true,
-          details: false,
-          hotlist: false,
-          calendar: false,
-          studies: []
-        });
-        return;
-      } catch (e) {
-        console.warn("[TradingView] Widget init failed, using iframe fallback:", e);
-      }
+  function setStatus(status) {
+    const map = LIVE_STATUS[status] || LIVE_STATUS.NO_DATA;
+    const badge = document.getElementById("live-status-badge");
+    if (badge) { badge.className = map.cls; badge.textContent = map.text; }
+    const banner = document.getElementById("live-feed-banner");
+    if (banner) {
+      banner.className = "feed-banner " + map.banner;
+      banner.innerHTML = `<span>${map.text === "LIVE"
+        ? "XAU/USD NATIVE LIVE CHART (SSE)"
+        : map.text === "HISTORICAL CACHE"
+          ? "SIGNAL INTELLIGENCE TERMINAL CHART · HISTORICAL CACHE (FEED NOT LIVE)"
+          : map.text === "NO DATA"
+            ? "NO DATA — feed and cache unavailable"
+            : "FEED DEGRADED — falling back to polling"}</span>` +
+        `<span class="update-clock" id="live-clock">${new Date().toISOString().replace("T", " ").slice(0, 19)}Z</span>`;
     }
-
-    // Direct iframe fallback
-    box.innerHTML = `
-      <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=BINANCE%3AXAUUSDT.P&interval=${interval}&hidesidetoolbar=0&symboledit=1&saveimage=1&toolbarbg=131722&theme=dark&style=1&timezone=Etc%2FUTC&locale=en" 
-        style="width:100%;height:100%;min-height:640px;border:none;" 
-        allowfullscreen>
-      </iframe>
-    `;
   }
 
-  let pollTimer = null;
-  window.__viewCleanup = () => {
-    if (pollTimer) clearInterval(pollTimer);
-  };
+  function redraw() {
+    const canvas = document.getElementById("live-canvas");
+    if (canvas && window.Charts && _liveCandles.length) {
+      Charts.candlesLive(canvas, _liveCandles, { height: 620 });
+    }
+  }
+
+  // Apply a snapshot/candle payload coming from SSE or the polling fallback.
+  function applyPayload(payload, seq) {
+    if (seq !== _liveSeq) return;   // stale response from a previous timeframe
+    if (!payload) return;
+    if (Array.isArray(payload.candles) && payload.candles.length) _liveCandles = payload.candles;
+    setStatus(payload.data_status || "NO_DATA");
+    const clock = document.getElementById("live-clock");
+    if (clock && payload.data_status) clock.textContent = new Date().toISOString().replace("T", " ").slice(0, 19) + "Z";
+    redraw();
+  }
+
+  function stopStream() {
+    if (_liveES) {
+      const es = _liveES;
+      _liveES = null;
+      try { es.close(); } catch (_) {}   // no duplicate SSE connections
+    }
+    if (_livePollTimer) { clearInterval(_livePollTimer); _livePollTimer = null; }
+  }
+
+  // Polling fallback: cache endpoint first (no network needed), then quote for price.
+  function startPolling(tf) {
+    const seq = _liveSeq;
+    const tick = async () => {
+      try {
+        const r = await fetch(API.base + `/market/${SYMBOL}/cache?timeframe=${encodeURIComponent(tf)}`);
+        if (!r.ok) throw new Error("cache " + r.status);
+        applyPayload(await r.json(), seq);
+      } catch (_) {
+        if (seq === _liveSeq) setStatus("NO_DATA");
+      }
+    };
+    tick();
+    _livePollTimer = setInterval(tick, 5000);
+  }
+
+  // SSE stream with polling fallback (no duplicate timers on retry).
+  function startStream(tf) {
+    if (!("EventSource" in window)) { startPolling(tf); return; }
+    try {
+      _liveES = new EventSource(API.liveStreamURL(SYMBOL, tf));
+    } catch (_) {
+      startPolling(tf);
+      return;
+    }
+    _liveES.addEventListener("snapshot", (ev) => {
+      try { applyPayload(JSON.parse(ev.data), _liveSeq); } catch (_) {}
+    });
+    _liveES.onopen = () => {
+      // Stream is live: drop the polling seed to avoid duplicate fetches/closes.
+      if (_livePollTimer) { clearInterval(_livePollTimer); _livePollTimer = null; }
+    };
+    _liveES.addEventListener("candle", (ev) => {
+      try { applyPayload(JSON.parse(ev.data), _liveSeq); } catch (_) {}
+    });
+    _liveES.onerror = () => {
+      // Stream dropped (server offline / proxy): degrade to polling, no retry storm.
+      if (_liveES) { try { _liveES.close(); } catch (_) {} _liveES = null; }
+      if (_livePollTimer == null) startPolling(tf);
+    };
+  }
+
+  function loadTF(tf) {
+    _liveSeq += 1;
+    currentTF = tf;
+    _liveCandles = [];
+    document.querySelectorAll(".btn[data-tf]").forEach((b) => {
+      b.className = `btn ${b.dataset.tf === tf ? "btn-primary" : "btn-ghost"}`;
+    });
+    const label = document.getElementById("live-tf-label");
+    if (label) label.textContent = tf.toUpperCase();
+    stopStream();
+    setStatus("NO_DATA");
+    // Paint from cache immediately (never blocks the page), then open the stream.
+    const seq = _liveSeq;
+    startPolling(tf);
+    setTimeout(() => {
+      if (seq !== _liveSeq) return;   // user switched timeframe again: abandon
+      stopStream();
+      startStream(tf);
+    }, 250);
+  }
+  const switchTF = loadTF;   // timeframe switch with stale-response (seq) guard
+
+  window.__viewCleanup = () => { stopStream(); };
 
   mount.innerHTML = `
     <div class="stack">
       <div class="row-between">
-        <div class="section-title">Live Market — XAU/USD (Binance Futures)</div>
-        <div class="tf-toolbar" id="tv-tf-toolbar">${TFS.map(btnHtml).join("")}</div>
+        <div class="section-title">Live Market — XAU/USD · <span id="live-tf-label">15M</span></div>
+        <div class="tf-toolbar">${TFS.map((t) => `<button class="btn ${t === currentTF ? "btn-primary" : "btn-ghost"}" data-tf="${t}">${t.toUpperCase()}</button>`).join("")}</div>
       </div>
-      <div class="feed-banner live" id="live-feed-banner">
-        <span>TRADINGVIEW OFFICIAL REAL-TIME CHART</span>
-        <span class="update-clock">BINANCE:XAUUSDT.P · LIVE STREAMING</span>
+      <div class="feed-banner" id="live-feed-banner">
+        <span>CONNECTING…</span>
+        <span class="update-clock" id="live-clock">—</span>
       </div>
-      <div class="card" style="padding:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:#131722;">
+      <div class="card" style="padding:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:var(--bg-0)">
         <div class="card-head" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center">
-          <span>XAU/USD · <span id="live-tf-label" style="color:var(--primary);font-weight:700">5M</span></span>
+          <span>Native incremental chart</span>
           <span class="muted" style="display:flex;align-items:center;gap:8px">
-            <span class="pulse-dot live"></span>
-            <span class="badge badge-green">TRADINGVIEW LIVE</span>
-            <span style="font-size:11px">Full Technical Indicators & Drawing Tools</span>
+            <span id="live-status-badge" class="badge badge-dim">NO DATA</span>
+            <span style="font-size:11px">SSE stream · polling fallback · cache seed</span>
           </span>
         </div>
-        <div class="card-body" style="padding:0;height:640px;width:100%">
-          <div id="tradingview_chart_container" style="height:100%;width:100%"></div>
+        <div class="card-body" style="padding:8px;height:640px">
+          <canvas id="live-canvas" style="width:100%;height:620px;display:block"></canvas>
         </div>
       </div>
       <div class="live-info-strip" id="live-info-strip"></div>
     </div>`;
 
-  // Wire buttons
-  document.querySelectorAll(".btn[data-tf]").forEach(b => {
-    b.addEventListener("click", () => renderTVChart(b.dataset.tf));
+  document.querySelectorAll(".btn[data-tf]").forEach((b) => {
+    b.addEventListener("click", () => switchTF(b.dataset.tf));
   });
 
-  // Render initial TV chart
-  renderTVChart("5m");
-
-  // Keep topbar and metrics strip synced with live price
-  pollTimer = setInterval(async () => {
-    try {
-      const snap = await API.overview("XAUUSD");
-      if (snap && snap.latest_price) {
-        const p = Number(snap.latest_price).toFixed(2);
-        const strip = document.getElementById("live-info-strip");
-        if (strip) {
-          strip.innerHTML = [
-            UI.metric("Price", p, "live").outerHTML,
-            UI.metric("Spread", snap.spread != null ? snap.spread.toFixed(2) : "0.30", "pts").outerHTML,
-            UI.metric("Regime", UI.esc(AppState.regime || "TRENDING")).outerHTML,
-            UI.metric("Session", UI.esc(AppState.session || "ACTIVE")).outerHTML,
-            UI.metric("Chart Engine", "TradingView Pro").outerHTML,
-            UI.metric("Data Feed", '<span class="badge badge-green">LIVE</span>').outerHTML,
-          ].join("");
-        }
-      }
-    } catch (_) {}
-  }, 3000);
+  loadTF(currentTF);
 };
+
 
 /* ================= SIGNALS ================= */
 Routes["/signals"] = (mount, query) => {
@@ -971,6 +1137,7 @@ Routes["/signals"] = (mount, query) => {
     }).length;
     const smcCount = rows.filter(s => String(s.strategy || "").toUpperCase().includes("SMC")).length;
     const trendCount = rows.filter(s => String(s.strategy || "").toUpperCase().includes("TREND")).length;
+    const aiRejectCount = rows.filter(s => String(s.outcome || "").toUpperCase() === "AI_REJECTED" || (s.ai_validation && String(s.ai_validation.status).toUpperCase() === "REJECT")).length;
 
     // Helper: live gold price
     function getLivePrice() {
@@ -1028,6 +1195,7 @@ Routes["/signals"] = (mount, query) => {
       else if (outcomeStatus === "TP_HIT") statusBadge = '<span class="badge badge-success">TP HIT</span>';
       else if (outcomeStatus === "SL_HIT") statusBadge = '<span class="badge badge-danger">SL HIT</span>';
       else if (outcomeStatus === "BREAKEVEN_HIT" || outcomeStatus === "BREAKEVEN") statusBadge = '<span class="badge" style="background:rgba(255,171,0,0.15);color:#ffab00;border:1px solid #ffab00;font-weight:700">🛡 BREAKEVEN</span>';
+      else if (outcomeStatus === "AI_REJECTED") statusBadge = '<span class="badge badge-red" style="background:rgba(239,68,68,0.25);border:1px solid #ef4444;font-weight:700">AI REJECTED</span>';
       else if (outcomeStatus === "CANCELLED" || outcomeStatus === "EXPIRED" || outcomeStatus === "SUPERSEDED") statusBadge = '<span class="badge badge-dim" style="background:rgba(120,144,156,0.2);color:#90a4ae;border:1px solid rgba(120,144,156,0.4)">CANCELLED</span>';
       else if (outcomeStatus === "ESCAPE" || outcomeStatus === "ESCAPE_CLOSED") statusBadge = '<span class="badge" style="background:#ffab00;color:#000">ESCAPE</span>';
 
@@ -1042,35 +1210,38 @@ Routes["/signals"] = (mount, query) => {
       let pnlPillHtml = '<span class="pnl-pill neutral">—</span>';
 
       if (outcomeStatus === "FILLED" && livePrice > 0 && entry > 0) {
-        const pts = dir === "LONG" ? (livePrice - entry) : (entry - livePrice);
+        let pts = 0;
+        let sign = "+";
+        let cls = "profit";
+        if (dir === "LONG") {
+          pts = Number((livePrice - entry).toFixed(2));
+          sign = pts >= 0 ? "+" : "-";
+          cls = pts >= 0 ? "profit" : "loss";
+        } else {
+          pts = Number((entry - livePrice).toFixed(2));
+          sign = pts >= 0 ? "+" : "-";
+          cls = pts >= 0 ? "profit" : "loss";
+        }
         const absPts = Math.abs(pts).toFixed(2);
-        const absVal = (Math.abs(pts) * sigLotsNum * 100.0).toFixed(2);
-        const sign = pts >= 0 ? "+" : "-";
-        const cls = pts >= 0 ? "profit" : "loss";
+        const absVal = Math.abs(pts * sigLotsNum * 100.0).toFixed(2);
         pnlPillHtml = `<span class="pnl-pill ${cls}">${sign}${feedCurrSym}${absVal} (${sign}${absPts} pts)</span>`;
-      } else if (outcomeStatus === "TP_HIT" && entry > 0) {
-        const targetTp = isTrend && s.take_profit_2 && Number(s.take_profit_2) > 0 ? Number(s.take_profit_2) : tp;
-        const pts = Math.abs((targetTp || tp) - entry).toFixed(2);
+      } else if (outcomeStatus === "TP_HIT" && entry > 0 && tp > 0) {
+        const pts = Math.abs(tp - entry).toFixed(2);
         const absVal = (Number(pts) * sigLotsNum * 100.0).toFixed(2);
         pnlPillHtml = `<span class="pnl-pill profit">+${feedCurrSym}${absVal} (+${pts} pts)</span>`;
       } else if (outcomeStatus === "SL_HIT" && entry > 0 && sl > 0) {
         const pts = Math.abs(entry - sl).toFixed(2);
         const absVal = (Number(pts) * sigLotsNum * 100.0).toFixed(2);
         pnlPillHtml = `<span class="pnl-pill loss">-${feedCurrSym}${absVal} (-${pts} pts)</span>`;
-      } else if (outcomeStatus === "BREAKEVEN_HIT" || outcomeStatus === "BREAKEVEN") {
+      } else {
         pnlPillHtml = `<span class="pnl-pill neutral">${feedCurrSym}0.00 (0.00 pts)</span>`;
-      } else if (outcomeStatus === "PENDING" && livePrice > 0 && entry > 0) {
-        const dist = Math.abs(entry - livePrice).toFixed(2);
-        pnlPillHtml = `<span class="pnl-pill neutral">${dist} pts away</span>`;
-      } else if (outcomeStatus === "CANCELLED" || outcomeStatus === "EXPIRED") {
-        pnlPillHtml = `<span class="pnl-pill neutral">Cancelled</span>`;
       }
 
-      // Dual TP Display for Trend Breakout trades
-      let tpDisplayHtml = `<span class="num up font-mono">${UI.fmt(s.take_profit_1)}</span>`;
-      if (isTrend && s.take_profit_2 && Number(s.take_profit_2) > 0 && Number(s.take_profit_2) !== Number(s.take_profit_1)) {
+      // Multi-Tranche TP display
+      let tpDisplayHtml = `<span class="font-mono up" style="font-weight:700">$${Number(s.take_profit_1 || s.take_profit || 0).toFixed(2)}</span>`;
+      if (s.take_profit_2 && Number(s.take_profit_2) > 0) {
         tpDisplayHtml = `
-          <div style="display:inline-flex;flex-direction:column;gap:2px;align-items:flex-end">
+          <div style="display:flex;flex-direction:column;gap:2px;align-items:flex-end">
             <div class="badge-tp1-chip" style="font-size:10px;padding:2px 5px">🎯 TP1: $${Number(s.take_profit_1).toFixed(2)}</div>
             <div class="badge-tp2-chip" style="font-size:10px;padding:2px 5px">🏆 TP2: $${Number(s.take_profit_2).toFixed(2)}</div>
           </div>
@@ -1089,6 +1260,19 @@ Routes["/signals"] = (mount, query) => {
       const sigLots = s.lot_size != null ? Number(s.lot_size).toFixed(2) : "0.09";
       const sigTf = (s.timeframe || "5m").toUpperCase();
 
+      const ai = s.ai_validation;
+      let aiVerdictPill = '<span class="badge badge-dim" style="font-size:10px">N/A</span>';
+      if (ai && ai.status) {
+        const aiStat = String(ai.status).toUpperCase();
+        if (aiStat === "APPROVE" || aiStat === "APPROVED") {
+          aiVerdictPill = `<span class="ai-verdict-pill approved" style="font-size:10px;cursor:pointer" title="${UI.esc(ai.explanation || '')}">🟢 APPROVED (${ai.confidence || 95}%)</span>`;
+        } else if (aiStat === "REJECT" || aiStat === "REJECTED") {
+          aiVerdictPill = `<span class="ai-verdict-pill rejected" style="font-size:10px;cursor:pointer" title="${UI.esc(ai.explanation || '')}">🔴 REJECTED (${ai.confidence || 35}%)</span>`;
+        } else {
+          aiVerdictPill = `<span class="ai-verdict-pill standby" style="font-size:10px">${aiStat}</span>`;
+        }
+      }
+
       return `<tr class="clickable ${trancheClass}" data-id="${s.id}">
         <td>${UI.fmtTs(s.created_at)}</td>
         <td><strong>${UI.esc(s.symbol)}</strong> <span class="badge badge-dim" style="font-size:10px;padding:1px 5px;margin-left:4px">${sigTf}</span></td>
@@ -1101,6 +1285,7 @@ Routes["/signals"] = (mount, query) => {
         <td style="text-align:right;padding:6px 10px">${tpDisplayHtml}</td>
         <td class="num">1:${UI.fmt(s.risk_reward, 1)}</td>
         <td>${pnlPillHtml}</td>
+        <td>${aiVerdictPill}</td>
         <td>${statusBadge}</td>
         <td style="text-align:center">${actionsHtml}</td>
       </tr>`;
@@ -1114,6 +1299,10 @@ Routes["/signals"] = (mount, query) => {
         if (activeStrat === "RETRACEMENT" && (st.includes("SMC") || st.includes("TREND"))) return false;
         if (activeStrat === "SMC" && !st.includes("SMC")) return false;
         if (activeStrat === "TREND" && !st.includes("TREND")) return false;
+        if (activeStrat === "AI_REJECTED") {
+          const isRej = String(s.outcome || "").toUpperCase() === "AI_REJECTED" || (s.ai_validation && String(s.ai_validation.status).toUpperCase() === "REJECT");
+          if (!isRej) return false;
+        }
 
         if (activeStatus) {
           const out = String(s.outcome || "PENDING").toUpperCase();
@@ -1251,7 +1440,7 @@ Routes["/signals"] = (mount, query) => {
 
       if (!tbody) return;
       if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text-muted)">
+        tbody.innerHTML = `<tr><td colspan="14" style="text-align:center;padding:32px;color:var(--text-muted)">
           <div style="font-size:13px;font-weight:700;margin-bottom:4px">No matching signals found</div>
           <div style="font-size:11px">Try adjusting your strategy pills, status, or search query.</div>
         </td></tr>`;
@@ -1355,6 +1544,7 @@ Routes["/signals"] = (mount, query) => {
           <div class="sig-pill" data-strat="RETRACEMENT">🎯 Fib Retracement <span class="pill-count">${retCount}</span></div>
           <div class="sig-pill" data-strat="SMC">💎 SMC With Fib <span class="pill-count">${smcCount}</span></div>
           <div class="sig-pill" data-strat="TREND">📈 Fib Go With Trend <span class="pill-count">${trendCount}</span></div>
+          <div class="sig-pill" data-strat="AI_REJECTED" style="border-color:rgba(239,68,68,0.4);color:#f87171">🤖 AI Rejected <span class="pill-count" style="background:rgba(239,68,68,0.2);color:#f87171">${aiRejectCount}</span></div>
         </div>
 
         <!-- Filter Controls -->
@@ -1365,6 +1555,7 @@ Routes["/signals"] = (mount, query) => {
             <option value="PENDING">🟡 PENDING</option>
             <option value="TP_HIT">🏆 TP HIT</option>
             <option value="SL_HIT">🔴 SL HIT</option>
+            <option value="AI_REJECTED">🔴 AI REJECTED</option>
             <option value="BREAKEVEN">🛡️ BREAKEVEN</option>
             <option value="ESCAPE">🛡️ ESCAPE</option>
           </select>
@@ -1392,6 +1583,7 @@ Routes["/signals"] = (mount, query) => {
           <th>TP</th>
           <th>R:R</th>
           <th>Live PnL / Delta</th>
+          <th>AI Verdict</th>
           <th>Status</th>
           <th style="text-align:center">Actions</th>
         </tr></thead>
@@ -3940,6 +4132,155 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     }).join(" ");
   }
 
+  function renderAiGuardianCard(aiData, tfData, tf) {
+    if (!aiData) {
+      return `<div class="ai-guardian-card standby">
+        <div class="ai-guardian-header">
+          <div class="ai-guardian-title">
+            <span>🤖 AI SETUP GUARDIAN</span>
+            <span class="badge badge-dim">${TF_LABELS[tf] || tf.toUpperCase()} TIMEFRAME</span>
+          </div>
+          <div class="ai-guardian-badges">
+            <span class="ai-verdict-pill standby">● STANDBY / OBSERVING</span>
+            <span class="badge badge-dim">Model: GPT-4o-mini</span>
+          </div>
+        </div>
+        <div class="ai-guardian-body">
+          AI Sentinel is active and observing the market. When price touches the retracement entry zone on <b>${TF_LABELS[tf] || tf.toUpperCase()}</b>, AI will rigorously evaluate trend momentum, structural integrity, and risk-reward ratio before approving execution.
+        </div>
+      </div>`;
+    }
+
+    const isApproved = aiData.status === "APPROVE" || aiData.status === "APPROVED";
+    const isRejected = aiData.status === "REJECT" || aiData.status === "REJECTED";
+    const cardCls = isApproved ? "approved" : (isRejected ? "rejected" : "standby");
+    const pillCls = isApproved ? "approved" : (isRejected ? "rejected" : "standby");
+    const pillText = isApproved ? `🟢 AI APPROVED (${aiData.confidence != null ? aiData.confidence : 95}%)` : (isRejected ? `🔴 AI REJECTED (${aiData.confidence != null ? aiData.confidence : 35}%)` : `🟡 AI ${aiData.status}`);
+    const commentaryCls = isApproved ? "approve-border" : (isRejected ? "reject-border" : "");
+
+    const dirBadge = aiData.direction === "LONG"
+      ? '<span class="badge badge-green" style="font-size:10px">▲ LONG</span>'
+      : '<span class="badge badge-red" style="font-size:10px">▼ SHORT</span>';
+
+    return `<div class="ai-guardian-card ${cardCls}">
+      <div class="ai-guardian-header">
+        <div class="ai-guardian-title">
+          <span>🤖 AI SETUP GUARDIAN</span>
+          <span class="badge badge-dim">${TF_LABELS[tf] || tf.toUpperCase()}</span>
+          ${dirBadge}
+        </div>
+        <div class="ai-guardian-badges">
+          <span class="ai-verdict-pill ${pillCls}">${pillText}</span>
+          <span class="badge badge-dim">Model: ${aiData.model || "GPT-4o-mini"}</span>
+          <span class="badge badge-dim" style="font-size:10px">${aiData.created_at ? new Date(aiData.created_at).toLocaleTimeString() : "Recent"}</span>
+        </div>
+      </div>
+      <div class="ai-guardian-body">
+        <div style="margin-bottom:6px">
+          <b>Guardian Decision:</b> ${isApproved ? '<span style="color:#4ade80;font-weight:700">TRADE APPROVED</span> — Passed macro trend, structure, and risk-reward checks.' : '<span style="color:#f87171;font-weight:700">TRADE REJECTED</span> — Execution blocked to protect capital against counter-trend or high-risk setup.'}
+        </div>
+        <div class="ai-guardian-commentary ${commentaryCls}">
+          <b>💬 AI Reasoning:</b> ${UI.esc(aiData.explanation || "No explanation provided.")}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function renderStrategySignalsFeed(stratType, stratTitle) {
+    const containerId = "strat-sub-signals-table";
+    setTimeout(async () => {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      try {
+        const res = await API.signals({ strategy: stratType, limit: 30 });
+        if (!res || !res.length) {
+          el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:12px">No signals recorded yet for this strategy. Setup scanner is observing.</div>';
+          return;
+        }
+
+        const rowsHtml = res.map(s => {
+          const out = String(s.outcome || "PENDING").toUpperCase();
+          let outBadge = '<span class="badge badge-blue">PENDING</span>';
+          if (out === "TP_HIT") outBadge = '<span class="badge badge-green">TP HIT ✓</span>';
+          else if (out === "SL_HIT") outBadge = '<span class="badge badge-red">SL HIT ✗</span>';
+          else if (out === "AI_REJECTED") outBadge = '<span class="badge badge-red" style="background:rgba(239,68,68,0.25);border:1px solid #ef4444;font-weight:700">AI REJECTED ✗</span>';
+          else if (out === "FILLED") outBadge = '<span class="badge badge-amber">FILLED ●</span>';
+          else if (out === "CANCELLED") outBadge = '<span class="badge badge-muted">CANCELLED</span>';
+          else if (out === "BREAKEVEN" || out === "BREAKEVEN_HIT") outBadge = '<span class="badge" style="background:rgba(255,171,0,0.15);color:#ffab00">BREAKEVEN</span>';
+
+          const ai = s.ai_validation;
+          let aiPill = '<span class="badge badge-dim" style="font-size:10px">N/A</span>';
+          if (ai && ai.status) {
+            const aiStat = String(ai.status).toUpperCase();
+            if (aiStat === "APPROVE" || aiStat === "APPROVED") {
+              aiPill = `<span class="ai-verdict-pill approved" style="font-size:10px;cursor:pointer" title="${UI.esc(ai.explanation || '')}">🟢 APPROVED (${ai.confidence || 95}%)</span>`;
+            } else if (aiStat === "REJECT" || aiStat === "REJECTED") {
+              aiPill = `<span class="ai-verdict-pill rejected" style="font-size:10px;cursor:pointer" title="${UI.esc(ai.explanation || '')}">🔴 REJECTED (${ai.confidence || 35}%)</span>`;
+            } else {
+              aiPill = `<span class="ai-verdict-pill standby" style="font-size:10px">${aiStat}</span>`;
+            }
+          }
+
+          const dirCls = s.direction === "LONG" ? "color:#00e676;font-weight:700" : "color:#ef5350;font-weight:700";
+          const dirIco = s.direction === "LONG" ? "▲ BUY" : "▼ SELL";
+          const timeStr = s.created_at ? new Date(s.created_at).toLocaleTimeString() : "—";
+          const isSMC = String(stratType).toUpperCase().includes("SMC");
+          const verStr = s.strategy_version || (isSMC ? "Single (0.68)" : "L1 (0.61)");
+
+          return `<tr class="clickable" onclick="openSignalDrawer('${s.id}')" style="cursor:pointer" title="Click to view full AI analysis & details">
+            <td style="font-size:11px;color:var(--text-dim)">${timeStr}</td>
+            <td><b>${(s.timeframe || "5m").toUpperCase()}</b></td>
+            <td><span class="badge badge-dim" style="font-size:10px">${verStr}</span></td>
+            <td style="${dirCls}">${dirIco}</td>
+            <td class="num font-mono"><b>$${Number(s.entry_price || 0).toFixed(2)}</b></td>
+            <td class="num font-mono" style="color:#ef5350">$${Number(s.stop_loss || 0).toFixed(2)}</td>
+            <td class="num font-mono" style="color:#00e676">$${Number(s.take_profit_1 || 0).toFixed(2)}</td>
+            <td class="num">1:${UI.fmt(s.risk_reward, 1)}</td>
+            <td>${aiPill}</td>
+            <td>${outBadge}</td>
+            <td style="text-align:center"><button class="btn btn-sm btn-secondary" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();openSignalDrawer('${s.id}')">👁️ View</button></td>
+          </tr>`;
+        }).join("");
+
+        el.innerHTML = `<div class="table-wrap"><table class="term" style="margin:0;font-size:12px">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>TF</th>
+              <th>Layer</th>
+              <th>Dir</th>
+              <th class="num">Entry</th>
+              <th class="num">SL</th>
+              <th class="num">TP1</th>
+              <th class="num">R:R</th>
+              <th>AI Verdict</th>
+              <th>Outcome</th>
+              <th style="text-align:center">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table></div>`;
+      } catch (e) {
+        el.innerHTML = '<div style="padding:15px;color:var(--text-dim)">Failed to load signals sub-feed.</div>';
+      }
+    }, 80);
+
+    return `<div class="strategy-signals-feed-wrap">
+      <div class="strategy-signals-header">
+        <div class="strategy-signals-title">
+          <span>⚡ ${stratTitle} Signal History</span>
+          <span class="badge badge-blue">Strategy Sub-Feed</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim)">Filtered exclusively to ${stratTitle} setups & AI validations</div>
+      </div>
+      <div id="${containerId}" style="overflow-x:auto">
+        <div style="padding:20px;text-align:center;color:var(--text-dim);font-size:12px">Loading strategy signals...</div>
+      </div>
+    </div>`;
+  }
+
   function renderLockMsg(d) {
     const activeLockTf = d.active_trade_tf || d.cascading_active_tf;
     return activeLockTf
@@ -3970,6 +4311,9 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
 
       const tWrap = document.getElementById("strat-timeline-wrap");
       if (tWrap) tWrap.innerHTML = renderTimeline(tfData.state);
+
+      const gWrap = document.getElementById("strat-ai-guardian-wrap");
+      if (gWrap) gWrap.innerHTML = renderAiGuardianCard(d.ai_guardian?.[selectedTf], tfData, selectedTf);
 
       const sWrap = document.getElementById("strat-signal-box-wrap");
       if (sWrap) sWrap.innerHTML = renderActiveSignalBox(tfData, price, selectedTf);
@@ -4045,6 +4389,9 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <!-- STATE TIMELINE -->
       <div id="strat-timeline-wrap">${renderTimeline(tfData.state)}</div>
 
+      <!-- AI SETUP GUARDIAN SCORECARD -->
+      <div id="strat-ai-guardian-wrap">${renderAiGuardianCard(d.ai_guardian?.[selectedTf], tfData, selectedTf)}</div>
+
       <!-- BIG ACTIVE SIGNAL BOX -->
       <div id="strat-signal-box-wrap">${renderActiveSignalBox(tfData, price, selectedTf)}</div>
 
@@ -4069,6 +4416,9 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
           </div>
         </div>
       </div>
+
+      <!-- EMBEDDED STRATEGY SIGNALS FEED -->
+      <div id="strat-signals-history-wrap">${renderStrategySignalsFeed(strategyType, strategyName)}</div>
     </div>`;
   }, mount).then(() => {
     if (_stratTimer) clearInterval(_stratTimer);

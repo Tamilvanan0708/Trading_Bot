@@ -17,21 +17,45 @@ _last_signals_sync_ts: float = 0.0
 
 
 @router.get("")
-async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_session)):
+async def list_signals(
+    limit: int = 50,
+    strategy: str | None = None,
+    outcome: str | None = None,
+    db: AsyncSession = Depends(get_db_session),
+):
     """Lists trading signals exclusively from our dedicated Strategies:
     - SMC With Fib (Single @ 0.680)
     - Fib With Retracement (L1 @ 0.618, L2 @ 0.500, L3 @ 0.382)
     - Fib Go With Trend (9/21 EMA + 0.618 Breakout Confirmation)
 
-    Reads directly from the database without blocking on live network or advance locks.
+    Supports filtering by strategy and outcome.
     """
     try:
         repo = Repository(db)
         raw_signals = await repo.list_recent_signals(limit=limit * 5)
-        filtered_signals = [
-            s for s in raw_signals
-            if s.strategy in ("SMC_WITH_FIB", "FIB_WITH_RETRACEMENT", "RETRACEMENT", "FIB_GO_WITH_TREND")
-        ][:limit]
+        filtered_signals = []
+        for s in raw_signals:
+            if s.strategy not in ("SMC_WITH_FIB", "FIB_WITH_RETRACEMENT", "RETRACEMENT", "FIB_GO_WITH_TREND"):
+                continue
+            if strategy:
+                strat_req = strategy.upper()
+                s_strat = (s.strategy or "").upper()
+                if strat_req in ("FIB_WITH_RETRACEMENT", "RETRACEMENT") and s_strat not in ("FIB_WITH_RETRACEMENT", "RETRACEMENT"):
+                    continue
+                elif strat_req not in ("FIB_WITH_RETRACEMENT", "RETRACEMENT") and strat_req != s_strat:
+                    continue
+            if outcome:
+                out_req = outcome.upper()
+                s_out = (s.outcome or "").upper()
+                ai_stat = getattr(s.ai_validation, "status", "") if s.ai_validation else ""
+                if out_req == "AI_REJECTED":
+                    if s_out != "AI_REJECTED" and ai_stat != "REJECT":
+                        continue
+                elif s_out != out_req:
+                    continue
+            filtered_signals.append(s)
+
+        filtered_signals = filtered_signals[:limit]
 
         # Enforce strictly 1 PENDING signal per (strategy, timeframe, layer) slot
         seen_pending_slots = set()
@@ -59,6 +83,9 @@ async def list_signals(limit: int = 50, db: AsyncSession = Depends(get_db_sessio
                         "status": getattr(s.ai_validation, "status", None),
                         "confidence": getattr(s.ai_validation, "confidence", None),
                         "explanation": getattr(s.ai_validation, "explanation", None),
+                        "provider": getattr(s.ai_validation, "provider", None),
+                        "model": getattr(s.ai_validation, "model", None),
+                        "reason_code": getattr(s.ai_validation, "reason_code", None),
                     }
             except Exception:
                 ai_data = None

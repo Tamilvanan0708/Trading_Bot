@@ -521,9 +521,40 @@ async def get_fib_retracement_dashboard(
             states[tf] = await RetracementRepository(db).load_latest_active(
                 symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
 
-    return _build_strategy_dashboard(
+    dash = _build_strategy_dashboard(
         symbol, live_price, data_status, states, multi_svc.slots,
         strategy_label="FIB_WITH_RETRACEMENT")
+
+    ai_guardian = {}
+    try:
+        from app.database.models import AIValidationModel, SignalModel
+        q = (
+            select(AIValidationModel, SignalModel)
+            .join(SignalModel, AIValidationModel.signal_id == SignalModel.id)
+            .where(SignalModel.strategy.in_(("FIB_WITH_RETRACEMENT", "RETRACEMENT")))
+            .order_by(AIValidationModel.created_at.desc())
+            .limit(10)
+        )
+        res = (await db.execute(q)).all()
+        for ai_val, sig in res:
+            tf = (sig.timeframe or "5m").lower()
+            if tf not in ai_guardian:
+                ai_guardian[tf] = {
+                    "signal_id": sig.id,
+                    "timeframe": tf,
+                    "direction": sig.direction,
+                    "status": ai_val.status,
+                    "confidence": ai_val.confidence,
+                    "explanation": ai_val.explanation,
+                    "identified_risks": ai_val.identified_risks or [],
+                    "model": ai_val.model,
+                    "provider": ai_val.provider,
+                    "created_at": ai_val.created_at.isoformat() if ai_val.created_at else None,
+                }
+    except Exception as ai_e:
+        logger.debug("[STRATEGY] Error fetching AI guardian for Fib: %s", ai_e)
+    dash["ai_guardian"] = ai_guardian
+    return dash
 
 
 from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
@@ -578,6 +609,35 @@ async def get_smc_fib_dashboard(
             else:
                 card["cascade_status"] = "ACTIVE" if active_trade_tf else "SCANNING"
 
+    ai_guardian = {}
+    try:
+        from app.database.models import AIValidationModel, SignalModel
+        q = (
+            select(AIValidationModel, SignalModel)
+            .join(SignalModel, AIValidationModel.signal_id == SignalModel.id)
+            .where(SignalModel.strategy == "SMC_WITH_FIB")
+            .order_by(AIValidationModel.created_at.desc())
+            .limit(10)
+        )
+        res = (await db.execute(q)).all()
+        for ai_val, sig in res:
+            tf = (sig.timeframe or "5m").lower()
+            if tf not in ai_guardian:
+                ai_guardian[tf] = {
+                    "signal_id": sig.id,
+                    "timeframe": tf,
+                    "direction": sig.direction,
+                    "status": ai_val.status,
+                    "confidence": ai_val.confidence,
+                    "explanation": ai_val.explanation,
+                    "identified_risks": ai_val.identified_risks or [],
+                    "model": ai_val.model,
+                    "provider": ai_val.provider,
+                    "created_at": ai_val.created_at.isoformat() if ai_val.created_at else None,
+                }
+    except Exception as ai_e:
+        logger.debug("[STRATEGY] Error fetching AI guardian for SMC: %s", ai_e)
+
     return {
         "strategy": "SMC_WITH_FIB",
         "symbol": symbol,
@@ -587,6 +647,7 @@ async def get_smc_fib_dashboard(
         "active_trade_tf": active_trade_tf,
         "cascading_active_tf": active_trade_tf,
         "timeframes": states,
+        "ai_guardian": ai_guardian,
     }
 
 
