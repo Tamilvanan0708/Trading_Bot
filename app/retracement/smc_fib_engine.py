@@ -415,32 +415,6 @@ class SMCFibEngine:
                 self.state = RetracementState.TRADE_ACTIVE
 
     def _track_active_trade(self, candle: Candle) -> None:
-        # 1. Opposite Market Structure Break (CHoCH Reversal):
-        # If market structure breaks in the opposite direction, the current trade is invalidated / stopped out by CHoCH,
-        # and we immediately initiate the reversal setup (e.g. Bearish Short stopped out -> Bullish Long setup).
-        swings = detect_swings(self._history, left_bars=self.left_bars, right_bars=self.right_bars)
-        confirmed_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._history) - 1]
-        confirmed_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._history) - 1]
-
-        if self.direction == SignalDirection.SHORT and confirmed_highs:
-            last_high = confirmed_highs[-1]
-            if candle.close > last_high.price and last_high.index < len(self._history) - 1:
-                self.state = RetracementState.COMPLETED
-                self.outcome = "SL_HIT"
-                self.completion_reason = f"CHoCH Reversal: Price broke above swing high at {last_high.price}."
-                # Do NOT call _reset_setup here — the caller needs to observe the
-                # completed state.  Reset + re-detect will happen on the next candle.
-                return
-        elif self.direction == SignalDirection.LONG and confirmed_lows:
-            last_low = confirmed_lows[-1]
-            if candle.close < last_low.price and last_low.index < len(self._history) - 1:
-                self.state = RetracementState.COMPLETED
-                self.outcome = "SL_HIT"
-                self.completion_reason = f"CHoCH Reversal: Price broke below swing low at {last_low.price}."
-                # Do NOT call _reset_setup here — the caller needs to observe the
-                # completed state.  Reset + re-detect will happen on the next candle.
-                return
-
         if self.direction == SignalDirection.LONG:
             # Check SL Hit at 0.920 Stop Loss first (matching research evaluator)
             if self.sl_price is not None and candle.low <= self.sl_price:

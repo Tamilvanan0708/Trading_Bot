@@ -358,6 +358,29 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 )
                                                 continue
 
+                                    # Higher Timeframe (1H) Macro Trend Filter for fast timeframes (1m, 3m, 5m, 15m)
+                                    if tf_key in ("1m", "3m", "5m", "15m") and hasattr(fib_svc, "slots") and "1h" in fib_svc.slots:
+                                        slot_1h = fib_svc.slots.get("1h")
+                                        if slot_1h and getattr(slot_1h, "engine", None):
+                                            c_1h = getattr(slot_1h.engine, "_candles", [])
+                                            if len(c_1h) >= 20 and entry_px > 500.0:
+                                                from app.indicators.ema import calculate_ema
+                                                ema_1h_vals = calculate_ema(c_1h, period=min(50, len(c_1h)))
+                                                if ema_1h_vals:
+                                                    last_1h_ema = ema_1h_vals[-1]
+                                                    if f_state.direction in ("SHORT", "SELL") and entry_px > last_1h_ema:
+                                                        logger.info(
+                                                            "[PAPER-AUTO] 1H Macro Trend Filter: Skipping %s SHORT trade because price $%.2f is above 1H EMA $%.2f (1H Uptrend)",
+                                                            tf_key.upper(), entry_px, last_1h_ema,
+                                                        )
+                                                        continue
+                                                    elif f_state.direction in ("LONG", "BUY") and entry_px < last_1h_ema:
+                                                        logger.info(
+                                                            "[PAPER-AUTO] 1H Macro Trend Filter: Skipping %s LONG trade because price $%.2f is below 1H EMA $%.2f (1H Downtrend)",
+                                                            tf_key.upper(), entry_px, last_1h_ema,
+                                                        )
+                                                        continue
+
                                 _in_flight_signals.add(sig_id)
                                 try:
                                     # --- AI VALIDATION GATE ---
@@ -661,12 +684,13 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     )
                 )).scalars().all()
 
-                # Per-trade validation: check if each open trade is still actively tracked by its timeframe engine.
-                # If its timeframe engine is no longer active (or anchor changed), close the stale trade immediately.
-                existing_open_smc = None
+                # Per-trade validation: track active open trades per timeframe.
+                existing_open_smc_by_tf: dict[str, PaperTradeModel] = {}
                 for ot in open_smc_trades:
                     parts = (ot.signal_id or "").split("_")
                     ot_tf = parts[2].lower() if len(parts) >= 3 else None
+                    if not ot_tf:
+                        continue
                     ot_card = smc_states.get(ot_tf) if ot_tf else None
                     ot_engine_active = bool(ot_card and ot_card.get("is_trade_active"))
 
@@ -675,22 +699,44 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     card_anchor = str(int(card_p2)) if card_p2 else None
                     is_valid_active = ot_engine_active and (ot_anchor is None or ot_anchor == card_anchor)
 
-                    if is_valid_active and existing_open_smc is None:
-                        existing_open_smc = ot
+                    if ot_tf not in existing_open_smc_by_tf:
+                        if is_valid_active:
+                            existing_open_smc_by_tf[ot_tf] = ot
+                        else:
+                            # If trade is still within bounds, let the global price monitor exit it naturally!
+                            # Only close if it has genuinely reached SL/TP or is stale (> 6h)
+                            entry_chk = ot.actual_entry or ot.target_entry or 0.0
+                            close_px = live_price if (live_price and live_price > 1000.0) else (ot.stop_loss or entry_chk)
+                            dir_chk = ot.direction or "LONG"
+                            sl_hit = (close_px <= ot.stop_loss) if (dir_chk == "LONG" and ot.stop_loss) else ((close_px >= ot.stop_loss) if (dir_chk == "SHORT" and ot.stop_loss) else False)
+                            tp_hit = (close_px >= ot.take_profit_1) if (dir_chk == "LONG" and ot.take_profit_1) else ((close_px <= ot.take_profit_1) if (dir_chk == "SHORT" and ot.take_profit_1) else False)
+                            age_hours = (datetime.now(timezone.utc) - (ot.opened_at or ot.created_at)).total_seconds() / 3600.0 if (ot.opened_at or ot.created_at) else 0.0
+
+                            if not sl_hit and not tp_hit and age_hours < 6.0:
+                                existing_open_smc_by_tf[ot_tf] = ot
+                            else:
+                                pts_stale = round((close_px - entry_chk) if dir_chk == "LONG" else (entry_chk - close_px), 2)
+                                ot.state = "CLOSED"
+                                ot.exit_price = close_px
+                                ot.exit_reason = "TP_HIT" if tp_hit else ("SL_HIT" if sl_hit else "SETUP_INVALIDATED")
+                                ot.closed_at = datetime.now(timezone.utc)
+                                ot.realized_pnl = round(pts_stale * (ot.lot_size or 0.01) * 100.0, 2)
+                                ot.realized_r = round(pts_stale / max(0.1, abs(entry_chk - (ot.stop_loss or 0.0))), 2)
+                                await db.commit()
+                                logger.info("[PAPER-AUTO] Closed stale SMC trade %s (TF %s, reason: %s) @ %.2f", ot.signal_id, ot_tf, ot.exit_reason, close_px)
                     else:
+                        # Extra duplicate trade on the same timeframe -> close older
                         entry_chk = ot.actual_entry or ot.target_entry or 0.0
                         close_px = live_price if (live_price and live_price > 1000.0) else (ot.stop_loss or entry_chk)
-                        if entry_chk > 0 and close_px and close_px > 1000.0:
-                            dir_chk = ot.direction or "LONG"
-                            pts_stale = round((close_px - entry_chk) if dir_chk == "LONG" else (entry_chk - close_px), 2)
-                            ot.state = "CLOSED"
-                            ot.exit_price = close_px
-                            ot.exit_reason = "TP_HIT" if pts_stale > 0 else "SL_HIT"
-                            ot.closed_at = datetime.now(timezone.utc)
-                            ot.realized_pnl = round(pts_stale * (ot.lot_size or 0.01) * 100.0, 2)
-                            ot.realized_r = round(pts_stale / max(0.1, abs(entry_chk - (ot.stop_loss or 0.0))), 2)
-                            await db.commit()
-                            logger.info("[PAPER-AUTO] Orphan-closed stale SMC trade %s (TF %s inactive or anchor mismatch) @ %.2f", ot.signal_id, ot_tf, close_px)
+                        dir_chk = ot.direction or "LONG"
+                        pts_stale = round((close_px - entry_chk) if dir_chk == "LONG" else (entry_chk - close_px), 2)
+                        ot.state = "CLOSED"
+                        ot.exit_price = close_px
+                        ot.exit_reason = "DUPLICATE_CLOSED"
+                        ot.closed_at = datetime.now(timezone.utc)
+                        ot.realized_pnl = round(pts_stale * (ot.lot_size or 0.01) * 100.0, 2)
+                        ot.realized_r = round(pts_stale / max(0.1, abs(entry_chk - (ot.stop_loss or 0.0))), 2)
+                        await db.commit()
 
                 for tf_key in smc_svc.timeframes:
                     s_card = smc_states.get(tf_key) or {}
@@ -765,24 +811,25 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                     # Track + close existing OPEN SMC trade if engine signals TP_HIT / SL_HIT / COMPLETED
                     smc_outcome = s_card.get("outcome")  # "TP_HIT" | "SL_HIT" | None
-                    if existing_open_smc is not None and existing_open_smc.signal_id == sig_id and existing_open_smc.state == "OPEN":
-                        entry_chk = existing_open_smc.actual_entry or existing_open_smc.target_entry or 0.0
+                    tf_open_trade = existing_open_smc_by_tf.get(tf_key)
+                    if tf_open_trade is not None and tf_open_trade.signal_id == sig_id and tf_open_trade.state == "OPEN":
+                        entry_chk = tf_open_trade.actual_entry or tf_open_trade.target_entry or 0.0
                         if smc_outcome in ("TP_HIT", "SL_HIT") and entry_chk > 0:
                             exit_reason = smc_outcome
                             exit_px = tp_px if smc_outcome == "TP_HIT" else sl_px
                             pts = round((tp_px - entry_chk) if dir_str == "LONG" else (entry_chk - tp_px), 2) if smc_outcome == "TP_HIT" else round((sl_px - entry_chk) if dir_str == "LONG" else (entry_chk - sl_px), 2)
-                            existing_open_smc.state = "CLOSED"
-                            existing_open_smc.exit_price = exit_px
-                            existing_open_smc.exit_reason = exit_reason
-                            existing_open_smc.closed_at = datetime.now(timezone.utc)
-                            existing_open_smc.realized_pnl = round(pts * (existing_open_smc.lot_size or 0.01) * 100.0, 2)
-                            existing_open_smc.realized_r = round(pts / max(0.1, abs(entry_chk - (existing_open_smc.stop_loss or 0.0))), 2)
+                            tf_open_trade.state = "CLOSED"
+                            tf_open_trade.exit_price = exit_px
+                            tf_open_trade.exit_reason = exit_reason
+                            tf_open_trade.closed_at = datetime.now(timezone.utc)
+                            tf_open_trade.realized_pnl = round(pts * (tf_open_trade.lot_size or 0.01) * 100.0, 2)
+                            tf_open_trade.realized_r = round(pts / max(0.1, abs(entry_chk - (tf_open_trade.stop_loss or 0.0))), 2)
                             await db.commit()
-                            logger.info("[PAPER-AUTO] Engine %s closed SMC trade %s @ %.2f (+$%.2f)", smc_outcome, sig_id, exit_px, existing_open_smc.realized_pnl)
-                            existing_open_smc = None  # Allow next setup to open
+                            logger.info("[PAPER-AUTO] Engine %s closed SMC trade %s @ %.2f (+$%.2f)", smc_outcome, sig_id, exit_px, tf_open_trade.realized_pnl)
+                            existing_open_smc_by_tf.pop(tf_key, None)  # Allow next setup to open on this TF
 
-                    # Single Active Trade Rule: Only open trade if no open SMC trade exists!
-                    if s_card.get("is_entry_touched") and sig_id not in _in_flight_signals and existing_open_smc is None:
+                    # Single Active Trade Rule: Only open trade if no open SMC trade exists on THIS timeframe!
+                    if s_card.get("is_entry_touched") and sig_id not in _in_flight_signals and (tf_key not in existing_open_smc_by_tf):
                         existing = (await db.execute(
                             select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
                         )).scalars().first()

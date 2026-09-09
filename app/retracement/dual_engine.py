@@ -121,11 +121,11 @@ class DualRetracementEngine:
         if tf in ("1m", "3m"):
             return 2.0
         if tf == "5m":
-            return 4.0
-        if tf == "15m":
             return 6.0
+        if tf == "15m":
+            return 7.0
         if tf == "30m":
-            return 8.0
+            return 9.0
         return 12.0
 
     def process_candle(self, candle: Candle) -> list[RetracementEvent]:
@@ -305,6 +305,11 @@ class DualRetracementEngine:
         setup.sl_price = setup.fib_0_236
         setup.dynamic_tp = setup.fib_1_000
 
+        # Protect against micro-noise on Gold: enforce minimum SL distance of 4.5 pts
+        if high_target > 1000.0 and setup.entry_price and setup.sl_price:
+            if (setup.entry_price - setup.sl_price) < 4.5:
+                setup.sl_price = round(setup.entry_price - 4.5, 2)
+
     def _apply_bearish_fib(self, setup: RetracementSetup, high_anchor: float, low_target: float) -> None:
         span = high_anchor - low_target if high_anchor > low_target else 1.0
         setup.fib_0 = high_anchor
@@ -318,6 +323,11 @@ class DualRetracementEngine:
         setup.entry_price = setup.fib_0_618
         setup.sl_price = setup.fib_0_236
         setup.dynamic_tp = setup.fib_1_000
+
+        # Protect against micro-noise on Gold: enforce minimum SL distance of 4.5 pts
+        if high_anchor > 1000.0 and setup.entry_price and setup.sl_price:
+            if (setup.sl_price - setup.entry_price) < 4.5:
+                setup.sl_price = round(setup.entry_price + 4.5, 2)
 
     def _detect_fresh_bos_if_available(self, candle: Candle, direction: str) -> list[RetracementEvent]:
         """Detect if a newer, sharper micro-BOS formed while waiting for entry.
