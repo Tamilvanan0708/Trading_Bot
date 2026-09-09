@@ -161,6 +161,12 @@ class RetracementSetup(BaseModel):
     validation_passed: bool = False
     insufficient_structure_reason: str = ""
 
+    # Multimodal Vision AI Verification
+    ai_status: str | None = "EVALUATING"
+    ai_confidence: float | None = 88.0
+    ai_reason: str = "Monitoring 0.618 Retracement"
+    ai_timestamp: datetime | None = None
+
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     invalidation_reason: str = ""

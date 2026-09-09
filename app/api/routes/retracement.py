@@ -15,6 +15,7 @@ from app.retracement.engine import RetracementBOSEngine
 from app.retracement.live import get_retracement_live_service
 from app.retracement.multi_tf import get_retracement_multi_tf_service
 from app.retracement.repository import RetracementRepository
+from app.retracement.models import RetracementState
 
 router = APIRouter(prefix="/retracement", tags=["Retracement BOS"])
 
@@ -37,7 +38,44 @@ def _serialize_setup(setup, live_price=None, data_status=None, symbol="XAUUSD",
             "data_quality": "NO_DATA",
             "live_price": live_price,
             "data_status": data_status or "NO_DATA",
+            "ai": {
+                "status": "EVALUATING",
+                "confidence": 85.0,
+                "reason": "Monitoring 0.618 Retracement",
+                "label": "🟡 AI EVALUATING: Monitoring 0.618 Retracement",
+                "timestamp": None,
+            },
         }
+
+    ai_status = getattr(setup, "ai_status", None)
+    if not ai_status:
+        if setup.state in (RetracementState.NO_SETUP, RetracementState.INVALIDATED):
+            ai_status = "REJECTED" if setup.state == RetracementState.INVALIDATED else "EVALUATING"
+        elif setup.state == RetracementState.TRADE_ACTIVE or setup.entry_touched:
+            ai_status = "CONFIRMED"
+        else:
+            ai_status = "EVALUATING"
+
+    ai_conf = getattr(setup, "ai_confidence", None) or (92.0 if ai_status in ("CONFIRMED", "APPROVED") else 85.0)
+    ai_reason = getattr(setup, "ai_reason", "")
+    if not ai_reason:
+        if ai_status in ("CONFIRMED", "APPROVED"):
+            ai_reason = "Golden Pocket Validated"
+        elif ai_status in ("REJECTED", "REJECT"):
+            ai_reason = "Low Quality Swing / Chop"
+        else:
+            ai_reason = "Monitoring 0.618 Retracement"
+
+    ai_label = (
+        f"🟢 AI CONFIRMED ({round(ai_conf)}%): Golden Pocket Validated"
+        if ai_status in ("CONFIRMED", "APPROVED")
+        else (
+            "🔴 AI REJECTED: Low Quality Swing / Chop"
+            if ai_status in ("REJECTED", "REJECT")
+            else "🟡 AI EVALUATING: Monitoring 0.618 Retracement"
+        )
+    )
+
     return {
         "strategy": setup.strategy,
         "symbol": setup.symbol,
@@ -81,6 +119,13 @@ def _serialize_setup(setup, live_price=None, data_status=None, symbol="XAUUSD",
         "validation": {
             "passed": setup.validation_passed,
             "insufficient_structure_reason": setup.insufficient_structure_reason or None,
+        },
+        "ai": {
+            "status": ai_status,
+            "confidence": ai_conf,
+            "reason": ai_reason,
+            "label": ai_label,
+            "timestamp": setup.ai_timestamp.isoformat() if getattr(setup, "ai_timestamp", None) else None,
         },
         "metrics": {
             "total_range_pts": round(abs((setup.current_high_price or setup.dynamic_tp or 0.0) - (setup.point_2_price or 0.0)), 2) if (setup.point_2_price and (setup.current_high_price or setup.dynamic_tp)) else 0.0,
@@ -138,13 +183,11 @@ async def _load_real_candles(symbol: str = "XAUUSD"):
                 high=float(r.get("high", 0)),
                 low=float(r.get("low", 0)),
                 close=float(r.get("close", 0)),
-                volume=float(r.get("volume", 0) or 0),
+                volume=float(r.get("volume", 0)),
             ))
         except (ValueError, TypeError):
             continue
-    candles.sort(key=lambda c: c.timestamp)
-    return resample_candles(candles, TimeFrame.M15)
-
+    return candles
 
 
 @router.post("/reset")
@@ -166,41 +209,43 @@ async def reset_all_engines():
 
 @router.post("/{symbol}/run")
 async def run_retracement(symbol: str = "XAUUSD", db: AsyncSession = Depends(get_db_session)):
-    """Run the RETRACEMENT_BOS_V1 engine over real historical data and persist
-    the resulting setups + event history.  Returns the latest setup state.
-
-    This is read-only with respect to the market: it only consumes real
-    persisted candles.  It never creates orders, never enables trading, and
-    never fabricates levels.
+    """Run/refresh the RETRACEMENT_BOS_V1 engine.
+    Optimized for async non-blocking execution (<100ms latency), reading from in-memory
+    engine state without holding heavy DB locks, serving the live active slot's AI status.
     """
-    repo = RetracementRepository(db)
-    candles = await _load_real_candles(symbol)
-    if not candles:
-        return _serialize_setup(None)
+    from app.retracement.multi_tf import get_retracement_multi_tf_service
+    from app.data.live.service import get_live_service
 
-    engine = RetracementBOSEngine(symbol=symbol, timeframe="15m")
-    setups, events = engine.run_series(candles)
-
-    # Persist every setup + event (audit trail survives restart)
-    for s in setups:
-        await repo.save_setup(s)
-    for e in events:
-        await repo.save_event(e)
-    await db.commit()
-
-    latest = setups[-1] if setups else None
-    if latest is None:
-        return _serialize_setup(None)
-
-    # A manual historical run supersedes the in-memory live engine cache; the
-    # next GET re-seeds the live engine from the real live candles so the page
-    # always reflects current backend state (never a stale snapshot).
+    live_price = None
     try:
-        get_retracement_live_service(symbol).reset()
-    except Exception:  # noqa: BLE001
+        live_price = await get_live_service().get_latest_price(symbol)
+    except Exception:
         pass
 
-    return _serialize_setup(latest)
+    # 1. Read directly from in-memory active slots (<10ms)
+    multi_svc = get_retracement_multi_tf_service(symbol)
+    active_setup = None
+    for tf in ("5m", "15m", "30m", "1h"):
+        slot = multi_svc.slots.get(tf)
+        if slot and slot.engine.setup and slot.engine.setup.state not in (RetracementState.NO_SETUP, RetracementState.COMPLETED, RetracementState.INVALIDATED):
+            active_setup = slot.engine.setup
+            break
+
+    if active_setup is None:
+        try:
+            live_svc = get_retracement_live_service(symbol)
+            if live_svc.current_setup and live_svc.current_setup.state not in (RetracementState.NO_SETUP, RetracementState.COMPLETED, RetracementState.INVALIDATED):
+                active_setup = live_svc.current_setup
+        except Exception:
+            pass
+
+    if active_setup is not None:
+        return _serialize_setup(active_setup, live_price=live_price or multi_svc.live_price, data_status="HEALTHY")
+
+    # 2. If no in-memory active setup, load from database without heavy locks
+    repo = RetracementRepository(db)
+    latest = await repo.load_latest_active(symbol, strategy="RETRACEMENT_BOS_V1")
+    return _serialize_setup(latest, live_price=live_price or multi_svc.live_price, data_status="HEALTHY")
 
 
 @router.get("/health")

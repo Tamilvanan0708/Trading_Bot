@@ -308,10 +308,8 @@ class DualRetracementEngine:
                 setup.sl_price = round(setup.entry_price + 4.5, 2)
 
     def _detect_fresh_bos_if_available(self, candle: Candle, direction: str) -> list[RetracementEvent]:
-        """Detect if a newer, sharper micro-BOS formed while waiting for entry.
-
-        This prevents holding onto stale, oversized 40-120 point swings when fresh
-        15-25 point micro-swings (stair-step breakouts) are active in the market.
+        """Detect if a genuine macro BOS formed while waiting for entry.
+        Filters out micro-swings (< min_impulse_range) to keep structural anchor locked.
         """
         setup = self.setup
         if setup is None or setup.layers:
@@ -344,6 +342,11 @@ class DualRetracementEngine:
                         if not lows_before:
                             return []
                         anchor_low = min(lows_before, key=lambda s: s.price)
+
+                    anchor_low_price = anchor_low.price
+                    leg_range = candle.high - anchor_low_price
+                    if leg_range < self._min_impulse_range():
+                        return []
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,
@@ -391,6 +394,11 @@ class DualRetracementEngine:
                         if not highs_before:
                             return []
                         anchor_high = max(highs_before, key=lambda s: s.price)
+
+                    anchor_high_price = anchor_high.price
+                    leg_range = anchor_high_price - candle.low
+                    if leg_range < self._min_impulse_range():
+                        return []
 
                     new_setup = RetracementSetup(
                         symbol=self.symbol,
@@ -582,7 +590,7 @@ class DualRetracementEngine:
         # As the impulse wave expands higher/lower, dynamically update Target 1.000 (Keep Anchor locked!)
 
         if setup.direction == "LONG":
-            # 1. Check for opposite (Bearish) BOS or fresh sharper micro-BOS before fills
+            # 1. Check for opposite (Bearish) BOS before fills
             if not setup.layers:
                 opp_events = self._detect_opposite_bos(candle)
                 if opp_events:
@@ -591,7 +599,7 @@ class DualRetracementEngine:
                 fresh_events = self._detect_fresh_bos_if_available(candle, "LONG")
                 if fresh_events:
                     setup.state = RetracementState.INVALIDATED
-                    setup.invalidation_reason = "Superceded by fresh recent micro BOS."
+                    setup.invalidation_reason = "Superceded by fresh structural BOS."
                     self._archived_setups.append(setup)
                     return fresh_events
 
@@ -601,28 +609,16 @@ class DualRetracementEngine:
                     setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f}) before entry."
                     return events
 
-                new_high_made = False
+                # Dynamic Target Expansion: Anchor (Point 2) stays fixed.
+                # As price pushes higher, Target 1.000 expands dynamically with each candle.
                 if candle.high > (setup.current_high_price or 0.0):
-                    new_high_made = True
                     setup.current_high_price = candle.high
                     setup.current_high_timestamp = candle.timestamp
-                    # Bounded span for scalping: roll anchor up if span > 35 pts and a higher swing low exists
-                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (candle.high - setup.point_2_price) > 35.0:
-                        swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
-                        c_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._candles) - 1]
-                        higher_lows = [s for s in c_lows if s.timestamp > setup.point_2_timestamp and s.price > setup.point_2_price and (candle.high - s.price) >= 10.0]
-                        if higher_lows:
-                            setup.point_2_price = higher_lows[-1].price
-                            setup.point_2_timestamp = higher_lows[-1].timestamp
                     self._apply_bullish_fib(setup, setup.point_2_price, candle.high)
 
-            # 2. Fill layers on pullback touch (3-Tranche Scaling System)
-            #    A true pullback retracement occurs AFTER the expansion high is formed.
-            #    If this candle set a NEW HIGH (expansion move), the candle's low occurred BEFORE/during
-            #    the expansion push (e.g. bullish candle or wick), so it is not a retracement of the new high.
-            #    Exception: Bearish reversal bar where open was the high (candle.open >= candle.high - 0.05).
-            can_fill = (not new_high_made) or (candle.open >= candle.high - 0.05)
-            new_fills = self._fill_long_layers(candle) if can_fill else []
+            # 2. Instant Touch Execution: execute L1/L2/L3 immediately upon line touch
+            #    without waiting for candle close or blocking on expansion bars.
+            new_fills = self._fill_long_layers(candle)
             for layer in new_fills:
                 events.append(RetracementEvent(
                     setup_id=setup.setup_id,
@@ -652,7 +648,7 @@ class DualRetracementEngine:
                     setup.tp_locked = True
                 setup.state = RetracementState.TRADE_ACTIVE
         else:
-            # 1. Check for opposite (Bullish) BOS or fresh sharper micro-BOS before fills
+            # 1. Check for opposite (Bullish) BOS before fills
             if not setup.layers:
                 opp_events = self._detect_opposite_bos(candle)
                 if opp_events:
@@ -661,7 +657,7 @@ class DualRetracementEngine:
                 fresh_events = self._detect_fresh_bos_if_available(candle, "SHORT")
                 if fresh_events:
                     setup.state = RetracementState.INVALIDATED
-                    setup.invalidation_reason = "Superceded by fresh recent micro BOS."
+                    setup.invalidation_reason = "Superceded by fresh structural BOS."
                     self._archived_setups.append(setup)
                     return fresh_events
 
@@ -671,28 +667,16 @@ class DualRetracementEngine:
                     setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f}) before entry."
                     return events
 
-                new_low_made = False
+                # Dynamic Target Expansion: Anchor (Point 2) stays fixed.
+                # As price pushes lower, Target 1.000 expands dynamically with each candle.
                 if candle.low < (setup.current_high_price or float("inf")):
-                    new_low_made = True
                     setup.current_high_price = candle.low
                     setup.current_high_timestamp = candle.timestamp
-                    # Bounded span for scalping: roll anchor down if span > 35 pts and a lower swing high exists
-                    if str(self.timeframe).lower() in ("1m", "3m", "5m") and (setup.point_2_price - candle.low) > 35.0:
-                        swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
-                        c_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._candles) - 1]
-                        lower_highs = [s for s in c_highs if s.timestamp > setup.point_2_timestamp and s.price < setup.point_2_price and (s.price - candle.low) >= 10.0]
-                        if lower_highs:
-                            setup.point_2_price = lower_highs[-1].price
-                            setup.point_2_timestamp = lower_highs[-1].timestamp
                     self._apply_bearish_fib(setup, setup.point_2_price, candle.low)
 
-            # 2. Fill layers on pullback touch (SHORT: price rallies UP to the level)
-            #    A true pullback retracement occurs AFTER the expansion low is formed.
-            #    If this candle set a NEW LOW (downward expansion), the candle's high occurred BEFORE/during
-            #    the drop, so it is not a retracement of the new low.
-            #    Exception: Bullish reversal bar where open was the low (candle.open <= candle.low + 0.05).
-            can_fill = (not new_low_made) or (candle.open <= candle.low + 0.05)
-            new_fills = self._fill_short_layers(candle) if can_fill else []
+            # 2. Instant Touch Execution: execute L1/L2/L3 immediately upon line touch
+            #    without waiting for candle close or blocking on expansion bars.
+            new_fills = self._fill_short_layers(candle)
             for layer in new_fills:
                 events.append(RetracementEvent(
                     setup_id=setup.setup_id,

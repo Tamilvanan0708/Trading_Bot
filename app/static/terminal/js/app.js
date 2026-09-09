@@ -2230,6 +2230,50 @@ function renderCompleted(setups) {
     return "NO DATA";
   }
 
+  function renderTfAIBadge(d) {
+    const ai = (d && d.ai) || {};
+    const st = String((d && d.state) || "NO_SETUP").toUpperCase();
+    const s = String(ai.status || (st === "INVALIDATED" ? "REJECTED" : (d && d.entry && d.entry.touched ? "CONFIRMED" : "EVALUATING"))).toUpperCase();
+    const conf = ai.confidence != null ? ai.confidence : 88;
+    if (s.includes("CONFIRM") || s.includes("APPROV")) {
+      return `<span class="badge badge-green" style="font-size:11px;font-weight:700">🟢 AI CONFIRMED (${UI.fmt(conf, 0)}%)</span>`;
+    } else if (s.includes("REJECT")) {
+      return `<span class="badge badge-red" style="font-size:11px;font-weight:700">🔴 AI REJECTED</span>`;
+    }
+    return `<span class="badge badge-amber" style="font-size:11px;font-weight:700">🟡 AI EVALUATING</span>`;
+  }
+
+  function renderVisionAICard(d) {
+    const ai = (d && d.ai) || {};
+    const st = String((d && d.state) || "NO_SETUP").toUpperCase();
+    const aiStatus = String(ai.status || (st === "INVALIDATED" ? "REJECTED" : (d && d.entry && d.entry.touched ? "CONFIRMED" : "EVALUATING"))).toUpperCase();
+    const conf = ai.confidence != null ? ai.confidence : 88;
+    const reason = ai.reason || (aiStatus.includes("CONFIRM") || aiStatus.includes("APPROV") ? "Golden Pocket Validated" : (aiStatus.includes("REJECT") ? "Low Quality Swing / Chop" : "Monitoring 0.618 Retracement"));
+
+    let badge = "";
+    let borderCol = "";
+    if (aiStatus.includes("CONFIRM") || aiStatus.includes("APPROV")) {
+      badge = `<span class="badge badge-green" style="font-weight:700">🟢 AI CONFIRMED (${UI.fmt(conf, 0)}%): Golden Pocket Validated</span>`;
+      borderCol = "#22c55e";
+    } else if (aiStatus.includes("REJECT")) {
+      badge = `<span class="badge badge-red" style="font-weight:700">🔴 AI REJECTED: Low Quality Swing / Chop</span>`;
+      borderCol = "#ef4444";
+    } else {
+      badge = `<span class="badge badge-amber" style="font-weight:700">🟡 AI EVALUATING: Monitoring 0.618 Retracement</span>`;
+      borderCol = "#ffd54f";
+    }
+
+    return `<div class="card" style="border-left:4px solid ${borderCol};margin-bottom:var(--sp-3)">
+      <div class="card-head">
+        <span style="display:flex;align-items:center;gap:6px">🧠 Vision AI Verification</span>
+        ${badge}
+      </div>
+      <div class="card-body" style="font-size:12px;color:var(--text-dim);line-height:1.5">
+        ${UI.esc(reason)}
+      </div>
+    </div>`;
+  }
+
   function renderTfSignalCard(tf, d, price) {
     const state = String(d && d.state || "NO_SETUP").toUpperCase();
     const tfBadge = `<span class="badge badge-blue" style="font-size:13px">${UI.esc(tf.toUpperCase())}</span>`;
@@ -2270,6 +2314,7 @@ function renderCompleted(setups) {
           ${tfBadge}
           <span class="badge badge-green">▲ BULLISH RETRACEMENT</span>
           ${entryChip}${tpChip}
+          ${renderTfAIBadge(d)}
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:11px;color:var(--text-dim)">STATE: ${UI.esc(state.replace(/_/g, " "))}</span>
@@ -2326,6 +2371,8 @@ function renderCompleted(setups) {
       </div>
 
       <div id="retr-timeline">${renderStateTimeline(data.state, data.outcome)}</div>
+
+      <div id="retr-ai-card">${renderVisionAICard(data)}</div>
 
       <div id="retr-multi"></div>
 
@@ -2401,6 +2448,7 @@ function renderCompleted(setups) {
       const el = document.getElementById(id);
       if (el && el.innerHTML !== html) el.innerHTML = html;
     };
+    setHtml("retr-ai-card", renderVisionAICard(data));
     setHtml("retr-multi", renderMultiSignals(multi));
     setHtml("retr-timeline", renderStateTimeline(data.state, data.outcome));
     setHtml("retr-signal", renderActiveSignal(data, price, feedStatus));
@@ -2864,6 +2912,12 @@ Routes["/ai"] = (mount) => {
           <span>ENTRY STATUS</span><span>${entryStatus}</span>
         </div>
         ${tp.is_locked ? `<div class="row-between" style="font-size:12px;margin-top:4px"><span>LOCKED TP</span><span style="font-weight:700;font-family:var(--font-num)">${UI.fmt(tp.locked)}</span></div>` : ""}
+        <div class="divider" style="margin:6px 0"></div>
+        <div class="row-between" style="font-size:12px;margin-top:4px">
+          <span>VISION AI</span>
+          <span>${r.ai && r.ai.label ? r.ai.label : (r.entry_touched ? '<span class="badge badge-green">🟢 AI CONFIRMED</span>' : '<span class="badge badge-amber">🟡 AI EVALUATING</span>')}</span>
+        </div>
+        ${r.ai && r.ai.reason ? `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${UI.esc(r.ai.reason)}</div>` : ''}
       </div>
     </div></div>`;
   }

@@ -499,9 +499,9 @@ def test_multi_section_has_no_monetary_pnl():
     assert "PTS" in section
 
 
-def test_new_high_bar_does_not_fill_pullback_on_same_bar():
-    """A candle that pushes to a new expansion high must not use its own low
-    (which occurred before the push) to trigger a premature retracement fill."""
+def test_expansion_bar_touch_fills_instantly():
+    """When price touches the entry level (0.618), execute L1 immediately
+    without waiting for candle close or blocking on expansion bars."""
     from app.retracement.dual_engine import DualRetracementEngine
 
     series = _m15_waiting_series()
@@ -517,7 +517,8 @@ def test_new_high_bar_does_not_fill_pullback_on_same_bar():
     push = _bar(last_ts + _DT, 125.0, 135.0, 120.0, 133.0)
     engine.process_candle(push)
 
-    # Must remain in TP_DYNAMIC with zero layers filled because this bar set the new high
-    assert engine.setup.state == RetracementState.TP_DYNAMIC
-    assert len(engine.setup.layers) == 0
-    assert engine.setup.entry_touched is False
+    # Under instant touch execution, L1 executes immediately upon line touch
+    assert engine.setup.state == RetracementState.TRADE_ACTIVE
+    assert "L1" in engine.setup.layers
+    assert engine.setup.entry_touched is True
+    assert engine.setup.tp_locked is True

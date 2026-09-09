@@ -515,25 +515,41 @@ async def ai_validation_dashboard(symbol: str = "XAUUSD",
         ai_provider_status = "HEALTHY"
         ai_provider_name = ai.get("provider", "UNKNOWN")
 
-    # 4. Retracement state
+    # 4. Retracement state — serve active live slot directly (eliminates stale cached DB history)
     retr = None
     try:
-        live_svc = get_retracement_live_service(symbol)
-        retr_setup = await live_svc.advance(db)
-        if retr_setup is not None:
-            from app.api.routes.retracement import _serialize_setup
-            retr = _serialize_setup(retr_setup, live_price=live_price, data_status="HEALTHY" if not degraded else "NO_DATA")
+        from app.retracement.multi_tf import get_retracement_multi_tf_service
+        from app.api.routes.retracement import _serialize_setup
+        multi_svc = get_retracement_multi_tf_service(symbol)
+        active_setup = None
+        for tf_name in ("5m", "15m", "30m", "1h"):
+            slot = multi_svc.slots.get(tf_name)
+            if slot and slot.engine.setup and str(slot.engine.setup.state) not in ("NO_SETUP", "COMPLETED", "INVALIDATED"):
+                active_setup = slot.engine.setup
+                break
+        if active_setup is not None:
+            retr = _serialize_setup(active_setup, live_price=live_price, data_status="HEALTHY" if not degraded else "NO_DATA")
     except Exception as exc:  # noqa: BLE001
-        logger.debug("[AI] retracement state unavailable: %s", exc)
+        logger.debug("[AI] multi_tf active slot check: %s", exc)
+
+    if retr is None:
         try:
-            from app.retracement.repository import RetracementRepository
-            repo = RetracementRepository(db)
-            retr_setup = await repo.load_latest_active(symbol, strategy="RETRACEMENT_BOS_V1")
+            live_svc = get_retracement_live_service(symbol)
+            retr_setup = await live_svc.advance(db)
             if retr_setup is not None:
                 from app.api.routes.retracement import _serialize_setup
-                retr = _serialize_setup(retr_setup, live_price=live_price, data_status="HISTORICAL")
-        except Exception:  # noqa: BLE001
-            pass
+                retr = _serialize_setup(retr_setup, live_price=live_price, data_status="HEALTHY" if not degraded else "NO_DATA")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[AI] retracement state unavailable: %s", exc)
+            try:
+                from app.retracement.repository import RetracementRepository
+                repo = RetracementRepository(db)
+                retr_setup = await repo.load_latest_active(symbol, strategy="RETRACEMENT_BOS_V1")
+                if retr_setup is not None:
+                    from app.api.routes.retracement import _serialize_setup
+                    retr = _serialize_setup(retr_setup, live_price=live_price, data_status="HISTORICAL")
+            except Exception:  # noqa: BLE001
+                pass
 
     # 5. Deterministic gate evaluation
     det = _gate_eval(settings, analysis, degraded)
