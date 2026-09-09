@@ -186,23 +186,23 @@ async def test_paper_trading_cross_timeframe_duplicate_skipped(in_memory_db: Asy
     monkeypatch.setattr(multi_tf, "get_live_service", lambda: FakeLive())
     monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: mon)
 
-    # Insert an existing OPEN trade on 1H with identical entry (113.1) and SL (104.69)
-    existing_1h_trade = PaperTradeModel(
-        signal_id="FIB_RETR_1H_L1_99",
-        symbol="XAUUSD",
-        direction="BUY",
-        state="OPEN",
-        lot_size=0.01,
-        risk_amount=8.0,
-        target_entry=113.1,
-        actual_entry=113.1,
-        stop_loss=104.69,
-        take_profit_1=121.5,
-        take_profit_2=121.5,
-        take_profit_3=121.5,
-        opened_at=datetime.now(timezone.utc),
-    )
-    in_memory_db.add(existing_1h_trade)
+    # Insert existing OPEN trades on 1H with identical entry & SL
+    for l_id, l_entry in [("L1", 116.15), ("L2", 114.50), ("L3", 112.85)]:
+        in_memory_db.add(PaperTradeModel(
+            signal_id=f"FIB_RETR_1H_{l_id}_107",
+            symbol="XAUUSD",
+            direction="BUY",
+            state="OPEN",
+            lot_size=0.01,
+            risk_amount=8.0,
+            target_entry=l_entry,
+            actual_entry=l_entry,
+            stop_loss=110.42,
+            take_profit_1=121.5,
+            take_profit_2=121.5,
+            take_profit_3=121.5,
+            opened_at=datetime.now(timezone.utc),
+        ))
     await in_memory_db.commit()
 
     # Run sync_strategy_paper_trades

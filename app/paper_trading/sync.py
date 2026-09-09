@@ -345,15 +345,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         ema_vals = calculate_ema(candles_for_ema, period=period)
                                         if ema_vals:
                                             latest_ema = ema_vals[-1]
-                                            if f_state.direction == "LONG" and entry_px < (latest_ema - 15.0):
+                                            if f_state.direction in ("LONG", "BUY") and entry_px < latest_ema:
                                                 logger.info(
-                                                    "[PAPER-AUTO] Trend Filter: Skipping LONG trade on %s because entry $%.2f is deeply counter-trend vs %d EMA $%.2f",
+                                                    "[PAPER-AUTO] Trend Filter: Skipping LONG trade on %s because entry $%.2f is counter-trend vs %d EMA $%.2f (Downtrend)",
                                                     tf_key.upper(), entry_px, period, latest_ema,
                                                 )
                                                 continue
-                                            elif f_state.direction == "SHORT" and entry_px > (latest_ema + 15.0):
+                                            elif f_state.direction in ("SHORT", "SELL") and entry_px > latest_ema:
                                                 logger.info(
-                                                    "[PAPER-AUTO] Trend Filter: Skipping SHORT trade on %s because entry $%.2f is deeply counter-trend vs %d EMA $%.2f",
+                                                    "[PAPER-AUTO] Trend Filter: Skipping SHORT trade on %s because entry $%.2f is counter-trend vs %d EMA $%.2f (Uptrend)",
                                                     tf_key.upper(), entry_px, period, latest_ema,
                                                 )
                                                 continue
@@ -364,6 +364,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     ai_approved = True
                                     ai_verdict = "APPROVED"
                                     try:
+                                        bos_label = "Bullish BOS" if f_state.direction in ("LONG", "BUY") else "Bearish BOS"
+                                        anchor_label = "Anchor swing low held" if f_state.direction in ("LONG", "BUY") else "Anchor swing high held"
+                                        sl_label = f"Stop loss protected below 0.236 at ${sl_px:.2f}" if f_state.direction in ("LONG", "BUY") else f"Stop loss protected above 0.236 at ${sl_px:.2f}"
                                         val_sig = SignalPayload(
                                             signal_id=sig_id,
                                             instrument="XAUUSD",
@@ -395,10 +398,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 "bos_confirmation": "FULL_BODY_CLOSE",
                                             },
                                             reasons=[
-                                                f"Clean {tf_key.upper()} Bullish BOS confirmed at ${f_state.point_1_price:.2f}",
-                                                f"Anchor swing low held at ${f_state.point_2_price:.2f}",
+                                                f"Clean {tf_key.upper()} {bos_label} confirmed at ${f_state.point_1_price:.2f}",
+                                                f"{anchor_label} at ${f_state.point_2_price:.2f}",
                                                 f"Entry touched at {l_key} Fibonacci retracement ${entry_px:.2f}",
-                                                f"Stop loss protected at 0.236 ${sl_px:.2f}",
+                                                sl_label,
                                             ],
                                         )
                                         ai_res = await validator.validate(val_sig)
@@ -762,6 +765,29 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         )).scalars().first()
 
                         if not existing and entry_px > 0:
+                            # --- SMC MACRO TREND ALIGNMENT FILTER (EMA) ---
+                            if getattr(exec_cfg, "trend_filter_enabled", True):
+                                tf_slot = smc_svc.slots.get(tf_key) if hasattr(smc_svc, "slots") else None
+                                candles_for_ema = getattr(tf_slot.engine, "_candles", []) if tf_slot else []
+                                if len(candles_for_ema) >= 30 and entry_px > 500.0:
+                                    from app.indicators.ema import calculate_ema
+                                    period = 200 if len(candles_for_ema) >= 200 else (50 if len(candles_for_ema) >= 50 else 20)
+                                    ema_vals = calculate_ema(candles_for_ema, period=period)
+                                    if ema_vals:
+                                        latest_ema = ema_vals[-1]
+                                        if dir_str in ("LONG", "BUY") and entry_px < latest_ema:
+                                            logger.info(
+                                                "[PAPER-AUTO] SMC Trend Filter: Skipping LONG trade on %s because entry $%.2f is counter-trend vs %d EMA $%.2f (Downtrend)",
+                                                tf_key.upper(), entry_px, period, latest_ema,
+                                            )
+                                            continue
+                                        elif dir_str in ("SHORT", "SELL") and entry_px > latest_ema:
+                                            logger.info(
+                                                "[PAPER-AUTO] SMC Trend Filter: Skipping SHORT trade on %s because entry $%.2f is counter-trend vs %d EMA $%.2f (Uptrend)",
+                                                tf_key.upper(), entry_px, period, latest_ema,
+                                            )
+                                            continue
+
                             _in_flight_signals.add(sig_id)
                             try:
                                 # --- AI VALIDATION GATE ---

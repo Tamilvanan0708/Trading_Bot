@@ -338,8 +338,8 @@ class OpenAICompatibleProvider(BaseAIProvider):
         return bool(cls._api_key(settings))
 
     async def validate(self, settings, context: dict, request_id: str) -> ProviderResult:
-        api_key = self._api_key(settings)
-        base_url = self._base_url(settings)
+        api_key = (self._api_key(settings) or "").strip()
+        base_url = (self._base_url(settings) or "").strip().rstrip("/")
         model = getattr(settings, f"{self.name.upper()}_MODEL", self.default_model) or self.default_model
         payload = json.dumps(context, indent=2, default=str)
         url = f"{base_url}/chat/completions"
@@ -383,6 +383,10 @@ class OpenAICompatibleProvider(BaseAIProvider):
             return ProviderResult(status="UNAVAILABLE", score=0, reason=f"Network error: {exc}",
                                   reason_code="CONNECTION_ERROR", provider=self.name, model=model,
                                   request_id=request_id, raw_response="NETWORK_ERROR")
+        except httpx.HTTPError as exc:
+            return ProviderResult(status="UNAVAILABLE", score=0, reason=f"HTTP protocol error: {exc}",
+                                  reason_code="PROTOCOL_ERROR", provider=self.name, model=model,
+                                  request_id=request_id, raw_response="PROTOCOL_ERROR")
 
         if res.status_code == 400:
             # Provider rejected the request body.  Capture the reason safely.
@@ -490,7 +494,7 @@ class LegacyOpenAIProvider(OpenAICompatibleProvider):
         return "https://api.openai.com/v1"
     @classmethod
     def _api_key(cls, settings):
-        return getattr(settings, "OPENAI_API_KEY", "") or getattr(settings, "AI_API_KEY", "")
+        return (getattr(settings, "OPENAI_API_KEY", "") or getattr(settings, "AI_API_KEY", "") or "").strip()
 
 
 class GeminiProvider(BaseAIProvider):
