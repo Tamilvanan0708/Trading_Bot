@@ -18,11 +18,13 @@ input string   InpSymbolOverride= "XAUUSD";                 // Broker Symbol (le
 input int      InpMagicNumber   = 777888;                   // EA Magic Number
 input int      InpPollIntervalMs= 250;                      // Order Poll Interval in Milliseconds
 input int      InpSlippagePts   = 50;                       // Max Slippage in Points
+input bool     InpRequireStopLoss = true;                   // Reject open orders lacking a valid stop-loss (never send unprotected)
 
 //--- Internal State
 string g_symbol;
 datetime g_last_heartbeat = 0;
 CTrade g_trade;
+string g_processed_ids[]; // Dedup registry of order ids already handled this session
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -143,8 +145,120 @@ void PollPendingOrders()
       return; // No pending orders
    }
    
-   // Parse and execute pending order
-   ExecuteIncomingOrder(response);
+    // Parse and execute ALL pending orders in the queue (the server pops every
+    // order on this response, so skipping any would silently lose it)
+    ProcessAllOrders(response);
+}
+
+//+------------------------------------------------------------------+
+//| Splits the "orders":[...] array and executes EVERY order object  |
+//| (brace-balanced scan that ignores braces inside quoted strings)  |
+//+------------------------------------------------------------------+
+void ProcessAllOrders(string response)
+{
+   int key_pos = StringFind(response, "\"orders\"");
+   if(key_pos < 0) return;
+   int arr_start = StringFind(response, "[", key_pos);
+   if(arr_start < 0) return;
+   
+   int len = StringLen(response);
+   int depth = 0;
+   int obj_begin = -1;
+   bool in_str = false;
+   bool escaped = false;
+   string obj = "";
+   
+   for(int i = arr_start + 1; i < len; i++)
+   {
+      ushort c = StringGetCharacter(response, i);
+      string ch = CharToString(c);
+      
+      if(escaped)
+      {
+         escaped = false;
+         if(depth > 0) obj = obj + ch;
+         continue;
+      }
+      if(in_str)
+      {
+         if(c == '\\') escaped = true;
+         else if(c == '"') in_str = false;
+         if(depth > 0) obj = obj + ch;
+         continue;
+      }
+      if(c == '"')
+      {
+         in_str = true;
+         if(depth > 0) obj = obj + ch;
+         continue;
+      }
+      if(c == '{')
+      {
+         if(depth == 0) { obj = ""; obj_begin = i; }
+         obj = obj + ch;
+         depth++;
+         continue;
+      }
+      if(c == '}')
+      {
+         if(depth == 0) continue;
+         obj = obj + ch;
+         depth--;
+         if(depth == 0 && obj_begin >= 0)
+         {
+            ExecuteIncomingOrder(obj); // one complete order object
+            obj = "";
+            obj_begin = -1;
+         }
+         continue;
+      }
+      if(c == ']' && depth == 0) break; // end of the orders array
+      if(depth > 0) obj = obj + ch;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Order-id dedup: an id is registered BEFORE execution so a       |
+//| re-delivered or duplicated response can never double-execute.    |
+//+------------------------------------------------------------------+
+bool IsOrderProcessed(string order_id)
+{
+   for(int i = 0; i < ArraySize(g_processed_ids); i++)
+      if(g_processed_ids[i] == order_id) return true;
+   return false;
+}
+
+void MarkOrderProcessed(string order_id)
+{
+   int n = ArraySize(g_processed_ids);
+   if(n >= 500) // keep bounded
+   {
+      ArrayRemove(g_processed_ids, 0, 100);
+      n = ArraySize(g_processed_ids);
+   }
+   ArrayResize(g_processed_ids, n + 1);
+   g_processed_ids[n] = order_id;
+}
+
+//+------------------------------------------------------------------+
+//| Find a position opened by THIS EA with a given comment (used to |
+//| recover from ambiguous/timed-out OrderSend results, never blind |
+//| re-send)                                                         |
+//+------------------------------------------------------------------+
+ulong FindPositionByComment(string trade_symbol, string comment, long direction_type)
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong pos_ticket = PositionGetTicket(i);
+      if(pos_ticket == 0) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      if(PositionGetString(POSITION_SYMBOL) != trade_symbol) continue;
+      if(direction_type >= 0 && PositionGetInteger(POSITION_TYPE) != direction_type) continue;
+      if(comment != "" && PositionGetString(POSITION_COMMENT) != comment) continue;
+      if(TimeCurrent() - PositionGetInteger(POSITION_TIME) > 30) continue; // only just-opened fills
+      return pos_ticket;
+   }
+   return 0;
 }
 
 //+------------------------------------------------------------------+
@@ -164,6 +278,14 @@ void ExecuteIncomingOrder(string json)
    string comment  = ExtractJsonString(json, "comment");
    
    if(order_id == "" || action == "") return;
+   
+   // Dedup: never execute the same order id twice, even if it is re-delivered
+   if(IsOrderProcessed(order_id))
+   {
+      PrintFormat("⚠️ [XAU_AI_Bridge] Order %s already processed — skipping duplicate.", order_id);
+      return;
+   }
+   MarkOrderProcessed(order_id);
    
    // Resolve chart/broker symbol: fallback to chart symbol if requested symbol has no market quotes
    string trade_symbol = (symbol != "") ? symbol : g_symbol;
@@ -345,6 +467,16 @@ void ExecuteIncomingOrder(string json)
    if(tp > 0) tp = NormalizeDouble(tp, digits);
    price = NormalizeDouble(price, digits);
    
+   // STRICT POLICY: never send a market order without a valid protective stop.
+   // If SL is missing or on the wrong side of the market, reject the order and
+   // report it — an unprotected live position is never acceptable.
+   if(InpRequireStopLoss && sl <= 0.0)
+   {
+      PrintFormat("❌ [XAU_AI_Bridge] REJECTING ORDER %s: no valid stop-loss (would have been sent unprotected with SL=0).", order_id);
+      SendExecutionReport(order_id, 0, "REJECTED", 0.0, TRADE_RETCODE_INVALID_STOPS, "SL missing or invalid — rejected by EA policy");
+      return;
+   }
+   
    PrintFormat("🚀 [XAU_AI_Bridge] EXECUTING ORDER: %s %.2f Lots of %s @ %.2f (SL=%.2f, TP=%.2f)...",
                is_buy ? "BUY" : "SELL", lots, trade_symbol, price, sl, tp);
    
@@ -374,18 +506,43 @@ void ExecuteIncomingOrder(string json)
    else
       request.type_filling = ORDER_FILLING_RETURN;
    
-   if(!OrderSend(request, trade_result))
+   // Send with NO blind re-send: a retry is only allowed when the broker
+   // explicitly rejected the request parameters (provable non-execution).
+   // Ambiguous outcomes (timeout / communication failure) are resolved by
+   // searching for an actual fill instead of re-sending a real-money order.
+   bool sent = OrderSend(request, trade_result);
+   uint rc = trade_result.retcode;
+   
+   if(rc == TRADE_RETCODE_INVALID_FILL)
    {
-      if(request.type_filling != ORDER_FILLING_IOC)
-      {
+      // Explicit filling-mode rejection: the order never reached the market — safe retry with another supported mode
+      PrintFormat("⚠️ [XAU_AI_Bridge] Filling mode rejected (10030) — retrying with alternate mode...");
+      uint filling2 = (uint)SymbolInfoInteger(trade_symbol, SYMBOL_FILLING_MODE);
+      if(request.type_filling == ORDER_FILLING_FOK && (filling2 & SYMBOL_FILLING_IOC) != 0)
          request.type_filling = ORDER_FILLING_IOC;
-         OrderSend(request, trade_result);
+      else if((filling2 & SYMBOL_FILLING_FOK) != 0)
+         request.type_filling = ORDER_FILLING_FOK;
+      else
+         request.type_filling = ORDER_FILLING_RETURN;
+      sent = OrderSend(request, trade_result);
+      rc = trade_result.retcode;
+   }
+   else if(rc == TRADE_RETCODE_TIMEOUT || rc == TRADE_RETCODE_ERROR || rc == TRADE_RETCODE_RECONNECT || (!sent && rc == 0))
+   {
+      // Execution status unknown — NEVER re-send. Check whether the position actually filled.
+      Sleep(500);
+      ulong found = FindPositionByComment(trade_symbol, request.comment, (long)(is_buy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL));
+      if(found > 0)
+      {
+         PrintFormat("✅ [XAU_AI_Bridge] Ambiguous send resolved: position #%d found — treating as FILLED (no duplicate sent).", found);
+         SendExecutionReport(order_id, found, "FILLED", price, rc, "recovered after timeout");
       }
       else
       {
-         request.type_filling = ORDER_FILLING_RETURN;
-         OrderSend(request, trade_result);
+         PrintFormat("❌ [XAU_AI_Bridge] Ambiguous send: no fill found, no retry sent. Retcode: %u", rc);
+         SendExecutionReport(order_id, 0, "REJECTED", 0.0, rc, "timeout with no fill — not retried");
       }
+      return;
    }
    
    // Check execution result

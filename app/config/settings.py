@@ -77,12 +77,12 @@ class Settings(BaseSettings):
     AI_MAX_RETRIES: int = Field(default=1, ge=0, le=5)
     AI_RETRY_DELAY: float = Field(default=1.0, ge=0)
 
-    # Groq (primary free provider)
-    GROQ_API_KEY: str = "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"
+    # Groq (primary free provider) — load strictly from environment / .env
+    GROQ_API_KEY: str = ""
     GROQ_MODEL: str = "openai/gpt-oss-120b"
 
-    # Google Gemini (secondary fallback)
-    GEMINI_API_KEY: str = "AQ.Ab8RN6LqpGWT7jkES8qwmJvgLSLPmXJJrZP0gELKaygkla5iIw"
+    # Google Gemini (secondary fallback) — load strictly from environment / .env
+    GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # OpenRouter (tertiary fallback)
@@ -101,9 +101,9 @@ class Settings(BaseSettings):
     BAI_MODEL: str = "gpt-5-4-mini"
     BAI_BASE_URL: str = "https://api.b.ai/v1"
 
-    # Telegram
-    TELEGRAM_BOT_TOKEN: str = "8724401786:AAEOjScHIEgtPb1LP2VlZzUZEG9NmHclWYE"
-    TELEGRAM_CHAT_ID: str = "817345394"
+    # Telegram — load strictly from environment / .env
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
     TELEGRAM_ENABLED: bool = True
 
     # Paper Trading

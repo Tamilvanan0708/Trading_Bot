@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import logger
 from app.database.connection import get_db_session
 from app.database.repository import Repository
 from app.config.execution_settings import calculate_lot_size, get_execution_settings

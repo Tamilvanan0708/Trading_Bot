@@ -74,6 +74,8 @@ class DualRetracementEngine:
         self._archived_setups: list[RetracementSetup] = []
         self._candles_since_bos: int = 0
         self._max_expiry_candles: int = 200
+        self._last_traded_bos_high_ts: datetime | None = None
+        self._last_traded_bos_low_ts: datetime | None = None
 
     def reset(self) -> None:
         self.setup = None
@@ -81,6 +83,8 @@ class DualRetracementEngine:
         self._events = []
         self._archived_setups = []
         self._candles_since_bos = 0
+        self._last_traded_bos_high_ts = None
+        self._last_traded_bos_low_ts = None
 
     def _anchor_lookback_bars(self) -> int:
         """Timeframe-aware anchor lookback.
@@ -91,8 +95,8 @@ class DualRetracementEngine:
           1m  → 15 bars  (15 min)
           3m  → 20 bars  (1 h)
           5m  → 25 bars  (2 h)
-          15m → 60 bars  (15 h) — macro swing
-          30m → 60 bars
+          15m → 40 bars  (10 h)
+          30m → 50 bars  (25 h)
           1h+ → 60 bars
         """
         tf = str(self.timeframe).lower()
@@ -102,6 +106,10 @@ class DualRetracementEngine:
             return 20
         if tf == "5m":
             return 25
+        if tf == "15m":
+            return 40
+        if tf == "30m":
+            return 50
         return 60
 
     def process_candle(self, candle: Candle) -> list[RetracementEvent]:
@@ -149,72 +157,72 @@ class DualRetracementEngine:
         lookback_bars = self._anchor_lookback_bars()
 
         # 1. Check Bullish BOS (Body Close > last confirmed swing high)
-        if len(self._candles) >= 2 and self._candles[-2].close > last_sh.price:
-            return []  # BOS was already confirmed on a prior candle
-        if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-            # Anchor Low: lowest confirmed swing low before the BOS swing that initiated the leg
-            lows_before_bos = [
-                s for s in confirmed_lows
-                if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
-            ]
-            anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
-            p2_low = anchor_low.price
-            p2_ts = anchor_low.timestamp
+        if self._last_traded_bos_high_ts != last_sh.timestamp and (len(self._candles) - 1 - last_sh.index) <= lookback_bars:
+            if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
+                # Anchor Low: lowest confirmed swing low before the BOS swing that initiated the leg
+                lows_before_bos = [
+                    s for s in confirmed_lows
+                    if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
+                ]
+                anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+                p2_low = anchor_low.price
+                p2_ts = anchor_low.timestamp
 
-            setup = RetracementSetup(
-                symbol=self.symbol,
-                timeframe=self.timeframe,
-                direction="LONG",
-                state=RetracementState.TP_DYNAMIC,
-                point_1_price=last_sh.price,
-                point_1_timestamp=last_sh.timestamp,
-                bos_price=last_sh.price,
-                bos_timestamp=last_sh.timestamp,
-                point_2_price=p2_low,
-                point_2_timestamp=p2_ts,
-                current_high_price=candle.high,
-                current_high_timestamp=candle.timestamp,
-                dynamic_tp=candle.high,
-                validation_passed=True,
-            )
-            self._apply_bullish_fib(setup, p2_low, candle.high)
-            self.setup = setup
-            self._candles_since_bos = 0
-            return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
+                setup = RetracementSetup(
+                    symbol=self.symbol,
+                    timeframe=self.timeframe,
+                    direction="LONG",
+                    state=RetracementState.TP_DYNAMIC,
+                    point_1_price=last_sh.price,
+                    point_1_timestamp=last_sh.timestamp,
+                    bos_price=last_sh.price,
+                    bos_timestamp=last_sh.timestamp,
+                    point_2_price=p2_low,
+                    point_2_timestamp=p2_ts,
+                    current_high_price=candle.high,
+                    current_high_timestamp=candle.timestamp,
+                    dynamic_tp=candle.high,
+                    validation_passed=True,
+                )
+                self._apply_bullish_fib(setup, p2_low, candle.high)
+                self.setup = setup
+                self._last_traded_bos_high_ts = last_sh.timestamp
+                self._candles_since_bos = 0
+                return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
 
         # 2. Check Bearish BOS (Body Close < last confirmed swing low)
-        if len(self._candles) >= 2 and self._candles[-2].close < last_sl.price:
-            return []
-        if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-            # Anchor High: highest confirmed swing high before the BOS swing that initiated the leg
-            highs_before_bos = [
-                s for s in confirmed_highs
-                if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
-            ]
-            anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
-            p2_high = anchor_high.price
-            p2_ts = anchor_high.timestamp
+        if self._last_traded_bos_low_ts != last_sl.timestamp and (len(self._candles) - 1 - last_sl.index) <= lookback_bars:
+            if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
+                # Anchor High: highest confirmed swing high before the BOS swing that initiated the leg
+                highs_before_bos = [
+                    s for s in confirmed_highs
+                    if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
+                ]
+                anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+                p2_high = anchor_high.price
+                p2_ts = anchor_high.timestamp
 
-            setup = RetracementSetup(
-                symbol=self.symbol,
-                timeframe=self.timeframe,
-                direction="SHORT",
-                state=RetracementState.TP_DYNAMIC,
-                point_1_price=last_sl.price,
-                point_1_timestamp=last_sl.timestamp,
-                bos_price=last_sl.price,
-                bos_timestamp=last_sl.timestamp,
-                point_2_price=p2_high,
-                point_2_timestamp=p2_ts,
-                current_high_price=candle.low,
-                current_high_timestamp=candle.timestamp,
-                dynamic_tp=candle.low,
-                validation_passed=True,
-            )
-            self._apply_bearish_fib(setup, p2_high, candle.low)
-            self.setup = setup
-            self._candles_since_bos = 0
-            return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
+                setup = RetracementSetup(
+                    symbol=self.symbol,
+                    timeframe=self.timeframe,
+                    direction="SHORT",
+                    state=RetracementState.TP_DYNAMIC,
+                    point_1_price=last_sl.price,
+                    point_1_timestamp=last_sl.timestamp,
+                    bos_price=last_sl.price,
+                    bos_timestamp=last_sl.timestamp,
+                    point_2_price=p2_high,
+                    point_2_timestamp=p2_ts,
+                    current_high_price=candle.low,
+                    current_high_timestamp=candle.timestamp,
+                    dynamic_tp=candle.low,
+                    validation_passed=True,
+                )
+                self._apply_bearish_fib(setup, p2_high, candle.low)
+                self.setup = setup
+                self._last_traded_bos_low_ts = last_sl.timestamp
+                self._candles_since_bos = 0
+                return [RetracementEvent(setup_id=setup.setup_id, event_type=RetracementEventType.BOS_DETECTED, state_before=RetracementState.NO_SETUP, state_after=RetracementState.TP_DYNAMIC, timestamp=candle.timestamp, price=candle.close)]
 
         return []
 

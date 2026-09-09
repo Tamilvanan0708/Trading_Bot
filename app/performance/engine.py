@@ -51,7 +51,7 @@ def compute_performance(trades: list[PaperPosition]) -> dict:
     gross_win = sum(wins)
     gross_loss = abs(sum(losses))
     profit_factor = gross_win / gross_loss if gross_loss > 0 else (999.99 if gross_win > 0 else 0.0)
-    expectancy = (win_rate / 100.0 * avg_win) - ((1 - win_rate / 100.0) * avg_loss)
+    expectancy = (win_rate / 100.0 * avg_win) - ((1 - win_rate / 100.0) * abs(avg_loss))
 
     rs = [t.realized_r for t in closed if t.realized_r is not None]
     avg_r = sum(rs) / len(rs) if rs else 0.0

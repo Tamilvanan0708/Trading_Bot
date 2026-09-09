@@ -122,20 +122,20 @@ async def test_paper_trading_parallel_slot_execution(in_memory_db: AsyncSession)
     monkeypatch.setattr(multi_tf, "get_live_service", lambda: FakeLive())
     monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: mon)
 
-    # Insert an existing OPEN trade on 15M
+    # Insert an existing OPEN trade on 15M with its own distinct setup
     existing_15m_trade = PaperTradeModel(
-        signal_id="FIB_RETR_15M_L1_99",
+        signal_id="FIB_RETR_15M_L1_90",
         symbol="XAUUSD",
         direction="BUY",
         state="OPEN",
         lot_size=0.01,
         risk_amount=8.0,
-        target_entry=113.1,
-        actual_entry=113.1,
-        stop_loss=104.69,
-        take_profit_1=121.5,
-        take_profit_2=121.5,
-        take_profit_3=121.5,
+        target_entry=108.0,
+        actual_entry=108.0,
+        stop_loss=100.0,
+        take_profit_1=115.0,
+        take_profit_2=115.0,
+        take_profit_3=115.0,
         opened_at=datetime.now(timezone.utc),
     )
     in_memory_db.add(existing_15m_trade)
@@ -161,6 +161,63 @@ async def test_paper_trading_parallel_slot_execution(in_memory_db: AsyncSession)
 
     assert "15m" in trade_tfs
     assert "30m" in trade_tfs, "30m paper trade must execute in parallel without cross-timeframe block!"
+
+
+@pytest.mark.asyncio
+async def test_paper_trading_cross_timeframe_duplicate_skipped(in_memory_db: AsyncSession):
+    """Smart Setup Deduplication: If 1H already has an open trade with identical entry & SL, 30M duplicate is skipped."""
+    from app.paper_trading import sync as pt_sync
+    mon = RetracementMultiTFMonitor(symbol="XAUUSD")
+    snap = MultiTimeframeSnapshot(
+        symbol="XAUUSD",
+        timestamp=_ts() + timedelta(hours=10),
+        current_price=112.0,
+        m15=_flat(30, _ts())[0],
+        m30=_active_trade_series(),
+        h1=_flat(30, _ts())[0],
+    )
+
+    class FakeLive:
+        async def get_multi_timeframe_snapshot(self, symbol, include_forming=False, m15_limit=400):
+            return snap
+
+    monkeypatch = pytest.MonkeyPatch()
+    from app.retracement import multi_tf
+    monkeypatch.setattr(multi_tf, "get_live_service", lambda: FakeLive())
+    monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: mon)
+
+    # Insert an existing OPEN trade on 1H with identical entry (113.1) and SL (104.69)
+    existing_1h_trade = PaperTradeModel(
+        signal_id="FIB_RETR_1H_L1_99",
+        symbol="XAUUSD",
+        direction="BUY",
+        state="OPEN",
+        lot_size=0.01,
+        risk_amount=8.0,
+        target_entry=113.1,
+        actual_entry=113.1,
+        stop_loss=104.69,
+        take_profit_1=121.5,
+        take_profit_2=121.5,
+        take_profit_3=121.5,
+        opened_at=datetime.now(timezone.utc),
+    )
+    in_memory_db.add(existing_1h_trade)
+    await in_memory_db.commit()
+
+    # Run sync_strategy_paper_trades
+    await sync_strategy_paper_trades(in_memory_db, force=True)
+    monkeypatch.undo()
+
+    # Query all open paper trades: 30M MUST be skipped due to identical setup de-duplication!
+    open_30m_trades = (await in_memory_db.execute(
+        select(PaperTradeModel).where(
+            PaperTradeModel.state == "OPEN",
+            PaperTradeModel.signal_id.like("FIB_RETR_30M_%"),
+        )
+    )).scalars().all()
+
+    assert len(open_30m_trades) == 0, "30m duplicate trade must be skipped when 1H has identical setup!"
 
 
 @pytest.mark.asyncio

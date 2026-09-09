@@ -94,9 +94,13 @@ class TradingLimits:
         return LimitDecision(True)
 
     async def register_trade_result(self, repo: Repository, pnl_usd: float) -> None:
-        """Updates daily counters after a paper trade closes."""
+        """Updates daily loss/consecutive-loss counters after a paper trade closes.
+
+        NOTE: daily_trades is incremented only in register_trade_opened() at
+        position open; closing a trade must NOT increment it again.
+        """
         await self._load(repo)
-        daily_trades = int(await repo.get_system_state(KEY_DAILY_TRADES, "0")) + 1
+        daily_trades = int(await repo.get_system_state(KEY_DAILY_TRADES, "0"))
         daily_loss = float(await repo.get_system_state(KEY_DAILY_LOSS, "0"))
         consecutive_losses = int(await repo.get_system_state(KEY_CONSECUTIVE_LOSSES, "0"))
 
@@ -106,7 +110,6 @@ class TradingLimits:
         else:
             consecutive_losses = 0
 
-        await repo.set_system_state(KEY_DAILY_TRADES, str(daily_trades))
         await repo.set_system_state(KEY_DAILY_LOSS, f"{daily_loss:.2f}")
         await repo.set_system_state(KEY_CONSECUTIVE_LOSSES, str(consecutive_losses))
         logger.info(

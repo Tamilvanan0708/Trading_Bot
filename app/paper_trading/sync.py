@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.validator import get_ai_validator
@@ -237,6 +237,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         continue
                                     if f_state.direction == "SHORT" and (live_price <= tp_px or live_price >= sl_px):
                                         continue
+
+                                # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
+                                # If an open trade already exists on ANOTHER timeframe for the SAME direction
+                                # with an overlapping entry price (within 2.0 pts) AND matching stop loss (within 2.0 pts),
+                                # this is the exact same macro setup detected across multiple timeframes (e.g. 30M & 1H).
+                                # Skip opening a duplicate trade to prevent double risk/exposure!
+                                norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
+                                dup_query = await db.execute(
+                                    select(PaperTradeModel).where(
+                                        PaperTradeModel.state == "OPEN",
+                                        PaperTradeModel.direction.in_(norm_dirs),
+                                        ~PaperTradeModel.signal_id.like(f"%_{tf_key.upper()}_%"),
+                                        func.abs(PaperTradeModel.target_entry - entry_px) <= 2.0,
+                                        func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.0,
+                                    )
+                                )
+                                existing_dup = dup_query.scalars().first()
+                                if existing_dup:
+                                    logger.info(
+                                        "[PAPER-AUTO] De-duplication: Skipping duplicate trade on %s because active %s trade already exists at $%.2f (ID: %s)",
+                                        tf_key.upper(),
+                                        existing_dup.direction,
+                                        existing_dup.target_entry,
+                                        existing_dup.id[:8],
+                                    )
+                                    continue
 
                                 _in_flight_signals.add(sig_id)
                                 try:

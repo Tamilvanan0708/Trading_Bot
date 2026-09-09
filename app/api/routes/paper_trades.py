@@ -250,7 +250,6 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
 
 
 @router.post("/paper-trades/reset")
-@router.get("/paper-trades/reset")
 async def reset_paper_trades(db: AsyncSession = Depends(get_db_session)):
     """Completely resets all paper trading records, clearing old trade history for a fresh start."""
     from sqlalchemy import delete
@@ -271,7 +270,6 @@ async def reset_paper_trades(db: AsyncSession = Depends(get_db_session)):
 
 
 @router.post("/paper-trades/repair")
-@router.get("/paper-trades/repair")
 async def repair_paper_trades(db: AsyncSession = Depends(get_db_session)):
     """Repairs false stop loss executions on Fib Retracement L1 trades.
     
