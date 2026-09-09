@@ -105,6 +105,7 @@ class LiveMarketDataService:
         self._refresh_error: str | None = None
         self._last_refresh_attempt_at: datetime | None = None
         self._startup_task: asyncio.Task | None = None
+        self._history_fallback = False
 
     # ------------------------------------------------------------------
     # Backward-compatible accessors
@@ -124,7 +125,9 @@ class LiveMarketDataService:
 
     @property
     def history_fallback(self) -> bool:
-        return False
+        """True when REST history failed and the service is running on
+        stale in-memory candles rather than a freshly fetched base."""
+        return self._history_fallback
 
     @property
     def live_price(self) -> float | None:
@@ -353,16 +356,15 @@ class LiveMarketDataService:
     async def _load_historical_base(self) -> None:
         """Load a REAL base 15M series (Binance REST) with validation.
 
-        LIVE MODE SAFETY: Prefers Binance REST candles. Falls back to bundled
-        local research JSON candles when REST is unavailable (e.g. Render cold
-        start or rate-limit). The JSON files are real Binance candles collected
-        previously — never synthetic or fabricated.
+        LIVE MODE SAFETY: no synthetic or stale-file fallback.  If Binance
+        REST fails, the strategy base stays empty and the data-quality gate
+        blocks trading until real data is available.
         """
         provider = self._historical_provider
         if provider is None:
             provider = BinanceHistoryProvider(self.settings)
 
-        candles = []
+        candles: list[Candle] = []
         try:
             candles, report = await provider.load_base_15m(limit=800)
             self._gap_count = report["gaps"]
@@ -373,28 +375,27 @@ class LiveMarketDataService:
                 logger.error(
                     "Historical data validation errors: %s", report["errors"][:3]
                 )
-        except Exception as exc:  # noqa: BLE001 - non-fatal at startup
+        except Exception as exc:  # noqa: BLE001 - non-fatal at startup, but degraded
             self._last_history_error = str(exc)
-            logger.warning("Binance REST history unavailable: %s — trying local JSON fallback.", exc)
-            candles = []
+            self._closed_15m = []
+            self._refresh_status = "FAILED"
+            self._refresh_error = str(exc)
+            self._history_fallback = False
+            logger.error(
+                "DEGRADED: Binance REST history unavailable (%s). No synthetic/stale "
+                "fallback is used — strategy engines show NO_SETUP and the data-quality "
+                "gate blocks trading until real data is fetched.",
+                exc,
+            )
+            return
 
         if not candles:
-            # --- LOCAL JSON FALLBACK ---
-            # Use bundled research candles (real Binance data, just not real-time)
-            candles = await asyncio.to_thread(self._load_local_json_fallback_15m)
-            if candles:
-                logger.info(
-                    "Using local JSON fallback: %d 15M candles loaded (Binance REST unavailable).",
-                    len(candles),
-                )
-            else:
-                self._closed_15m = []
-                logger.error(
-                    "DEGRADED: Both Binance REST and local JSON fallback unavailable. "
-                    "Strategy engines will show NO_SETUP until data becomes available."
-                )
-                return
-
+            self._last_history_error = self._last_history_error or "Binance REST returned no candles"
+            self._closed_15m = []
+            self._refresh_status = "FAILED"
+            self._refresh_error = self._last_history_error
+            logger.error("DEGRADED: Binance REST returned no real 15M candles — no fallback applied.")
+            return
 
         # Join historical candles with future live candles:
         #   - Keep only fully-closed candles (timestamp < current bucket start).
@@ -412,8 +413,9 @@ class LiveMarketDataService:
                 self._closed_15m.append(c.model_copy(update={"timestamp": ts}))
         self._last_price = candles[-1].close
         self._last_history_refresh_at = datetime.now(timezone.utc)
-        self._refresh_status = "SUCCESS" if candles else "FAILED"
-        self._refresh_error = None if candles else self._last_history_error
+        self._refresh_status = "SUCCESS"
+        self._refresh_error = None
+        self._history_fallback = False
         logger.info(
             "Loaded %s closed real historical 15M candles "
             "(gaps=%s dup=%s ooo=%s).",
@@ -492,20 +494,23 @@ class LiveMarketDataService:
         try:
             fetched, report = await provider.load_base_15m(limit=limit)
         except Exception as exc:
-            if len(self._closed_15m) >= self.settings.LIVE_HISTORY_MIN_CANDLES:
-                logger.warning(
-                    "[HISTORY] Refresh REST unavailable (%s), but %d candles exist in memory with live feed active. Maintaining healthy status.",
-                    exc, len(self._closed_15m),
-                )
-                self._refresh_status = "SUCCESS"
-                self._refresh_error = None
-                self._last_history_refresh_at = datetime.now(timezone.utc)
-                return {"status": "SUCCESS", "added": 0, "gaps": self._gap_count}
+            # Honest failure: never launder a failed refresh into SUCCESS.
+            # In-memory candles are KEPT (display/analysis continuity), but the
+            # status reports FAILED and history_fallback flags the staleness so
+            # the data-quality gate can block new trades.
             self._refresh_status = "FAILED"
             self._refresh_error = str(exc)
-            self._last_history_refresh_at = datetime.now(timezone.utc)
-            logger.error("[HISTORY] Refresh FAILED. Reason: %s", exc)
-            logger.error("[SAFETY] Paper trading remains BLOCKED")
+            if self._closed_15m:
+                self._history_fallback = True
+                logger.warning(
+                    "[HISTORY] Refresh FAILED (%s); serving %d stale in-memory candles "
+                    "with degraded status. _last_history_refresh_at NOT advanced.",
+                    exc, len(self._closed_15m),
+                )
+            else:
+                self._history_fallback = False
+                logger.error("[HISTORY] Refresh FAILED and no candles in memory. Reason: %s", exc)
+            logger.error("[SAFETY] Paper trading remains BLOCKED while data is degraded")
             return {"status": "FAILED", "error": str(exc)}
 
         now = datetime.now(timezone.utc)
@@ -538,6 +543,7 @@ class LiveMarketDataService:
 
         self._refresh_status = "SUCCESS"
         self._refresh_error = None
+        self._history_fallback = False
         self._last_history_refresh_at = now
 
         logger.info(

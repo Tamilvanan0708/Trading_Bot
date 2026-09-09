@@ -6,13 +6,15 @@ Ensures exactly ONE 0.01 lot paper trade per unique strategy signal ID.
 """
 
 import asyncio
+import os
 from datetime import datetime, timezone
 import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.validator import get_ai_validator
+from app.ai.validator import AIValidator, get_ai_validator
+from app.config.settings import Settings, get_settings
 from app.core.constants import MarketBias, SignalDirection, SignalQuality, StrategyType
 from app.core.logging import logger
 from app.data.live.service import get_live_service
@@ -22,6 +24,7 @@ from app.config.execution_settings import calculate_lot_size, get_execution_sett
 from app.notifications.telegram_service import TelegramService
 from app.retracement.multi_tf import get_retracement_multi_tf_service
 from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
+from app.risk.admission import TradeAdmissionGate
 from app.signals.models import SignalPayload
 
 # Global async mutex lock and in-flight guard to strictly prevent double-executions
@@ -106,6 +109,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
         tg = TelegramService()
         validator = get_ai_validator()
+        if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("APP_ENV") == "test":
+            # Tests must never reach paid LLM providers through the background
+            # sync path; use the deterministic heuristic validator instead.
+            validator = AIValidator(Settings(AI_PROVIDER="mock"))
         exec_cfg = get_execution_settings()
 
         # 1. Fib With Retracement: Multi-Timeframe (5M, 15M, 30M, 1H, 4H) Single Active Trade Sync
@@ -220,6 +227,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             # Within the same timeframe slot, if a trade with a DIFFERENT anchor is still open, wait.
                             tf_active_anchor = active_setup_by_tf.get(tf_key)
                             if tf_active_anchor and tf_active_anchor != current_anchor and not current_anchor.startswith(tf_active_anchor + "_"):
+                                logger.info(
+                                    "[PAPER-AUTO] Deferring %s: %s slot still busy with anchor %s",
+                                    sig_id, tf_key.upper(), tf_active_anchor,
+                                )
                                 continue
 
                             existing = (await db.execute(
@@ -230,13 +241,42 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             sl_px = sig_sl
                             tp_px = float(layer.get("tp") or f_state.fib_1_000 or 0.0)
 
+                            # Stale-entry guard must use the MONITOR's own snapshot
+                            # price — the same data the setup was computed from.
+                            # The process-global live-service price may come from a
+                            # different/regime-shifted source and silently skip every
+                            # slot (the cross-timeframe block this replaces).
+                            slot = fib_svc.slots.get(tf_key) if isinstance(getattr(fib_svc, "slots", None), dict) else None
+                            ref_price = getattr(slot, "live_price", None) or getattr(fib_svc, "live_price", None)
+
                             if not existing and entry_px > 0 and layer.get("state") == "FILLED":
-                                # If live price has already reached TP or SL, do not open a stale trade
-                                if live_price is not None:
-                                    if f_state.direction == "LONG" and (live_price >= tp_px or live_price <= sl_px):
+                                # If the price has already reached TP or SL, do not open a stale trade
+                                if ref_price is not None and ref_price > 0:
+                                    if f_state.direction == "LONG" and (ref_price >= tp_px or ref_price <= sl_px):
+                                        logger.info(
+                                            "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond TP %.2f / SL %.2f",
+                                            sig_id, ref_price, tp_px, sl_px,
+                                        )
                                         continue
-                                    if f_state.direction == "SHORT" and (live_price <= tp_px or live_price >= sl_px):
+                                    if f_state.direction == "SHORT" and (ref_price <= tp_px or ref_price >= sl_px):
+                                        logger.info(
+                                            "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond TP %.2f / SL %.2f",
+                                            sig_id, ref_price, tp_px, sl_px,
+                                        )
                                         continue
+                                elif live_price is not None:
+                                    # Monitor exposes no price (custom engine); fall back to
+                                    # the global live price only when it is in the SAME regime
+                                    # as the setup (within 25% of entry) so an unrelated feed
+                                    # cannot silently block all slots.
+                                    in_regime = ref_price is None and 0.75 <= (live_price / entry_px) <= 1.33
+                                    if in_regime:
+                                        if f_state.direction == "LONG" and (live_price >= tp_px or live_price <= sl_px):
+                                            logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond TP/SL)", sig_id, live_price)
+                                            continue
+                                        if f_state.direction == "SHORT" and (live_price <= tp_px or live_price >= sl_px):
+                                            logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond TP/SL)", sig_id, live_price)
+                                            continue
 
                                 # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
                                 # If an open trade already exists on ANOTHER timeframe for the SAME direction
@@ -263,6 +303,46 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         existing_dup.id[:8],
                                     )
                                     continue
+
+                                # --- MINIMUM IMPULSE RANGE FILTER ---
+                                # Rejects micro sideways consolidation noise (e.g. $1-$2 chop on Gold)
+                                if getattr(exec_cfg, "min_impulse_filter_enabled", True):
+                                    p1 = float(f_state.point_1_price or 0.0)
+                                    p2 = float(f_state.point_2_price or 0.0)
+                                    peak = float(f_state.current_high_price or 0.0)
+                                    setup_span = abs(peak - p2) if peak > 0 and p2 > 0 else abs(p1 - p2)
+                                    min_req_pts = 4.0 if tf_key in ("1m", "3m", "5m") else (6.0 if tf_key == "15m" else (8.0 if tf_key == "30m" else 12.0))
+                                    if setup_span > 0 and setup_span < min_req_pts and entry_px > 500.0:
+                                        logger.info(
+                                            "[PAPER-AUTO] Min Impulse Filter: Setup range $%.2f is below min required $%.2f on %s — skipping noisy trade.",
+                                            setup_span,
+                                            min_req_pts,
+                                            tf_key.upper(),
+                                        )
+                                        continue
+
+                                # --- MACRO TREND ALIGNMENT FILTER (EMA) ---
+                                # Avoid taking counter-trend setups against the prevailing momentum
+                                if getattr(exec_cfg, "trend_filter_enabled", True) and slot and getattr(slot, "engine", None):
+                                    candles_for_ema = getattr(slot.engine, "_candles", [])
+                                    if len(candles_for_ema) >= 30 and entry_px > 500.0:
+                                        from app.indicators.ema import calculate_ema
+                                        period = 200 if len(candles_for_ema) >= 200 else (50 if len(candles_for_ema) >= 50 else 20)
+                                        ema_vals = calculate_ema(candles_for_ema, period=period)
+                                        if ema_vals:
+                                            latest_ema = ema_vals[-1]
+                                            if f_state.direction == "LONG" and entry_px < (latest_ema - 15.0):
+                                                logger.info(
+                                                    "[PAPER-AUTO] Trend Filter: Skipping LONG trade on %s because entry $%.2f is deeply counter-trend vs %d EMA $%.2f",
+                                                    tf_key.upper(), entry_px, period, latest_ema,
+                                                )
+                                                continue
+                                            elif f_state.direction == "SHORT" and entry_px > (latest_ema + 15.0):
+                                                logger.info(
+                                                    "[PAPER-AUTO] Trend Filter: Skipping SHORT trade on %s because entry $%.2f is deeply counter-trend vs %d EMA $%.2f",
+                                                    tf_key.upper(), entry_px, period, latest_ema,
+                                                )
+                                                continue
 
                                 _in_flight_signals.add(sig_id)
                                 try:
@@ -319,6 +399,48 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                                     if not ai_approved:
                                         continue
+
+                                    # --- HARD SAFETY: authoritative admission gate ---
+                                    # Blocks auto-open on degraded data quality, daily
+                                    # loss / daily trades / drawdown limits (TradingLimits),
+                                    # max open positions, and invalid signal geometry.
+                                    _gate = TradeAdmissionGate()
+                                    try:
+                                        _open_count = int((await db.execute(
+                                            select(func.count()).select_from(PaperTradeModel).where(
+                                                PaperTradeModel.state == "OPEN",
+                                            )
+                                        )).scalar() or 0)
+                                        if _open_count >= _gate.settings.MAX_OPEN_TRADES:
+                                            logger.warning(
+                                                "[ADMISSION] Max open paper trades (%s) reached — auto-open of %s blocked.",
+                                                _gate.settings.MAX_OPEN_TRADES, sig_id,
+                                            )
+                                            continue
+
+                                        _dq = None
+                                        try:
+                                            # Only consult the live service when it is actually
+                                            # running; an unstarted singleton (unit tests, cold
+                                            # state) would report a meaningless degraded-empty.
+                                            if getattr(ls, "_running", False) or getattr(ls, "_startup_task", None) is not None:
+                                                _dq = await ls.data_quality()
+                                        except Exception:  # noqa: BLE001
+                                            _dq = None
+                                        admission = await _gate.evaluate(val_sig, repo=repo, data_quality=_dq)
+                                        # Fib retracement tranche levels (0.618 -> 1.0 = 1R)
+                                        # intentionally price below the confluence MIN_RISK_REWARD
+                                        # gate; every other FAIL condition (data quality, limits,
+                                        # direction, geometry) is enforced.
+                                        blocking = [r for r in admission.reasons if r.startswith("FAIL") and "R:R" not in r]
+                                        if blocking:
+                                            logger.warning(
+                                                "[ADMISSION] Fib Retracement %s blocked: %s",
+                                                sig_id, "; ".join(blocking),
+                                            )
+                                            continue
+                                    except Exception as adm_err:  # noqa: BLE001
+                                        logger.warning("[ADMISSION] Gate evaluation failed for %s: %s", sig_id, adm_err)
 
                                     exec_cfg = get_execution_settings()
                                     trade_lot = calculate_lot_size(

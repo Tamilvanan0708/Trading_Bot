@@ -98,6 +98,14 @@ class ExecutionSettings(BaseModel):
         default="Fib Retracement",
         description="Strictly allowed strategy for MT5 execution (only Fib Retracement)"
     )
+    min_impulse_filter_enabled: bool = Field(
+        default=True,
+        description="Filter out micro sideways chop when setup impulse range is below threshold"
+    )
+    trend_filter_enabled: bool = Field(
+        default=True,
+        description="Filter counter-trend setups against macro trend alignment"
+    )
 
 
 _CURRENT_SETTINGS: ExecutionSettings | None = None

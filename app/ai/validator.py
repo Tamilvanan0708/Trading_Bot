@@ -218,6 +218,8 @@ class AIValidator:
             provider="HEURISTIC",
         )
 
+    validate = validate_signal
+
 
 _global_ai_validator: AIValidator | None = None
 

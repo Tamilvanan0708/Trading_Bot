@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import Settings, get_settings
+from app.api.routes.analysis import get_live_analysis
 from app.core.constants import MarketBias, SignalDirection, SignalQuality
 from app.core.logging import logger
 from app.data.live.service import get_live_service
@@ -84,8 +85,14 @@ def _gate_eval(settings: Settings, analysis: dict, degraded: bool) -> dict:
     })
 
     # Final authority: deterministic hard gates.
-    hard_fail = (not dq_ok) or (not signal_ok) or (not risk_ok) or tf_conflict
-    if hard_fail:
+    # A missing directional candidate is NOT a hard fail — it is precisely the
+    # state between "NO_TRADE" and "WATCH": confluence is monitored while no
+    # setup exists yet.  Risk quality only hard-fails when a candidate IS
+    # present (rr defaults to 0.0 for NO_TRADE signals).
+    has_candidate = signal_ok
+    risk_hard_fail = has_candidate and not risk_ok
+    hard_fail = (not dq_ok) or risk_hard_fail or tf_conflict
+    if hard_fail or (total >= settings.THRESHOLD_STRONG and not has_candidate):
         decision = "NO_TRADE"
     elif total >= settings.THRESHOLD_STRONG:
         decision = "VALIDATED_SIGNAL"
@@ -463,9 +470,10 @@ async def ai_validation_dashboard(symbol: str = "XAUUSD",
         pass
 
     # 3. Run analysis pipeline (best-effort, time-bounded)
+    # NOTE: get_live_analysis is imported at module level so callers/tests can
+    # monkeypatch this module's attribute; do not re-import it locally here.
     analysis = None
     try:
-        from app.api.routes.analysis import get_live_analysis
         analysis = await get_live_analysis(symbol)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[AI] analysis pipeline failed: %s", exc)

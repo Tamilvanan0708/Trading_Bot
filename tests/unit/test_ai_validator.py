@@ -88,7 +88,9 @@ def test_openai_compatible_body_excludes_response_format_when_disabled(monkeypat
 
 @pytest.mark.asyncio
 async def test_heuristic_validation_approves_strong():
-    validator = AIValidator()
+    # Hermetic: force the deterministic heuristic path regardless of any
+    # provider keys present in the local environment.
+    validator = AIValidator(Settings(AI_PROVIDER="mock", AI_API_KEY="", GROQ_API_KEY="", GEMINI_API_KEY="", OPENROUTER_API_KEY="", OLLAMA_BASE_URL="", BAI_API_KEY="", AI_API_BASE_URL=""))
     signal = _signal(quality=SignalQuality.STRONG, rr=3.0)
     result = await validator.validate_signal(signal)
     assert result.status == AIValidationStatus.APPROVE

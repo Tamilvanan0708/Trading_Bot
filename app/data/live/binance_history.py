@@ -29,13 +29,12 @@ BINANCE_REST_BASE_URLS = [
     "https://fapi3.binance.com",
 ]
 
-# TimeFrame -> Binance kline interval
+# TimeFrame -> Binance kline interval (futures XAUUSDT supported set)
 _INTERVAL_MAP = {
     TimeFrame.M5: "5m",
     TimeFrame.M15: "15m",
     TimeFrame.M30: "30m",
     TimeFrame.H1: "1h",
-    TimeFrame.H2: "2h",
     TimeFrame.H4: "4h",
     TimeFrame.D1: "1d",
 }
@@ -68,30 +67,22 @@ class BinanceHistoryProvider(MarketDataProvider):
             raise ValueError(f"Unsupported timeframe for Binance history: {timeframe}")
 
     async def _fetch_klines(self, params: dict) -> list[list]:
-        """Fetch klines with exponential-backoff retries and response validation."""
+        """Fetch klines with exponential-backoff retries and response validation.
+
+        Integrity policy: there is NO substitution fallback.  If the XAUUSDT
+        futures endpoint fails, the error propagates so callers can mark data
+        quality degraded — never silently replaced with a proxy instrument
+        (PAXGUSDT) or stale cached history reported as fresh.
+        """
         max_retries = self.settings.BINANCE_HISTORY_MAX_RETRIES
         timeout = httpx.Timeout(self.settings.BINANCE_HISTORY_TIMEOUT_SECONDS)
         backoff = self.settings.BINANCE_HISTORY_RETRY_BACKOFF
         last_exc: Exception | None = None
 
-        user_agents = [
-            "binance-connector-python/3.0.0",
-            "curl/8.4.0",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        ]
-
         for attempt in range(max_retries + 1):
             url = BINANCE_REST_BASE_URLS[attempt % len(BINANCE_REST_BASE_URLS)]
-            ua = user_agents[attempt % len(user_agents)]
             try:
-                async with httpx.AsyncClient(
-                    timeout=timeout,
-                    follow_redirects=True,
-                    headers={
-                        "User-Agent": ua,
-                        "Accept": "application/json",
-                    },
-                ) as client:
+                async with httpx.AsyncClient(timeout=timeout) as client:
                     res = await client.get(f"{url}/fapi/v1/klines", params=params)
                     if res.status_code != 200:
                         raise RuntimeError(
@@ -111,21 +102,6 @@ class BinanceHistoryProvider(MarketDataProvider):
                     attempt + 1, max_retries + 1, url, exc, delay,
                 )
                 await asyncio.sleep(delay)
-
-        # Fallback to Binance Spot PAXGUSDT if Futures is geo-restricted (e.g. US cloud hosts like Render)
-        try:
-            logger.info("[BINANCE REST] Futures endpoints blocked/failed; attempting Binance Spot PAXGUSDT fallback.")
-            spot_params = dict(params)
-            spot_params["symbol"] = "PAXGUSDT"
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers={"User-Agent": user_agents[0]}) as client:
-                res = await client.get("https://api.binance.com/api/v3/klines", params=spot_params)
-                if res.status_code == 200:
-                    data = res.json()
-                    if isinstance(data, list) and len(data) > 0:
-                        logger.info("[BINANCE REST] Successfully loaded %d candles via Spot PAXGUSDT fallback.", len(data))
-                        return data
-        except Exception as spot_exc:  # noqa: BLE001
-            logger.warning("[BINANCE REST] Spot PAXGUSDT fallback failed: %s", spot_exc)
 
         raise RuntimeError(f"Binance history fetch failed after {max_retries + 1} attempts: {last_exc}")
 
@@ -147,30 +123,9 @@ class BinanceHistoryProvider(MarketDataProvider):
         if end_time is not None:
             params["endTime"] = int(end_time.timestamp() * 1000)
 
-        try:
-            rows = await self._fetch_klines(params)
-        except Exception as exc:
-            logger.warning("Binance REST history fetch failed (%s); trying global data-api fallback", exc)
-            rows = []
-            try:
-                spot_params = {
-                    "symbol": "PAXGUSDT",
-                    "interval": self._interval(timeframe),
-                    "limit": min(max(limit, 1), 1000),
-                }
-                async with httpx.AsyncClient(timeout=8.0) as client:
-                    resp = await client.get("https://data-api.binance.vision/api/v3/klines", params=spot_params)
-                    if resp.status_code == 200:
-                        rows = resp.json()
-            except Exception as e:
-                logger.debug("Global vision fallback failed: %s", e)
-
-            if not rows:
-                from app.data.research_fallback import load_research_fallback_candles
-                fallback = load_research_fallback_candles(symbol, timeframe, limit=limit)
-                if fallback:
-                    return fallback
-                raise exc
+        # Honest failure: propagate the real fetch error instead of
+        # substituting proxy instruments or stale research files.
+        rows = await self._fetch_klines(params)
         candles: list[Candle] = []
         for row in rows:
             if len(row) < 6:

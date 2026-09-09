@@ -21,5 +21,7 @@
   "mt5_bridge_enabled": true,
   "mt5_symbol": "XAUUSD-VIP",
   "mt5_magic_number": 777888,
-  "mt5_allowed_strategy": "Fib Retracement"
+  "mt5_allowed_strategy": "Fib Retracement",
+  "min_impulse_filter_enabled": true,
+  "trend_filter_enabled": true
 }
