@@ -8,7 +8,7 @@ This project maintains **strictly 3 independent trading strategies** for XAU/USD
 - **Strategy Name**: `Fib Retracement`
 - **Internal Identifier**: `FIBONACCI_RETRACEMENT` / `RETRACEMENT_BOS_V1`
 - **Core Strategy Files**:
-  - `app/retracement/dual_engine.py`: Dual-Direction BOS Retracement Engine (Bullish & Bearish).
+  - `app/retracement/fib_retracement_engine.py`: Dual-Direction BOS Retracement Engine (Bullish & Bearish). (Shim: `dual_engine.py`).
   - `app/retracement/multi_tf.py`: Multi-Timeframe Cascading Monitor.
   - `app/retracement/models.py`: Retracement setup, levels, and state models.
 - **Key Characteristics**:

@@ -37,7 +37,7 @@ from typing import Any
 from app.core.constants import TimeFrame
 from app.core.logging import logger
 from app.data.live.service import get_live_service
-from app.retracement.dual_engine import DualRetracementEngine
+from app.retracement.fib_retracement_engine import DualRetracementEngine, FibRetracementEngine
 from app.retracement.models import RetracementSetup, RetracementState
 from app.retracement.repository import RetracementRepository
 

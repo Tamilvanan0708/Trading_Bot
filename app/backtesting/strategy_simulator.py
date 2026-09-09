@@ -24,7 +24,7 @@ from app.core.constants import SignalDirection
 from app.core.logging import logger
 from app.data.models import Candle
 from app.config.execution_settings import calculate_lot_size
-from app.retracement.dual_engine import DualRetracementEngine
+from app.retracement.fib_retracement_engine import DualRetracementEngine, FibRetracementEngine
 from app.retracement.fib_trend_engine import FibTrendEngine, FibTrendState
 from app.retracement.models import RetracementState
 from app.retracement.smc_fib_engine import SMCFibEngine

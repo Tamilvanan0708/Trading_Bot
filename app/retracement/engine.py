@@ -1,4 +1,10 @@
 """
+[LEGACY V1 BASELINE ENGINE]
+Notice: This is the original prototype V1 single-entry Fibonacci engine.
+It is preserved for historical research benchmarks and backward-compatible test suites.
+For LIVE PRODUCTION Fib Retracement trading, see:
+`app.retracement.fib_retracement_engine` (formerly dual_engine.py).
+
 RETRACEMENT_BOS_V1 — Exact Bullish BOS Retracement Strategy Engine.
 
 State machine:
