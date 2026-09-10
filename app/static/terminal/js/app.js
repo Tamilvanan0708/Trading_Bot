@@ -5745,11 +5745,16 @@ Routes["/settings"] = async (mount) => {
         <div class="card-body">
           <!-- TIMEFRAME SELECTOR -->
           <div style="margin-bottom:16px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
               <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);margin:0">
                 Active Fib Retracement Timeframes (Multi-Slot Parallel)
               </label>
-              <span style="font-size:11px;color:var(--text-dim)">Recommended: 5M, 15M, 30M, 1H (4H removed for faster turnover)</span>
+              <div style="display:flex;align-items:center;gap:10px">
+                <button type="button" id="btn-toggle-5m-focus" style="background:rgba(41,98,255,0.2);border:1px solid #2962ff;color:#90caf9;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+                  ⚡ 1-Click: Pure 5M Scalp Focus Mode
+                </button>
+                <span style="font-size:11px;color:var(--text-dim)">Recommended: 5M</span>
+              </div>
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
               <label style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:#181e29;border:1px solid rgba(100,181,246,0.3);border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:#90caf9">
@@ -6139,6 +6144,24 @@ Routes["/settings"] = async (mount) => {
           testTradeBtn.disabled = false;
           testTradeBtn.innerHTML = "🧪 Send Test 0.01 Lot Order";
         }, 2000);
+      }
+    });
+  }
+
+  // Wire up 1-Click Pure 5M Scalp Focus Mode
+  const btn5mFocus = mount.querySelector("#btn-toggle-5m-focus");
+  if (btn5mFocus) {
+    btn5mFocus.addEventListener("click", () => {
+      const cb5m = mount.querySelector("#tf-cb-5m");
+      const cb15m = mount.querySelector("#tf-cb-15m");
+      const cb30m = mount.querySelector("#tf-cb-30m");
+      const cb1h = mount.querySelector("#tf-cb-1h");
+      if (cb5m) cb5m.checked = true;
+      if (cb15m) cb15m.checked = false;
+      if (cb30m) cb30m.checked = false;
+      if (cb1h) cb1h.checked = false;
+      if (typeof UI !== "undefined" && UI.toast) {
+        UI.toast("5M Focus Mode", "Pure 5M Scalp Focus selected! Click SAVE to apply live.", "blue");
       }
     });
   }
