@@ -64,6 +64,7 @@ class StrategyBacktester:
         account_currency: str = "cent",
         risk_mode: str = "percent",
         risk_percent: float = 1.0,
+        engine_mode: str = "classic",
     ) -> None:
         self.symbol = symbol
         self.lot_size = lot_size
@@ -73,6 +74,7 @@ class StrategyBacktester:
         self.account_currency = account_currency or "cent"
         self.risk_mode = risk_mode or "percent"
         self.risk_percent = risk_percent or 1.0
+        self.engine_mode = (engine_mode or "classic").lower().strip()
         self.current_balance = initial_capital
 
     def _calculate_trade_pnl(self, pts: float, entry_px: float, sl_px: float) -> tuple[float, float, float]:
@@ -309,7 +311,7 @@ class StrategyBacktester:
         else:
             timeframes = allowed
 
-        engines = {tf: SMCFibEngine(symbol=self.symbol, timeframe=tf) for tf in timeframes}
+        engines = {tf: SMCFibEngine(symbol=self.symbol, timeframe=tf, engine_mode=self.engine_mode) for tf in timeframes}
 
         # Fetch candles for each timeframe in parallel
         candle_results = await asyncio.gather(*[
@@ -458,7 +460,7 @@ class StrategyBacktester:
         else:
             timeframes = allowed
 
-        engines = {tf: DualRetracementEngine(symbol=self.symbol, timeframe=tf) for tf in timeframes}
+        engines = {tf: DualRetracementEngine(symbol=self.symbol, timeframe=tf, engine_mode=self.engine_mode) for tf in timeframes}
 
         # Fetch candles for each timeframe in parallel
         candle_results = await asyncio.gather(*[
@@ -673,5 +675,6 @@ class StrategyBacktester:
             "profit_factor": profit_factor,
             "max_drawdown_usd": round(max_dd_usd, 2),
             "max_drawdown_pct": max_dd_pct,
+            "engine_mode": self.engine_mode,
             "daily_breakdown": daily_breakdown,
         }

@@ -101,6 +101,7 @@ class StrategyBacktestRequest(BaseModel):
     account_currency: str = Field(default="cent", description="cent | usd")
     risk_mode: str = Field(default="percent", description="percent | fixed_amount")
     risk_percent: float = Field(default=1.0, ge=0.1, le=10.0)
+    engine_mode: str = Field(default="classic", description="classic | experimental")
 
 
 @router.post("/run-strategy")
@@ -141,6 +142,7 @@ async def run_strategy_backtest(req: StrategyBacktestRequest):
         account_currency=req.account_currency,
         risk_mode=req.risk_mode,
         risk_percent=req.risk_percent,
+        engine_mode=req.engine_mode,
     )
 
     try:
