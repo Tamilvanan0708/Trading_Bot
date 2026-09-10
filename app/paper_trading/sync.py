@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.validator import AIValidator, get_ai_validator
@@ -263,39 +263,42 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             slot = fib_svc.slots.get(tf_key) if isinstance(getattr(fib_svc, "slots", None), dict) else None
                             ref_price = getattr(slot, "live_price", None) or getattr(fib_svc, "live_price", None)
 
-                            if not existing and entry_px > 0 and layer.get("state") == "FILLED":
-                                # If the price has already reached TP or SL, do not open a stale trade
-                                if ref_price is not None and ref_price > 0:
-                                    if f_state.direction == "LONG" and (ref_price >= tp_px or ref_price <= sl_px):
-                                        logger.info(
-                                            "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond TP %.2f / SL %.2f",
-                                            sig_id, ref_price, tp_px, sl_px,
-                                        )
-                                        continue
-                                    if f_state.direction == "SHORT" and (ref_price <= tp_px or ref_price >= sl_px):
-                                        logger.info(
-                                            "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond TP %.2f / SL %.2f",
-                                            sig_id, ref_price, tp_px, sl_px,
-                                        )
-                                        continue
-                                elif live_price is not None:
-                                    # Monitor exposes no price (custom engine); fall back to
-                                    # the global live price only when it is in the SAME regime
-                                    # as the setup (within 25% of entry) so an unrelated feed
-                                    # cannot silently block all slots.
-                                    in_regime = ref_price is None and 0.75 <= (live_price / entry_px) <= 1.33
-                                    if in_regime:
-                                        if f_state.direction == "LONG" and (live_price >= tp_px or live_price <= sl_px):
-                                            logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond TP/SL)", sig_id, live_price)
+                            is_fast_tp = (layer.get("state") == "TP_HIT")
+                            if not existing and entry_px > 0 and (layer.get("state") == "FILLED" or is_fast_tp):
+                                # If the price has already reached TP or SL and NOT fast_tp, do not open a stale trade
+                                if not is_fast_tp:
+                                    if ref_price is not None and ref_price > 0:
+                                        if f_state.direction == "LONG" and (ref_price >= tp_px or ref_price <= sl_px):
+                                            logger.info(
+                                                "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond TP %.2f / SL %.2f",
+                                                sig_id, ref_price, tp_px, sl_px,
+                                            )
                                             continue
-                                        if f_state.direction == "SHORT" and (live_price <= tp_px or live_price >= sl_px):
-                                            logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond TP/SL)", sig_id, live_price)
+                                        if f_state.direction == "SHORT" and (ref_price <= tp_px or ref_price >= sl_px):
+                                            logger.info(
+                                                "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond TP %.2f / SL %.2f",
+                                                sig_id, ref_price, tp_px, sl_px,
+                                            )
                                             continue
+                                    elif live_price is not None:
+                                        # Monitor exposes no price (custom engine); fall back to
+                                        # the global live price only when it is in the SAME regime
+                                        # as the setup (within 25% of entry) so an unrelated feed
+                                        # cannot silently block all slots.
+                                        in_regime = ref_price is None and 0.75 <= (live_price / entry_px) <= 1.33
+                                        if in_regime:
+                                            if f_state.direction == "LONG" and (live_price >= tp_px or live_price <= sl_px):
+                                                logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond TP/SL)", sig_id, live_price)
+                                                continue
+                                            if f_state.direction == "SHORT" and (live_price <= tp_px or live_price >= sl_px):
+                                                logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond TP/SL)", sig_id, live_price)
+                                                continue
 
                                 # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
-                                # If an open trade already exists on ANOTHER timeframe for the SAME direction
-                                # with an overlapping entry price (within 2.0 pts) AND matching stop loss (within 2.0 pts),
-                                # this is the exact same macro setup detected across multiple timeframes (e.g. 30M & 1H).
+                                # If an open trade already exists on ANOTHER timeframe for the SAME direction:
+                                # (1) Entry within 5.0 pts AND Stop Loss within 2.5 pts, OR
+                                # (2) Matching Take Profit (within 2.5 pts) AND matching Stop Loss (within 2.5 pts)
+                                # this is the exact same macro setup detected across multiple timeframes (e.g. 5M & 15M).
                                 # Skip opening a duplicate trade to prevent double risk/exposure!
                                 norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
                                 dup_query = await db.execute(
@@ -303,18 +306,28 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         PaperTradeModel.state == "OPEN",
                                         PaperTradeModel.direction.in_(norm_dirs),
                                         ~PaperTradeModel.signal_id.like(f"%_{tf_key.upper()}_%"),
-                                        func.abs(PaperTradeModel.target_entry - entry_px) <= 2.0,
-                                        func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.0,
+                                        or_(
+                                            and_(
+                                                func.abs(PaperTradeModel.target_entry - entry_px) <= 5.0,
+                                                func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                            ),
+                                            and_(
+                                                func.abs(PaperTradeModel.take_profit_1 - tp_px) <= 2.5,
+                                                func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                            ),
+                                        ),
                                     )
                                 )
                                 existing_dup = dup_query.scalars().first()
                                 if existing_dup:
                                     logger.info(
-                                        "[PAPER-AUTO] De-duplication: Skipping duplicate trade on %s because active %s trade already exists at $%.2f (ID: %s)",
+                                        "[PAPER-AUTO] De-duplication: Skipping duplicate trade on %s because active %s trade already exists at $%.2f (ID: %s, SL: $%.2f, TP: $%.2f)",
                                         tf_key.upper(),
                                         existing_dup.direction,
                                         existing_dup.target_entry,
                                         existing_dup.id[:8],
+                                        existing_dup.stop_loss,
+                                        existing_dup.take_profit_1,
                                     )
                                     continue
 
@@ -517,12 +530,20 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         account_currency=exec_cfg.account_currency,
                                     )
 
+                                    trade_state = "CLOSED" if is_fast_tp else "OPEN"
+                                    exit_px = tp_px if is_fast_tp else None
+                                    exit_reason = "TP_HIT" if is_fast_tp else None
+                                    closed_at = datetime.now(timezone.utc) if is_fast_tp else None
+                                    pts = round((tp_px - entry_px) if f_state.direction in ("LONG", "BUY") else (entry_px - tp_px), 2) if is_fast_tp else 0.0
+                                    realized_pnl = round(pts * trade_lot * 100.0, 2) if is_fast_tp else 0.0
+                                    realized_r = round(pts / max(0.1, abs(entry_px - sl_px)), 2) if is_fast_tp else 0.0
+
                                     new_trade = PaperTradeModel(
                                         id=str(uuid.uuid4()),
                                         signal_id=sig_id,
                                         symbol="XAUUSD",
                                         direction=f_state.direction,
-                                        state="OPEN",
+                                        state=trade_state,
                                         lot_size=trade_lot,
                                         risk_amount=round(trade_lot * abs(entry_px - sl_px) * 100.0, 2),
                                         target_entry=entry_px,
@@ -532,57 +553,87 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         take_profit_2=tp_px,
                                         take_profit_3=tp_px,
                                         opened_at=datetime.now(timezone.utc),
-                                        realized_pnl=0.0,
-                                        realized_r=0.0,
-                                        state_logs=[{"event": "ENTRY_TOUCHED", "price": entry_px, "layer": l_key, "timeframe": tf_key, "strategy": "FIB_WITH_RETRACEMENT", "ai_validation": ai_verdict}],
+                                        exit_price=exit_px,
+                                        exit_reason=exit_reason,
+                                        closed_at=closed_at,
+                                        realized_pnl=realized_pnl,
+                                        realized_r=realized_r,
+                                        state_logs=[
+                                            {"event": "ENTRY_TOUCHED", "price": entry_px, "layer": l_key, "timeframe": tf_key, "strategy": "FIB_WITH_RETRACEMENT", "ai_validation": ai_verdict},
+                                            *([{"event": "TP_HIT", "price": tp_px, "pnl": realized_pnl, "time": datetime.now(timezone.utc).isoformat()}] if is_fast_tp else []),
+                                        ],
                                     )
                                     db.add(new_trade)
                                     await db.commit()
-                                    active_setup_by_tf[tf_key] = current_anchor
-                                    logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (Fib Retr %s %s) @ %.2f", sig_id, tf_key.upper(), l_key, entry_px)
+                                    if not is_fast_tp:
+                                        active_setup_by_tf[tf_key] = current_anchor
+                                    logger.info(
+                                        "[PAPER-AUTO] AI-APPROVED: %s trade %s (Fib Retr %s %s) @ %.2f (PnL: $%.2f)",
+                                        "Fast TP closed" if is_fast_tp else "Opened",
+                                        sig_id, tf_key.upper(), l_key, entry_px, realized_pnl,
+                                    )
 
-                                    # MT5 Bridge Live Execution Dispatch (Strictly Fib Retracement Only)
-                                    try:
-                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                        sl_distance = round(abs(entry_px - sl_px), 2)
-                                        tp_distance = round(abs(tp_px - entry_px), 2)
-                                        get_mt5_bridge_manager().enqueue_order({
-                                            "id": f"mt5-{new_trade.id[:8]}",
-                                            "paper_trade_id": new_trade.id,
-                                            "strategy": "Fib Retracement",
-                                            "layer": l_key,
-                                            "direction": f_state.direction,
-                                            "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
-                                            "lot_size": trade_lot,
-                                            "entry_price": entry_px,
-                                            "stop_loss": sl_px,
-                                            "take_profit_1": tp_px,
-                                            "sl_points": sl_distance,
-                                            "tp_points": tp_distance,
-                                            "execution_mode": "POINTS_DISTANCE",
-                                        })
-                                    except Exception as mt5_err:  # noqa: BLE001
-                                        logger.warning("[MT5-BRIDGE] Failed to dispatch order to MT5 queue: %s", mt5_err)
+                                    if is_fast_tp:
+                                        # Smart Shield immediate trigger on fast L2/L3 TP
+                                        if exec_cfg.smart_shield_enabled and l_key in ("L2", "L3"):
+                                            l1_trade = (await db.execute(
+                                                select(PaperTradeModel).where(
+                                                    PaperTradeModel.signal_id.like(f"FIB_RETR_{tf_key.upper()}_L1_{int(f_state.point_2_price)}%"),
+                                                    PaperTradeModel.state == "OPEN",
+                                                )
+                                            )).scalars().first()
+                                            if l1_trade:
+                                                new_l1_sl = float(f_state.fib_0_618 or 0.0) if exec_cfg.smart_shield_level == "0.618" else float(f_state.fib_0_500 or 0.0)
+                                                if (f_state.direction == "LONG" and new_l1_sl > (l1_trade.stop_loss or 0.0)) or (f_state.direction == "SHORT" and 0.0 < new_l1_sl < (l1_trade.stop_loss or 999999.0)):
+                                                    l1_trade.stop_loss = new_l1_sl
+                                                    await db.commit()
+                                                    logger.info(
+                                                        "[PAPER-AUTO] Smart Shield (Fast TP %s): L%s TP hit -> trailed L1 SL to %.2f",
+                                                        exec_cfg.smart_shield_level, l_key[-1], new_l1_sl,
+                                                    )
+                                    else:
+                                        # MT5 Bridge Live Execution Dispatch (Strictly Fib Retracement Only)
+                                        try:
+                                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                            sl_distance = round(abs(entry_px - sl_px), 2)
+                                            tp_distance = round(abs(tp_px - entry_px), 2)
+                                            get_mt5_bridge_manager().enqueue_order({
+                                                "id": f"mt5-{new_trade.id[:8]}",
+                                                "paper_trade_id": new_trade.id,
+                                                "strategy": "Fib Retracement",
+                                                "layer": l_key,
+                                                "direction": f_state.direction,
+                                                "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                                "lot_size": trade_lot,
+                                                "entry_price": entry_px,
+                                                "stop_loss": sl_px,
+                                                "take_profit_1": tp_px,
+                                                "sl_points": sl_distance,
+                                                "tp_points": tp_distance,
+                                                "execution_mode": "POINTS_DISTANCE",
+                                            })
+                                        except Exception as mt5_err:  # noqa: BLE001
+                                            logger.warning("[MT5-BRIDGE] Failed to dispatch order to MT5 queue: %s", mt5_err)
 
-                                    # Telegram: Dispatch Trade Opened Alert
-                                    try:
-                                        dir_badge = "BUY / LONG ▲" if f_state.direction == "LONG" else "SELL / SHORT ▼"
-                                        msg = (
-                                            f"🚀 *TRADE OPENED ({trade_lot:.2f} Lots)*\n"
-                                            f"━━━━━━━━━━━━━━━━━━━━\n"
-                                            f"📊 *Strategy:* Fib Retracement ({l_key})\n"
-                                            f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
-                                            f"📈 *Direction:* {dir_badge}\n"
-                                            f"💵 *Entry:* ${entry_px:.2f}\n"
-                                            f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
-                                            f"🎯 *Take Profit:* ${tp_px:.2f}\n"
-                                            f"🧠 *AI Verdict:* {ai_short}\n"
-                                            f"⚡ *Multi-Slot:* {tf_key.upper()} Active (15M, 30M, 1H scanning in parallel)\n"
-                                            f"━━━━━━━━━━━━━━━━━━━━"
-                                        )
-                                        await tg.send_raw_alert(msg)
-                                    except Exception as tg_err:  # noqa: BLE001
-                                        logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
+                                        # Telegram: Dispatch Trade Opened Alert
+                                        try:
+                                            dir_badge = "BUY / LONG ▲" if f_state.direction == "LONG" else "SELL / SHORT ▼"
+                                            msg = (
+                                                f"🚀 *TRADE OPENED ({trade_lot:.2f} Lots)*\n"
+                                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                                f"📊 *Strategy:* Fib Retracement ({l_key})\n"
+                                                f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
+                                                f"📈 *Direction:* {dir_badge}\n"
+                                                f"💵 *Entry:* ${entry_px:.2f}\n"
+                                                f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
+                                                f"🎯 *Take Profit:* ${tp_px:.2f}\n"
+                                                f"🧠 *AI Verdict:* {ai_short}\n"
+                                                f"⚡ *Multi-Slot:* {tf_key.upper()} Active (15M, 30M, 1H scanning in parallel)\n"
+                                                f"━━━━━━━━━━━━━━━━━━━━"
+                                            )
+                                            await tg.send_raw_alert(msg)
+                                        except Exception as tg_err:  # noqa: BLE001
+                                            logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                                 finally:
                                     _in_flight_signals.discard(sig_id)
                             elif existing and existing.state == "OPEN":

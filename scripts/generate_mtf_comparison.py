@@ -23,11 +23,20 @@ from app.research.ranking import rank_candidates  # noqa: E402
 
 def main() -> None:
     src = "data/research/mtf_report.json"
-    if not os.path.exists(src):
-        print(f"MTF report not found: {src}. Run scripts/run_mtf_research.py first.")
-        sys.exit(1)
-    with open(src, encoding="utf-8") as f:
-        report = json.load(f)
+    if os.path.exists(src):
+        with open(src, encoding="utf-8") as f:
+            report = json.load(f)
+    else:
+        # Awaiting research: run scripts/run_mtf_research.py to populate the raw
+        # report. Until then, emit a valid but empty comparison so downstream
+        # consumers (dashboard, reports/, this CLI) never hard-fail.
+        print(f"MTF report not found: {src}. Emitting empty comparison (run scripts/run_mtf_research.py to populate).")
+        report = {
+            "candidates": [],
+            "data": {},
+            "best_exit_per_config": {},
+            "note": "Awaiting MTF research output.",
+        }
 
     candidates = report.get("candidates", [])
     # Merge cost-robustness data into candidates for cost-aware ranking.

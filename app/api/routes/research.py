@@ -318,7 +318,13 @@ async def get_daily_opportunity():
     CANDIDATE_A = {"config": "PROD_4H_1H_30M_15M", "regime": "RANGING", "conf": 75, "tp_r": 1.75, "sl_atr": 1.5}
     path = f"data/research/mtf_signals/signals_{CANDIDATE_A['config']}.json"
     if not os.path.exists(path):
-        return {"available": False, "detail": "No cached signals. Run scripts/run_mtf_research.py first."}
+        # Honest fallback: with no cached signals there is no statistical
+        # support for a daily edge, so the conclusion must still be present.
+        return {
+            "available": False,
+            "conclusion": "NOT STATISTICALLY SUPPORTED",
+            "detail": "No cached signals. Run scripts/run_mtf_research.py first.",
+        }
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
     from app.core.constants import SignalDirection

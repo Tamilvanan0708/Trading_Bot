@@ -43,7 +43,9 @@ def get_smc_fib_multi_tf_service(symbol: str = "XAUUSD") -> SMCFibMultiTFMonitor
 class _SMC_TFSlot:
     def __init__(self, symbol: str, timeframe: str) -> None:
         self.timeframe = timeframe
-        self.engine = SMCFibEngine(symbol=symbol, timeframe=timeframe)
+        from app.config.execution_settings import get_execution_settings
+        mode = getattr(get_execution_settings(), "fib_engine_mode", "classic")
+        self.engine = SMCFibEngine(symbol=symbol, timeframe=timeframe, engine_mode=mode)
         self.last_processed_ts: datetime | None = None
         self.has_live_data: bool = False
         self.live_price: float | None = None
@@ -142,8 +144,11 @@ class SMCFibMultiTFMonitor:
                 hist_candles = await self._bootstrap_from_history()
 
             # Step 1: Advance each slot with its own newly-closed candles
+            from app.config.execution_settings import get_execution_settings
+            active_engine_mode = getattr(get_execution_settings(), "fib_engine_mode", "classic")
             for tf in self.timeframes:
                 slot = self.slots[tf]
+                slot.engine.engine_mode = active_engine_mode
                 candles = []
                 snap_candles = list(snap.get_series(TF_MAP[tf])) if snap is not None else []
 

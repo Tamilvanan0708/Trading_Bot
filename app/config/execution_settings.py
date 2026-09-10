@@ -106,6 +106,10 @@ class ExecutionSettings(BaseModel):
         default=True,
         description="Filter counter-trend setups against macro trend alignment"
     )
+    fib_engine_mode: Literal["classic", "experimental"] = Field(
+        default="classic",
+        description="classic (Sept 8 proven anchor + rolling span + continuation BOS) | experimental (macro locked origin)"
+    )
 
 
 _CURRENT_SETTINGS: ExecutionSettings | None = None

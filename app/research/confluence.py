@@ -9,7 +9,7 @@ from collections import defaultdict
 
 from app.backtesting.models import SimulatedTrade
 
-BUCKETS = [(0, 49), (50, 59), (60, 69), (70, 79), (80, 89), (90, 100), (100, float("inf"))]
+BUCKETS = [(0, 49), (50, 59), (60, 69), (70, 74), (75, 79), (80, 89), (90, 100)]
 
 
 def _bucket(score: float) -> str:
@@ -27,7 +27,7 @@ def confluence_bucket_analysis(trades: list[SimulatedTrade]) -> dict:
         groups[_bucket(cs)].append(t)
 
     result = {}
-    ordered = sorted(groups.items(), key=lambda x: int(x[0].split("–")[0]))
+    ordered = sorted(groups.items(), key=lambda x: int(x[0].split("–")[0]) if "–" in x[0] else -1)
     for bucket_name, group in ordered:
         rs = [t.pnl_r or 0.0 for t in group]
         wins = [r for r in rs if r > 0]

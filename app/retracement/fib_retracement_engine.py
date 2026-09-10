@@ -60,6 +60,7 @@ class DualRetracementEngine:
         left_bars: int | None = None,
         right_bars: int | None = None,
         smart_shield_level: str | None = None,
+        engine_mode: str | None = None,
     ):
         self.symbol = symbol
         self.timeframe = timeframe
@@ -68,6 +69,7 @@ class DualRetracementEngine:
         self.left_bars = left_bars if left_bars is not None else default_bars
         self.right_bars = right_bars if right_bars is not None else default_bars
         self.smart_shield_level = smart_shield_level
+        self.engine_mode = engine_mode or "classic"
         self.setup: RetracementSetup | None = None
         self._candles: list[Candle] = []
         self._events: list[RetracementEvent] = []
@@ -114,6 +116,10 @@ class DualRetracementEngine:
 
     def _min_impulse_range(self) -> float:
         """Minimum impulse point range to eliminate micro sideways consolidation chop."""
+        if self.engine_mode == "classic":
+            if self._candles and self._candles[-1].close < 500.0:
+                return 1.0
+            return 2.0
         # For synthetic unit test series (where price is around 100), allow smaller legs
         if self._candles and self._candles[-1].close < 500.0:
             return 1.0
@@ -175,19 +181,25 @@ class DualRetracementEngine:
         if self._last_traded_bos_high_ts != last_sh.timestamp and (len(self._candles) - 1 - last_sh.index) <= lookback_bars:
             if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
                 # Candle body expansion check: ensure breakout candle has momentum (not a weak doji/pin bar)
-                c_range = candle.high - candle.low
-                if c_range > 0 and (abs(candle.close - candle.open) / c_range) < 0.20:
-                    return []
+                if self.engine_mode != "classic":
+                    c_range = candle.high - candle.low
+                    if c_range > 0 and (abs(candle.close - candle.open) / c_range) < 0.20:
+                        return []
 
-                # Anchor Low: lowest confirmed swing low of the current BOS leg.
-                # If there are previous confirmed swing highs, isolate the swing lows formed
-                # after the previous structure high to prevent reaching back into earlier completed BOS legs.
-                # Anchor Low: lowest confirmed swing low that originated this impulse
-                lows_before_bos = [
-                    s for s in confirmed_lows
-                    if (len(self._candles) - 1 - s.index) <= lookback_bars and s.price < last_sh.price
-                ]
-                anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+                if self.engine_mode == "classic":
+                    # Classic mode (Sept 8 proven): lowest confirmed swing low before the BOS swing that initiated the leg
+                    lows_before_bos = [
+                        s for s in confirmed_lows
+                        if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
+                    ]
+                    anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+                else:
+                    # Experimental mode: lowest confirmed swing low that originated this impulse
+                    lows_before_bos = [
+                        s for s in confirmed_lows
+                        if (len(self._candles) - 1 - s.index) <= lookback_bars and s.price < last_sh.price
+                    ]
+                    anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
 
                 p2_low = anchor_low.price
                 p2_ts = anchor_low.timestamp
@@ -223,19 +235,25 @@ class DualRetracementEngine:
         if self._last_traded_bos_low_ts != last_sl.timestamp and (len(self._candles) - 1 - last_sl.index) <= lookback_bars:
             if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
                 # Candle body expansion check
-                c_range = candle.high - candle.low
-                if c_range > 0 and (abs(candle.close - candle.open) / c_range) < 0.20:
-                    return []
+                if self.engine_mode != "classic":
+                    c_range = candle.high - candle.low
+                    if c_range > 0 and (abs(candle.close - candle.open) / c_range) < 0.20:
+                        return []
 
-                # Anchor High: highest confirmed swing high of the current BOS leg.
-                # If there are previous confirmed swing lows, isolate the swing highs formed
-                # after the previous structure low to prevent reaching back into earlier completed BOS legs.
-                # Anchor High: highest confirmed swing high that originated this impulse
-                highs_before_bos = [
-                    s for s in confirmed_highs
-                    if (len(self._candles) - 1 - s.index) <= lookback_bars and s.price > last_sl.price
-                ]
-                anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+                if self.engine_mode == "classic":
+                    # Classic mode (Sept 8 proven): highest confirmed swing high before the BOS swing that initiated the leg
+                    highs_before_bos = [
+                        s for s in confirmed_highs
+                        if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
+                    ]
+                    anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+                else:
+                    # Experimental mode: highest confirmed swing high that originated this impulse
+                    highs_before_bos = [
+                        s for s in confirmed_highs
+                        if (len(self._candles) - 1 - s.index) <= lookback_bars and s.price > last_sl.price
+                    ]
+                    anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
 
                 p2_high = anchor_high.price
                 p2_ts = anchor_high.timestamp
@@ -609,11 +627,19 @@ class DualRetracementEngine:
                     setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f}) before entry."
                     return events
 
-                # Dynamic Target Expansion: Anchor (Point 2) stays fixed.
-                # As price pushes higher, Target 1.000 expands dynamically with each candle.
+                # Dynamic Target Expansion:
+                # In classic mode, bounded span for scalping: roll anchor up if span > 35 pts and a higher swing low exists.
+                # In experimental mode, anchor stays strictly locked.
                 if candle.high > (setup.current_high_price or 0.0):
                     setup.current_high_price = candle.high
                     setup.current_high_timestamp = candle.timestamp
+                    if self.engine_mode == "classic" and str(self.timeframe).lower() in ("1m", "3m", "5m") and (candle.high - setup.point_2_price) > 35.0:
+                        swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
+                        c_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._candles) - 1]
+                        higher_lows = [s for s in c_lows if s.timestamp > setup.point_2_timestamp and s.price > setup.point_2_price and (candle.high - s.price) >= 10.0]
+                        if higher_lows:
+                            setup.point_2_price = higher_lows[-1].price
+                            setup.point_2_timestamp = higher_lows[-1].timestamp
                     self._apply_bullish_fib(setup, setup.point_2_price, candle.high)
 
             # 2. Instant Touch Execution: execute L1/L2/L3 immediately upon line touch
@@ -667,11 +693,19 @@ class DualRetracementEngine:
                     setup.invalidation_reason = f"Price breached Stop Loss ({setup.sl_price:.2f}) before entry."
                     return events
 
-                # Dynamic Target Expansion: Anchor (Point 2) stays fixed.
-                # As price pushes lower, Target 1.000 expands dynamically with each candle.
+                # Dynamic Target Expansion:
+                # In classic mode, bounded span for scalping: roll anchor down if span > 35 pts and a lower swing high exists.
+                # In experimental mode, anchor stays strictly locked.
                 if candle.low < (setup.current_high_price or float("inf")):
                     setup.current_high_price = candle.low
                     setup.current_high_timestamp = candle.timestamp
+                    if self.engine_mode == "classic" and str(self.timeframe).lower() in ("1m", "3m", "5m") and (setup.point_2_price - candle.low) > 35.0:
+                        swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
+                        c_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._candles) - 1]
+                        lower_highs = [s for s in c_highs if s.timestamp > setup.point_2_timestamp and s.price < setup.point_2_price and (s.price - candle.low) >= 10.0]
+                        if lower_highs:
+                            setup.point_2_price = lower_highs[-1].price
+                            setup.point_2_timestamp = lower_highs[-1].timestamp
                     self._apply_bearish_fib(setup, setup.point_2_price, candle.low)
 
             # 2. Instant Touch Execution: execute L1/L2/L3 immediately upon line touch

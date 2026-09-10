@@ -105,22 +105,27 @@ def load_research_fallback_candles(symbol: str, timeframe: TimeFrame, limit: int
     if cached is not None:
         return cached[-limit:]
 
-    # Prefer the 5M dataset (most granular, resamples to all TFs consistently).
     base5 = _cached_load(_FALLBACK_5M)
-    if not base5:
-        # Fall back to the 15M dataset for 15m/30m/1h/4h.
-        base15 = _cached_load(_FALLBACK_15M)
-        if not base15:
-            return []
-        if timeframe == TimeFrame.M15:
-            series = base15
-        else:
-            series = resample_candles(base15, timeframe)
+    base15 = _cached_load(_FALLBACK_15M)
+
+    # Build candidate series from every available real source and keep the
+    # DEEPEST one. The 5M file is the most granular but only covers the last
+    # days; higher timeframes (30m/1h/4h) need the longer-span 15M series to
+    # serve the full chart window instead of a short tail.
+    candidates: list[list[Candle]] = []
+    if timeframe == TimeFrame.M5:
+        if base5:
+            candidates.append(base5)
     else:
-        if timeframe == TimeFrame.M5:
-            series = base5
-        else:
-            series = resample_candles(base5, timeframe)
+        if base5:
+            candidates.append(base5 if timeframe == TimeFrame.M15 else resample_candles(base5, timeframe))
+        if base15:
+            candidates.append(base15 if timeframe == TimeFrame.M15 else resample_candles(base15, timeframe))
+
+    series: list[Candle] = []
+    for cand in candidates:
+        if cand and len(cand) > len(series):
+            series = cand
 
     if not series:
         return []

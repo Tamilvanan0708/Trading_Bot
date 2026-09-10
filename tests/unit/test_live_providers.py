@@ -42,10 +42,17 @@ def test_build_binance_stream_url():
 
 
 def test_binance_provider_uses_correct_xauusdt_symbol():
-    """Regression: XAUUSD must map to the real Binance ticker xauusdt."""
+    """Regression: XAUUSD must map to the real Binance ticker xauusdt, and the
+    combined stream must subscribe bookTicker + aggTrade (plus the kline
+    streams used for candle aggregation)."""
     feed = BinanceGoldMarketProvider(symbol="XAUUSD", max_reconnect_attempts=0)
     assert feed._binance_symbol == "xauusdt"
-    assert feed._url == "wss://fstream.binance.com/stream?streams=xauusdt@bookTicker/xauusdt@aggTrade"
+    base = "wss://fstream.binance.com/stream?streams="
+    assert feed._url.startswith(base)
+    for stream in ("xauusdt@bookTicker", "xauusdt@aggTrade", "xauusdt@kline_5m", "xauusdt@kline_15m"):
+        assert stream in feed._url.split("streams=", 1)[1]
+    # No stray uppercase / non-XAUUSDT symbol may leak into the ticker.
+    assert "XAUUSDT" not in feed._url
 
 
 # ---------------------------------------------------------------------------

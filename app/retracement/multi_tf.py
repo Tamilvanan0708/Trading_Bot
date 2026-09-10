@@ -81,7 +81,9 @@ class _TFSlot:
 
     def __init__(self, symbol: str, timeframe: str) -> None:
         self.timeframe = timeframe
-        self.engine = DualRetracementEngine(symbol=symbol, timeframe=timeframe)
+        from app.config.execution_settings import get_execution_settings
+        mode = getattr(get_execution_settings(), "fib_engine_mode", "classic")
+        self.engine = DualRetracementEngine(symbol=symbol, timeframe=timeframe, engine_mode=mode)
         self.last_processed_ts: datetime | None = None
         self.last_completed: RetracementSetup | None = None
         self.live_price: float | None = None
@@ -241,6 +243,8 @@ class RetracementMultiTFMonitor:
 
     def _advance_slot(self, slot: _TFSlot, candles: list) -> RetracementSetup | None:
         """Advance ONE timeframe engine with its own newly-closed candles."""
+        from app.config.execution_settings import get_execution_settings
+        slot.engine.engine_mode = getattr(get_execution_settings(), "fib_engine_mode", "classic")
         if not candles:
             return slot.engine.setup
         new_candles = [

@@ -7,6 +7,7 @@ Verifies:
 """
 
 from datetime import datetime, timedelta, timezone
+import uuid
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -289,3 +290,115 @@ async def test_paper_trading_timestamped_anchor_avoids_collision(in_memory_db: A
     assert "L1" in open_layers, "L1 must be opened and not skipped due to yesterday's 4418 trade!"
     assert "L2" in open_layers
     assert "L3" in open_layers
+
+
+@pytest.mark.asyncio
+async def test_cross_timeframe_duplicate_blocked_with_matching_sl_tp(in_memory_db: AsyncSession):
+    """Verify that a 15M trade with 2.58 pt entry diff is blocked when SL and TP match an existing 5M trade."""
+    import app.paper_trading.sync as pt_sync
+    from app.retracement.models import RetracementSetup
+
+    # Existing 5M open trade
+    in_memory_db.add(PaperTradeModel(
+        id=str(uuid.uuid4()),
+        signal_id="FIB_RETR_5M_L1_4430",
+        symbol="XAUUSD",
+        direction="SHORT",
+        state="OPEN",
+        lot_size=0.05,
+        risk_amount=100.0,
+        target_entry=4399.07,
+        actual_entry=4399.07,
+        stop_loss=4419.81,
+        take_profit_1=4379.46,
+        take_profit_2=4379.46,
+        take_profit_3=4379.46,
+        opened_at=datetime.now(timezone.utc),
+    ))
+    await in_memory_db.commit()
+
+    # 15M setup with entry 4401.65 (2.58 pt diff) but identical SL and TP
+    p2_time = datetime(2026, 9, 9, 21, 15, tzinfo=timezone.utc)
+    setup_15m = RetracementSetup(
+        direction="SHORT",
+        point_1_price=4414.0,
+        point_2_price=4430.0,
+        point_2_timestamp=p2_time,
+        sl_price=4419.81,
+        fib_0_236=4419.81,
+        fib_0_618=4401.65,
+        fib_0_500=4407.0,
+        fib_0_382=4412.0,
+        fib_1_000=4379.46,
+        layers={
+            "L1": {"state": "FILLED", "entry_price": 4401.65, "tp": 4379.46, "sl": 4419.81},
+        },
+    )
+
+    class FakeMonitor:
+        timeframes = ["15m"]
+        async def advance(self, db):
+            return {"15m": setup_15m}
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: FakeMonitor())
+
+    await sync_strategy_paper_trades(in_memory_db, force=True)
+    monkeypatch.undo()
+
+    # 15M duplicate must be blocked!
+    trades_15m = (await in_memory_db.execute(
+        select(PaperTradeModel).where(
+            PaperTradeModel.signal_id.like("FIB_RETR_15M_%"),
+        )
+    )).scalars().all()
+    assert len(trades_15m) == 0, "15M duplicate trade must be blocked by cross-timeframe deduplication filter!"
+
+
+@pytest.mark.asyncio
+async def test_fast_tp_layer_captured_and_records_profit(in_memory_db: AsyncSession):
+    """Verify that a layer that resolved to TP_HIT within one cycle is recorded as CLOSED with profit."""
+    import app.paper_trading.sync as pt_sync
+    from app.retracement.models import RetracementSetup
+
+    p2_time = datetime(2026, 9, 9, 21, 20, tzinfo=timezone.utc)
+    setup_with_tp = RetracementSetup(
+        direction="SHORT",
+        point_1_price=4414.0,
+        point_2_price=4430.0,
+        point_2_timestamp=p2_time,
+        sl_price=4420.0,
+        fib_0_236=4420.0,
+        fib_0_618=4402.0,
+        fib_0_500=4407.0,
+        fib_0_382=4412.0,
+        fib_1_000=4385.0,
+        layers={
+            "L2": {"state": "TP_HIT", "entry_price": 4407.0, "tp": 4402.0, "sl": 4420.0},
+        },
+    )
+
+    class FakeMonitor:
+        timeframes = ["5m"]
+        async def advance(self, db):
+            return {"5m": setup_with_tp}
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: FakeMonitor())
+
+    await sync_strategy_paper_trades(in_memory_db, force=True)
+    monkeypatch.undo()
+
+    # L2 must be recorded in paper trades as CLOSED with exit_reason TP_HIT and positive realized_pnl!
+    l2_trades = (await in_memory_db.execute(
+        select(PaperTradeModel).where(
+            PaperTradeModel.signal_id.like("FIB_RETR_5M_L2_%"),
+        )
+    )).scalars().all()
+    assert len(l2_trades) == 1, "L2 fast TP trade must be created in paper trades table!"
+    t = l2_trades[0]
+    assert t.state == "CLOSED"
+    assert t.exit_reason == "TP_HIT"
+    assert t.exit_price == 4402.0
+    assert t.actual_entry == 4407.0
+    assert t.realized_pnl is not None and t.realized_pnl > 0.0, f"Expected positive realized PnL, got {t.realized_pnl}"

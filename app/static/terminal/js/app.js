@@ -5488,6 +5488,7 @@ Routes["/settings"] = async (mount) => {
     const activeTfs = exec.fib_retracement_timeframes || ["5m", "15m", "30m", "1h"];
     const smartShield = exec.smart_shield_enabled !== false;
     const smartShieldLevel = exec.smart_shield_level || "0.618";
+    const fibEngineMode = exec.fib_engine_mode || "classic";
     const mt5BridgeEnabled = exec.mt5_bridge_enabled === true;
     const mt5Symbol = exec.mt5_symbol || "XAUUSD";
     const mt5Online = mt5.is_online === true;
@@ -5777,6 +5778,20 @@ Routes["/settings"] = async (mount) => {
                 <option value="0.500" ${smartShieldLevel === '0.500' ? 'selected' : ''}>0.500 Conservative Buffer Shield (Wide Breakeven)</option>
               </select>
               <span class="muted" style="font-size:11px">When L2 or L3 hits Take Profit, automatically trails L1 Stop Loss to the selected Fibonacci target level</span>
+            </div>
+          </div>
+
+          <!-- FIBONACCI STRATEGY ENGINE PROFILE (CLASSIC vs EXPERIMENTAL) -->
+          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px">
+            <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
+              🎯 Fibonacci Strategy Profile (Engine Mode)
+            </label>
+            <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
+              <select id="set-fib-engine-mode" class="form-input" style="max-width:550px;width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
+                <option value="classic" ${fibEngineMode === 'classic' ? 'selected' : ''}>🏆 Classic Mode (Sept 8 Proven — Anchor Rolling + Continuation BOS - Recommended)</option>
+                <option value="experimental" ${fibEngineMode === 'experimental' ? 'selected' : ''}>🧪 Experimental Mode (Sept 9 Macro Locked Origin + Strict Gates)</option>
+              </select>
+              <span class="muted" style="font-size:11px">Classic Mode restores high-accuracy pre-BOS wave anchor & continuation dealing ranges with 100% instant line-touch execution.</span>
             </div>
           </div>
 
@@ -6174,6 +6189,9 @@ Routes["/settings"] = async (mount) => {
           fib_retracement_timeframes: tfs.length > 0 ? tfs : ["5m", "15m", "30m", "1h"],
           smart_shield_enabled: smartShield,
           smart_shield_level: smartShieldLvl,
+          fib_engine_mode: mount.querySelector("#set-fib-engine-mode")?.value || "classic",
+          trend_filter_enabled: (mount.querySelector("#set-fib-engine-mode")?.value === "experimental"),
+          min_impulse_filter_enabled: (mount.querySelector("#set-fib-engine-mode")?.value === "experimental"),
           mt5_bridge_enabled: mt5Enabled,
           mt5_symbol: mt5Sym,
           mt5_magic_number: 777888,

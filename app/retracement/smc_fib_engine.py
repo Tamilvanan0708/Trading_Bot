@@ -50,11 +50,12 @@ from app.retracement.models import (
 class SMCFibEngine:
     """Exact deterministic SMC With Fib Engine."""
 
-    def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int = 2, right_bars: int = 2):
+    def __init__(self, symbol: str = "XAUUSD", timeframe: str = "15m", left_bars: int = 2, right_bars: int = 2, engine_mode: str | None = None):
         self.symbol = symbol
         self.timeframe = timeframe
         self.left_bars = left_bars
         self.right_bars = right_bars
+        self.engine_mode = engine_mode or "classic"
         self.state = RetracementState.NO_SETUP
         self.direction = SignalDirection.LONG
 
@@ -172,12 +173,20 @@ class SMCFibEngine:
 
         # Check for Bullish BOS (Price broke above previous confirmed swing high)
         if candle.close > last_high.price and last_high.index < len(self._history) - 1:
-            # Bullish anchor = LOWEST swing low that originated this impulse
-            lows_before_bos = [
-                s for s in confirmed_lows
-                if (len(self._history) - 1 - s.index) <= lookback_bars and s.price < last_high.price
-            ]
-            anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_low
+            if self.engine_mode == "classic":
+                # Classic mode (Sept 8 proven): lowest swing low before the BOS swing that initiated the leg
+                lows_before_bos = [
+                    s for s in confirmed_lows
+                    if s.index <= last_high.index and (last_high.index - s.index) <= lookback_bars
+                ]
+                anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_low
+            else:
+                # Experimental mode: lowest swing low that originated this impulse
+                lows_before_bos = [
+                    s for s in confirmed_lows
+                    if (len(self._history) - 1 - s.index) <= lookback_bars and s.price < last_high.price
+                ]
+                anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else last_low
 
             self._initiate_setup(
                 direction=SignalDirection.LONG,
@@ -189,12 +198,20 @@ class SMCFibEngine:
             )
         # Check for Bearish BOS (Price broke below previous confirmed swing low)
         elif candle.close < last_low.price and last_low.index < len(self._history) - 1:
-            # Bearish anchor = HIGHEST swing high that originated this impulse
-            highs_before_bos = [
-                s for s in confirmed_highs
-                if (len(self._history) - 1 - s.index) <= lookback_bars and s.price > last_low.price
-            ]
-            anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_high
+            if self.engine_mode == "classic":
+                # Classic mode (Sept 8 proven): highest swing high before the BOS swing that initiated the leg
+                highs_before_bos = [
+                    s for s in confirmed_highs
+                    if s.index <= last_low.index and (last_low.index - s.index) <= lookback_bars
+                ]
+                anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_high
+            else:
+                # Experimental mode: highest swing high that originated this impulse
+                highs_before_bos = [
+                    s for s in confirmed_highs
+                    if (len(self._history) - 1 - s.index) <= lookback_bars and s.price > last_low.price
+                ]
+                anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else last_high
 
             self._initiate_setup(
                 direction=SignalDirection.SHORT,
@@ -283,8 +300,52 @@ class SMCFibEngine:
             self.invalidation_reason = f"Setup expired after {self.max_expiry_candles} candles without entry touch."
             return
 
-        # Anchor remains locked at the true structural swing origin while waiting for entry.
-        # Micro continuation swings do not overwrite the macro dealing range.
+        # Continuation BOS detection in classic mode: while waiting for entry (trade not touched yet),
+        # if price makes a fresh BOS in the trend direction, update the dealing range
+        # to the active impulse leg so we track the latest Lower High / Higher Low.
+        if self.engine_mode == "classic" and not self.entry_touched:
+            swings = detect_swings(self._history, left_bars=self.left_bars, right_bars=self.right_bars)
+            confirmed_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._history) - 1]
+            confirmed_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._history) - 1]
+            lookback_bars = self._anchor_lookback_bars()
+
+            if self.direction == SignalDirection.SHORT and confirmed_highs and confirmed_lows:
+                last_low = confirmed_lows[-1]
+                if candle.close < last_low.price and last_low.index < len(self._history) - 1:
+                    if self.point_1_ts and last_low.timestamp > self.point_1_ts:
+                        highs_before_bos = [
+                            s for s in confirmed_highs
+                            if s.index <= last_low.index and (last_low.index - s.index) <= lookback_bars
+                        ]
+                        anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+                        self._initiate_setup(
+                            direction=SignalDirection.SHORT,
+                            p1_price=last_low.price,
+                            p1_ts=last_low.timestamp,
+                            p2_price=anchor_high.price,
+                            p2_ts=anchor_high.timestamp,
+                            current_candle=candle,
+                        )
+                        return
+
+            elif self.direction == SignalDirection.LONG and confirmed_highs and confirmed_lows:
+                last_high = confirmed_highs[-1]
+                if candle.close > last_high.price and last_high.index < len(self._history) - 1:
+                    if self.point_1_ts and last_high.timestamp > self.point_1_ts:
+                        lows_before_bos = [
+                            s for s in confirmed_lows
+                            if s.index <= last_high.index and (last_high.index - s.index) <= lookback_bars
+                        ]
+                        anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+                        self._initiate_setup(
+                            direction=SignalDirection.LONG,
+                            p1_price=last_high.price,
+                            p1_ts=last_high.timestamp,
+                            p2_price=anchor_low.price,
+                            p2_ts=anchor_low.timestamp,
+                            current_candle=candle,
+                        )
+                        return
 
         # 1. Update dynamic target if new extremes are formed before entry
         if self.direction == SignalDirection.LONG:
@@ -292,7 +353,7 @@ class SMCFibEngine:
                 self.target_tp_price = candle.high
                 self.target_tp_ts = candle.timestamp
                 self._recompute_fib_levels()
-            # Single Entry at 0.680 Golden Pocket (0.01 lots)
+            # Single Entry at 0.680 Golden Pocket (0.01 lots) - Instant Touch Execution
             if self.entry_price is not None and candle.low <= self.entry_price:
                 if self.sl_price is not None and candle.low <= self.sl_price:
                     self.state = RetracementState.INVALIDATED
@@ -308,7 +369,7 @@ class SMCFibEngine:
                 self.target_tp_price = candle.low
                 self.target_tp_ts = candle.timestamp
                 self._recompute_fib_levels()
-            # Single Entry at 0.680 Golden Pocket (0.01 lots)
+            # Single Entry at 0.680 Golden Pocket (0.01 lots) - Instant Touch Execution
             if self.entry_price is not None and candle.high >= self.entry_price:
                 if self.sl_price is not None and candle.high >= self.sl_price:
                     self.state = RetracementState.INVALIDATED
@@ -321,6 +382,28 @@ class SMCFibEngine:
                 self.state = RetracementState.TRADE_ACTIVE
 
     def _track_active_trade(self, candle: Candle) -> None:
+        # 1. Opposite Market Structure Break (CHoCH Reversal in classic mode):
+        # If market structure breaks in opposite direction, stop out and reverse
+        if self.engine_mode == "classic":
+            swings = detect_swings(self._history, left_bars=self.left_bars, right_bars=self.right_bars)
+            confirmed_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._history) - 1]
+            confirmed_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._history) - 1]
+
+            if self.direction == SignalDirection.SHORT and confirmed_highs:
+                last_high = confirmed_highs[-1]
+                if candle.close > last_high.price and last_high.index < len(self._history) - 1:
+                    self.state = RetracementState.COMPLETED
+                    self.outcome = "SL_HIT"
+                    self.completion_reason = f"CHoCH Reversal: Price broke above swing high at {last_high.price}."
+                    return
+            elif self.direction == SignalDirection.LONG and confirmed_lows:
+                last_low = confirmed_lows[-1]
+                if candle.close < last_low.price and last_low.index < len(self._history) - 1:
+                    self.state = RetracementState.COMPLETED
+                    self.outcome = "SL_HIT"
+                    self.completion_reason = f"CHoCH Reversal: Price broke below swing low at {last_low.price}."
+                    return
+
         if self.direction == SignalDirection.LONG:
             # Check SL Hit at 0.920 Stop Loss first (matching research evaluator)
             if self.sl_price is not None and candle.low <= self.sl_price:
