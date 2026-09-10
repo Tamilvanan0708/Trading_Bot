@@ -5557,27 +5557,17 @@ Routes["/settings"] = async (mount) => {
         </div>
       </div>
 
-      <!-- CARD 2: POSITION SIZING ENGINE (DYNAMIC % COMPOUNDING vs FIXED LOT) -->
+      <!-- CARD 2: DYNAMIC POSITION SIZING & RISK ENGINE (AUTO-COMPOUNDING) -->
       <div class="card" style="border: 1px solid rgba(0,230,118,0.3)">
         <div class="card-head" style="background:rgba(0,230,118,0.08);display:flex;justify-content:space-between;align-items:center">
-          <span style="font-weight:700;color:#69f0ae">🎯 2. POSITION SIZING & RISK ENGINE</span>
-          <span id="sizing-mode-badge" class="badge ${sizingMode === 'broker_risk' ? 'badge-green' : 'badge-amber'}">
-            ${sizingMode === 'broker_risk' ? 'DYNAMIC % RISK (COMPOUNDING)' : 'FIXED LOT SIZE'}
+          <span style="font-weight:700;color:#69f0ae">📈 2. POSITION SIZING & RISK ENGINE</span>
+          <span id="sizing-mode-badge" class="badge badge-green">
+            DYNAMIC % RISK (AUTO-COMPOUNDING)
           </span>
         </div>
         <div class="card-body">
-          <div style="margin-bottom:16px">
-            <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
-              Select Position Sizing Mode
-            </label>
-            <select id="set-sizing-mode" class="form-input" style="width:100%;max-width:420px;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:700">
-              <option value="broker_risk" ${sizingMode === 'broker_risk' ? 'selected' : ''}>Dynamic % Risk (Compounding Auto-Lot based on SL distance)</option>
-              <option value="fixed" ${sizingMode === 'fixed' ? 'selected' : ''}>Fixed Lot Size (Manual 0.01, 0.02, 0.05 Lots)</option>
-            </select>
-          </div>
-
           <!-- DYNAMIC RISK CONTROLS -->
-          <div id="dynamic-risk-section" style="${sizingMode === 'broker_risk' ? '' : 'display:none;'};background:#181e29;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+          <div id="dynamic-risk-section" style="background:#181e29;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
               <span style="font-size:12px;font-weight:700;color:#90caf9">⚡ RISK PERCENTAGE PER TRADE (AUTO-COMPOUNDING)</span>
               <span class="muted" style="font-size:11px">Auto-upsizes on profit & auto-downsizes on drawdown</span>
@@ -5596,32 +5586,6 @@ Routes["/settings"] = async (mount) => {
                 <span style="font-size:12px;color:var(--text-dim);font-weight:600">Custom %:</span>
                 <input type="number" id="set-risk-percent" class="form-input" value="${riskPercent}" step="0.1" min="0.1" max="10.0" style="width:80px;padding:6px 8px;background:#10141d;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:4px;font-size:13px;font-weight:700;text-align:center">
                 <span style="font-size:12px;font-weight:700;color:#90caf9">%</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- FIXED LOT CONTROLS -->
-          <div id="fixed-lot-section" style="${sizingMode === 'fixed' ? '' : 'display:none;'};background:#181e29;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px 16px;margin-bottom:16px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-              <span style="font-size:12px;font-weight:700;color:#ffe082">📌 FIXED LOT SIZE PER TRADE</span>
-              <span class="muted" style="font-size:11px">1.0 pt Gold Move on 0.01 Lot = $1.00 USD (₹100 Cent)</span>
-            </div>
-            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
-              <button type="button" class="btn btn-sm ${fixedLotSize === 0.01 ? 'btn-primary' : 'btn-outline'} fixed-preset-btn" data-lot="0.01" style="font-weight:700">
-                0.01 Lot ($1.00 / pt)
-              </button>
-              <button type="button" class="btn btn-sm ${fixedLotSize === 0.02 ? 'btn-primary' : 'btn-outline'} fixed-preset-btn" data-lot="0.02" style="font-weight:700">
-                0.02 Lot ($2.00 / pt)
-              </button>
-              <button type="button" class="btn btn-sm ${fixedLotSize === 0.05 ? 'btn-primary' : 'btn-outline'} fixed-preset-btn" data-lot="0.05" style="font-weight:700">
-                0.05 Lot ($5.00 / pt)
-              </button>
-              <button type="button" class="btn btn-sm ${fixedLotSize === 0.10 ? 'btn-primary' : 'btn-outline'} fixed-preset-btn" data-lot="0.10" style="font-weight:700">
-                0.10 Lot ($10.00 / pt)
-              </button>
-              <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
-                <span style="font-size:12px;color:var(--text-dim);font-weight:600">Custom Lot:</span>
-                <input type="number" id="set-fixed-lot-size" class="form-input" value="${fixedLotSize}" step="0.01" min="0.01" max="10.0" style="width:85px;padding:6px 8px;background:#10141d;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:4px;font-size:13px;font-weight:700;text-align:center">
               </div>
             </div>
           </div>
@@ -5772,20 +5736,6 @@ Routes["/settings"] = async (mount) => {
             </div>
           </div>
 
-          <!-- SMART SHIELD SL TARGET CONFIG -->
-          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px">
-            <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
-              🛡️ Smart Shield Trailing Stop Loss Target
-            </label>
-            <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center">
-              <select id="set-smart-shield-level" class="form-input" style="max-width:500px;width:100%;padding:9px 12px;background:#181e29;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:13px;font-weight:600">
-                <option value="0.618" ${smartShieldLevel === '0.618' ? 'selected' : ''}>0.618 Entry Breakeven (Zero Risk Escape - Recommended)</option>
-                <option value="0.500" ${smartShieldLevel === '0.500' ? 'selected' : ''}>0.500 Conservative Buffer Shield (Wide Breakeven)</option>
-              </select>
-              <span class="muted" style="font-size:11px">When L2 or L3 hits Take Profit, automatically trails L1 Stop Loss to the selected Fibonacci target level</span>
-            </div>
-          </div>
-
           <!-- FIBONACCI STRATEGY ENGINE PROFILE (CLASSIC vs EXPERIMENTAL) -->
           <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;margin-top:16px">
             <label class="input-label" style="font-size:12px;font-weight:700;color:var(--text);display:block;margin-bottom:6px">
@@ -5813,10 +5763,10 @@ Routes["/settings"] = async (mount) => {
       </div>
 
       
-      <!-- CARD: METATRADER 5 (MT5) LIVE AUTO-TRADER (MQL5 EA BRIDGE) -->
+      <!-- CARD 5: METATRADER 5 (MT5) LIVE AUTO-TRADER (MQL5 EA BRIDGE) -->
       <div class="card" style="border: 1px solid rgba(171,71,188,0.35);margin-top:16px">
         <div class="card-head" style="background:rgba(171,71,188,0.08);display:flex;justify-content:space-between;align-items:center">
-          <span style="font-weight:700;color:#ce93d8">🏛️ 2. METATRADER 5 (MT5) LIVE AUTO-TRADER (MQL5 EA BRIDGE)</span>
+          <span style="font-weight:700;color:#ce93d8">🏛️ 5. METATRADER 5 (MT5) LIVE AUTO-TRADER (MQL5 EA BRIDGE)</span>
           <span id="mt5-status-badge" class="badge ${mt5Online ? 'badge-green' : 'badge-yellow'}">${mt5Online ? '🟢 ONLINE (VT Markets Connected)' : '⚪ WAITING FOR MT5 EA'}</span>
         </div>
         <div class="card-body">
@@ -5901,23 +5851,18 @@ Routes["/settings"] = async (mount) => {
     </div>`;
   }, mount);
 
-  // Helper to recalculate live lot and margin preview
+  // Helper to recalculate live lot and margin preview (Dynamic Auto-Compounding)
   function updateLotPreview() {
     const cur = mount.querySelector("#set-account-currency")?.value || "cent";
     const sym = cur === "cent" ? "₹" : "$";
     const bal = parseFloat(mount.querySelector("#set-account-balance")?.value || "10000");
     const leverage = parseInt(mount.querySelector("#set-account-leverage")?.value || "500", 10);
-    const mode = mount.querySelector("#set-sizing-mode")?.value || "broker_risk";
     const rPct = parseFloat(mount.querySelector("#set-risk-percent")?.value || "1.0");
-    const fixedLot = parseFloat(mount.querySelector("#set-fixed-lot-size")?.value || "0.01");
 
     const effectiveRisk = Math.max(1.0, bal * (rPct / 100.0));
 
-    // Calculate lot for given SL points
+    // Calculate lot for given SL points (Dynamic % Risk Auto-Compounding)
     const calcLot = (pts) => {
-      if (mode === "fixed") {
-        return Math.max(0.01, fixedLot).toFixed(2);
-      }
       const raw = effectiveRisk / (pts * 100.0);
       return Math.max(0.01, Math.min(5.0, Math.round(raw * 100) / 100)).toFixed(2);
     };
@@ -5942,11 +5887,7 @@ Routes["/settings"] = async (mount) => {
 
     const elEffRisk = mount.querySelector("#preview-effective-risk");
     if (elEffRisk) {
-      if (mode === "fixed") {
-        elEffRisk.textContent = `${sym}${(fixedLot * 3.0 * 100.0).toFixed(2)} Risk (5M)`;
-      } else {
-        elEffRisk.textContent = `${sym}${effectiveRisk.toFixed(2)} Risk`;
-      }
+      elEffRisk.textContent = `${sym}${effectiveRisk.toFixed(2)} Risk`;
     }
 
     const elLevBadge = mount.querySelector("#preview-leverage-badge");
@@ -5990,42 +5931,17 @@ Routes["/settings"] = async (mount) => {
 
     const elComp = mount.querySelector("#preview-compounding-note");
     if (elComp) {
-      if (mode === "broker_risk") {
-        const compBal = Math.round(bal * 1.5);
-        const compRisk = compBal * (rPct / 100.0);
-        const compLot5m = Math.max(0.01, Math.min(5.0, Math.round((compRisk / (3.0 * 100.0)) * 100) / 100)).toFixed(2);
-        const downBal = Math.round(bal * 0.8);
-        const downRisk = downBal * (rPct / 100.0);
-        const downLot5m = Math.max(0.01, Math.min(5.0, Math.round((downRisk / (3.0 * 100.0)) * 100) / 100)).toFixed(2);
-        elComp.innerHTML = `
-          📈 <b>Growth:</b> If balance reaches <b>${sym}${compBal.toLocaleString()}</b> (+50%), 5M lot auto-increases to <b style="color:#00e676">${compLot5m} Lots</b>.<br>
-          🛡️ <b>Drawdown Protection:</b> If balance drops to <b>${sym}${downBal.toLocaleString()}</b> (-20%), 5M lot auto-downsizes to <b style="color:#ffb74d">${downLot5m} Lots</b>.
-        `;
-      } else {
-        elComp.innerHTML = `
-          📌 <b>Fixed Sizing Active:</b> All trades open with fixed <b>${fixedLot} Lots</b> regardless of account balance fluctuations.<br>
-          💡 <b>Tip:</b> Switch to <i>Dynamic % Risk (Compounding)</i> to let profits accelerate lot growth safely.
-        `;
-      }
+      const compBal = Math.round(bal * 1.5);
+      const compRisk = compBal * (rPct / 100.0);
+      const compLot5m = Math.max(0.01, Math.min(5.0, Math.round((compRisk / (3.0 * 100.0)) * 100) / 100)).toFixed(2);
+      const downBal = Math.round(bal * 0.8);
+      const downRisk = downBal * (rPct / 100.0);
+      const downLot5m = Math.max(0.01, Math.min(5.0, Math.round((downRisk / (3.0 * 100.0)) * 100) / 100)).toFixed(2);
+      elComp.innerHTML = `
+        📈 <b>Growth:</b> If balance reaches <b>${sym}${compBal.toLocaleString()}</b> (+50%), 5M lot auto-increases to <b style="color:#00e676">${compLot5m} Lots</b>.<br>
+        🛡️ <b>Drawdown Protection:</b> If balance drops to <b>${sym}${downBal.toLocaleString()}</b> (-20%), 5M lot auto-downsizes to <b style="color:#ffb74d">${downLot5m} Lots</b>.
+      `;
     }
-  }
-
-  // Sizing Mode Switcher
-  const sizingSelect = mount.querySelector("#set-sizing-mode");
-  if (sizingSelect) {
-    sizingSelect.addEventListener("change", (e) => {
-      const isDynamic = e.target.value === "broker_risk";
-      const dynSec = mount.querySelector("#dynamic-risk-section");
-      const fixSec = mount.querySelector("#fixed-lot-section");
-      const badge = mount.querySelector("#sizing-mode-badge");
-      if (dynSec) dynSec.style.display = isDynamic ? "" : "none";
-      if (fixSec) fixSec.style.display = isDynamic ? "none" : "";
-      if (badge) {
-        badge.textContent = isDynamic ? "DYNAMIC % RISK (COMPOUNDING)" : "FIXED LOT SIZE";
-        badge.className = isDynamic ? "badge badge-green" : "badge badge-amber";
-      }
-      updateLotPreview();
-    });
   }
 
   // Currency Change interaction
@@ -6067,21 +5983,8 @@ Routes["/settings"] = async (mount) => {
     });
   });
 
-  // Fixed Lot Preset Buttons
-  mount.querySelectorAll(".fixed-preset-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const lot = parseFloat(btn.dataset.lot);
-      const input = mount.querySelector("#set-fixed-lot-size");
-      if (input) input.value = lot;
-      mount.querySelectorAll(".fixed-preset-btn").forEach(b => {
-        b.className = b === btn ? "btn btn-sm btn-primary fixed-preset-btn" : "btn btn-sm btn-outline fixed-preset-btn";
-      });
-      updateLotPreview();
-    });
-  });
-
   // Numeric input change listeners for instant live preview
-  mount.querySelectorAll("#set-account-balance, #set-risk-percent, #set-fixed-lot-size").forEach(input => {
+  mount.querySelectorAll("#set-account-balance, #set-risk-percent").forEach(input => {
     input.addEventListener("input", updateLotPreview);
   });
 
@@ -6171,13 +6074,12 @@ Routes["/settings"] = async (mount) => {
   if (saveBtn) {
     saveBtn.addEventListener("click", async () => {
       const cur = mount.querySelector("#set-account-currency")?.value || "cent";
-      const sMode = mount.querySelector("#set-sizing-mode")?.value || "broker_risk";
+      const sMode = "broker_risk";
       const rPct = parseFloat(mount.querySelector("#set-risk-percent")?.value || "1.0");
-      const fLot = parseFloat(mount.querySelector("#set-fixed-lot-size")?.value || "0.01");
       const balance = parseFloat(mount.querySelector("#set-account-balance")?.value || "10000.0");
       const leverage = parseInt(mount.querySelector("#set-account-leverage")?.value || "500", 10);
       const smartShield = true;
-      const smartShieldLvl = mount.querySelector("#set-smart-shield-level")?.value || "0.618";
+      const smartShieldLvl = "0.618";
 
       const stratFibRetr = mount.querySelector("#strat-cb-fib-retr")?.checked ?? true;
       const stratSmcFib = mount.querySelector("#strat-cb-smc-fib")?.checked ?? false;
@@ -6204,7 +6106,7 @@ Routes["/settings"] = async (mount) => {
           risk_percent: rPct,
           account_balance: balance,
           target_risk_usd: 100.0,
-          fixed_lot_size: fLot,
+          fixed_lot_size: 0.01,
           account_leverage: leverage,
           strategy_fib_retracement: stratFibRetr,
           strategy_smc_fib: stratSmcFib,

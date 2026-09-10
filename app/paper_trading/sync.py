@@ -789,7 +789,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         ot.realized_r = round(pts_stale / max(0.1, abs(entry_chk - (ot.stop_loss or 0.0))), 2)
                         await db.commit()
 
+                smc_allowed_tfs = [tf.lower() for tf in (exec_cfg.fib_retracement_timeframes or ["5m", "15m", "30m", "1h"])]
                 for tf_key in smc_svc.timeframes:
+                    if tf_key.lower() not in smc_allowed_tfs:
+                        continue
                     s_card = smc_states.get(tf_key) or {}
                     if not s_card.get("point_2") or not s_card.get("entry", {}).get("price"):
                         continue
