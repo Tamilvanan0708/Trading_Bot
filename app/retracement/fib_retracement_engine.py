@@ -187,12 +187,35 @@ class DualRetracementEngine:
                         return []
 
                 if self.engine_mode == "classic":
-                    # Classic mode (Sept 8 proven): lowest confirmed swing low before the BOS swing that initiated the leg
+                    # Classic mode: use the most recent confirmed swing low immediately
+                    # before the BOS high — this is the "Higher Low" base of the impulse
+                    # (not the ancient macro bottom). On 5m/3m/1m scalping this ensures
+                    # the Fib anchor matches exactly what a trader sees on TradingView.
                     lows_before_bos = [
                         s for s in confirmed_lows
                         if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
                     ]
-                    anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
+                    if lows_before_bos:
+                        tf_str = str(self.timeframe).lower()
+                        if tf_str in ("1m", "3m", "5m"):
+                            # Short TF: prefer the most recent HL immediately before BOS
+                            # (staircase Higher Low anchoring), not the macro absolute bottom.
+                            # Max span guard: if the most-recent HL still produces an
+                            # over-extended Fib (> 22 pts for Gold 5m), walk forward
+                            # to the next more recent HL.
+                            MAX_SPAN_5M = 22.0 if (self._candles and self._candles[-1].close > 1000.0) else 8.0
+                            sorted_by_time = sorted(lows_before_bos, key=lambda s: s.index, reverse=True)
+                            anchor_low = sorted_by_time[0]  # most recent HL first
+                            for candidate in sorted_by_time:
+                                span_candidate = candle.high - candidate.price
+                                if span_candidate <= MAX_SPAN_5M:
+                                    anchor_low = candidate
+                                    break
+                        else:
+                            # Higher TFs: use the absolute lowest point (macro structure)
+                            anchor_low = min(lows_before_bos, key=lambda s: s.price)
+                    else:
+                        anchor_low = confirmed_lows[-1]
                 else:
                     # Experimental mode: lowest confirmed swing low that originated this impulse
                     lows_before_bos = [
@@ -241,12 +264,32 @@ class DualRetracementEngine:
                         return []
 
                 if self.engine_mode == "classic":
-                    # Classic mode (Sept 8 proven): highest confirmed swing high before the BOS swing that initiated the leg
+                    # Classic mode: use the most recent confirmed swing high immediately
+                    # before the BOS low — this is the "Lower High" base of the impulse
+                    # (not the ancient macro top). On 5m/3m/1m scalping this ensures
+                    # the Fib anchor matches exactly what a trader sees on TradingView.
                     highs_before_bos = [
                         s for s in confirmed_highs
                         if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
                     ]
-                    anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
+                    if highs_before_bos:
+                        tf_str = str(self.timeframe).lower()
+                        if tf_str in ("1m", "3m", "5m"):
+                            # Short TF: prefer the most recent LH immediately before BOS
+                            # (staircase Lower High anchoring), not the macro absolute top.
+                            MAX_SPAN_5M = 22.0 if (self._candles and self._candles[-1].close > 1000.0) else 8.0
+                            sorted_by_time = sorted(highs_before_bos, key=lambda s: s.index, reverse=True)
+                            anchor_high = sorted_by_time[0]
+                            for candidate in sorted_by_time:
+                                span_candidate = candidate.price - candle.low
+                                if span_candidate <= MAX_SPAN_5M:
+                                    anchor_high = candidate
+                                    break
+                        else:
+                            # Higher TFs: use the absolute highest point (macro structure)
+                            anchor_high = max(highs_before_bos, key=lambda s: s.price)
+                    else:
+                        anchor_high = confirmed_highs[-1]
                 else:
                     # Experimental mode: highest confirmed swing high that originated this impulse
                     highs_before_bos = [
