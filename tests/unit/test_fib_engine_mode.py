@@ -192,3 +192,23 @@ def test_execution_settings_saves_and_loads_fib_engine_mode():
     save_execution_settings(cfg)
     loaded_classic = get_execution_settings()
     assert loaded_classic.fib_engine_mode == "classic"
+
+
+def test_timeframe_adaptive_fractal_bars():
+    """Verify that DualRetracementEngine initializes with 2 bars on 5m/3m/1m and 3 bars on 15m/30m/1h."""
+    eng_5m = DualRetracementEngine(symbol="XAUUSD", timeframe="5m")
+    assert eng_5m.left_bars == 2
+    assert eng_5m.right_bars == 2
+
+    eng_3m = DualRetracementEngine(symbol="XAUUSD", timeframe="3m")
+    assert eng_3m.left_bars == 2
+    assert eng_3m.right_bars == 2
+
+    eng_15m = DualRetracementEngine(symbol="XAUUSD", timeframe="15m")
+    assert eng_15m.left_bars == 3
+    assert eng_15m.right_bars == 3
+
+    eng_1h = DualRetracementEngine(symbol="XAUUSD", timeframe="1h")
+    assert eng_1h.left_bars == 3
+    assert eng_1h.right_bars == 3
+

@@ -64,8 +64,12 @@ class DualRetracementEngine:
     ):
         self.symbol = symbol
         self.timeframe = timeframe
-        # 3-bar fractal swings (7-bar window) capture true structural swing highs and lows
-        default_bars = 3
+        # Timeframe-adaptive fractal swings:
+        # Fast scalping timeframes (5m, 3m, 1m) use 2-bar fractals (5-bar window)
+        # to capture agile intraday swings matching TradingView scalping charts.
+        # Higher timeframes (15m, 30m, 1h, 4h) maintain 3-bar fractals (7-bar window) for structural stability.
+        tf = str(timeframe).lower()
+        default_bars = 2 if tf in ("1m", "3m", "5m") else 3
         self.left_bars = left_bars if left_bars is not None else default_bars
         self.right_bars = right_bars if right_bars is not None else default_bars
         self.smart_shield_level = smart_shield_level
