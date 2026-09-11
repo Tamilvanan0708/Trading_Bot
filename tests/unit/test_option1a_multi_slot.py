@@ -183,9 +183,11 @@ async def test_paper_trading_cross_timeframe_duplicate_skipped(in_memory_db: Asy
             return snap
 
     monkeypatch = pytest.MonkeyPatch()
+    from app.config.execution_settings import ExecutionSettings
     from app.retracement import multi_tf
     monkeypatch.setattr(multi_tf, "get_live_service", lambda: FakeLive())
     monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: mon)
+    monkeypatch.setattr(pt_sync, "get_execution_settings", lambda: ExecutionSettings(cross_tf_dedup_enabled=True))
 
     # Insert existing OPEN trades on 1H with identical entry & SL
     for l_id, l_entry in [("L1", 116.15), ("L2", 114.50), ("L3", 112.85)]:
@@ -341,7 +343,9 @@ async def test_cross_timeframe_duplicate_blocked_with_matching_sl_tp(in_memory_d
             return {"15m": setup_15m}
 
     monkeypatch = pytest.MonkeyPatch()
+    from app.config.execution_settings import ExecutionSettings
     monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: FakeMonitor())
+    monkeypatch.setattr(pt_sync, "get_execution_settings", lambda: ExecutionSettings(cross_tf_dedup_enabled=True))
 
     await sync_strategy_paper_trades(in_memory_db, force=True)
     monkeypatch.undo()

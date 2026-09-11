@@ -40,7 +40,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
     global _last_paper_sync_ts
     import time
     now = time.time()
-    if not force and (now - _last_paper_sync_ts < 10.0):
+    if not force and (now - _last_paper_sync_ts < 2.0):
         return
     _last_paper_sync_ts = now
 
@@ -157,6 +157,14 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     if tf_key.lower() not in allowed_tfs:
                         continue
                     f_state = fib_states.get(tf_key)
+                    if not f_state or not getattr(f_state, "layers", None) or not getattr(f_state, "point_2_price", None):
+                        try:
+                            from app.retracement.repository import RetracementRepository
+                            db_state = await RetracementRepository(db).load_latest_active("XAUUSD", strategy="RETRACEMENT_BOS_V1", timeframe=tf_key)
+                            if db_state and getattr(db_state, "layers", None) and getattr(db_state, "point_2_price", None):
+                                f_state = db_state
+                        except Exception:
+                            pass
                     if not f_state or not getattr(f_state, "layers", None) or not getattr(f_state, "point_2_price", None):
                         continue
                     p2_ts = getattr(f_state, "point_2_timestamp", None)

@@ -590,7 +590,11 @@ async def get_fib_retracement_dashboard(
     # Immediately synchronize any filled layers into paper trades
     try:
         from app.paper_trading.sync import sync_strategy_paper_trades
-        await asyncio.wait_for(sync_strategy_paper_trades(db, force=False), timeout=4.0)
+        has_active = any(
+            (getattr(st, "entry_touched", False) and not getattr(st, "outcome", None))
+            for st in states.values() if st is not None
+        )
+        await asyncio.wait_for(sync_strategy_paper_trades(db, force=has_active), timeout=5.0)
     except Exception as sync_err:  # noqa: BLE001
         logger.debug("[STRATEGY] fib-retracement sync error: %s", sync_err)
 
