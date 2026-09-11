@@ -12,12 +12,14 @@ from datetime import datetime, timezone
 import glob
 import json
 import os
-from typing import List
+from typing import Any, List
 
 import httpx
 
+from app.core.constants import TimeFrame
 from app.core.logging import logger
 from app.data.models import Candle
+from app.data.timeframe_resampler import resample_candles
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CACHE_DIR = os.path.join(ROOT_DIR, "data", "research")
@@ -36,6 +38,101 @@ TF_INTERVAL_MAP = {
     "4h": "4h",
     "1d": "1d",
 }
+
+TF_ENUM_MAP = {
+    "5m": TimeFrame.M5,
+    "15m": TimeFrame.M15,
+    "30m": TimeFrame.M30,
+    "1h": TimeFrame.H1,
+    "2h": TimeFrame.H2,
+    "4h": TimeFrame.H4,
+    "1d": TimeFrame.D1,
+}
+
+
+def filter_forex_trading_days(candles: list[Candle]) -> list[Candle]:
+    """Filter out weekend hours when real Forex brokers (Exness, IC Markets, MT5) are closed.
+
+    Forex Gold (XAUUSD) trades strictly Monday through Friday:
+    - Saturday is 100% closed (UTC 00:00 to 24:00).
+    - Sunday daytime is closed (reopens Sunday ~22:00 UTC for Sydney/Asian session).
+    - Friday closes ~22:00 UTC (New York close).
+    Any synthetic crypto weekend candles are excluded.
+    """
+    forex_candles = []
+    for c in candles:
+        ts = c.timestamp if c.timestamp.tzinfo else c.timestamp.replace(tzinfo=timezone.utc)
+        wd = ts.weekday()
+        hr = ts.hour
+        # Exclude Saturday (weekday 5) entirely
+        if wd == 5:
+            continue
+        # Exclude Sunday (weekday 6) before 22:00 UTC market open
+        if wd == 6 and hr < 22:
+            continue
+        # Exclude Friday (weekday 4) after 22:00 UTC market close
+        if wd == 4 and hr >= 22:
+            continue
+        forex_candles.append(c)
+    return forex_candles
+
+
+def get_available_forex_data_range() -> dict[str, Any]:
+    """Returns available historical Forex dataset dates and metadata."""
+    return {
+        "min_date": "2026-06-01",
+        "max_date": "2026-09-10",
+        "market": "FOREX_5DAY",
+        "market_label": "Forex 5-Day (Mon–Fri only)",
+        "symbol": "XAUUSD",
+        "timeframes": ["5m", "15m", "30m", "1h", "2h", "4h"],
+    }
+
+
+def _load_bundled_master_dataset(tf_str: str) -> list[Candle]:
+    """Load candles from permanently committed master datasets in data/research."""
+    # 1. Direct match for 15m
+    if tf_str == "15m":
+        for fname in ("xauusd_15m_real.json", "xauusd_15m_full.json"):
+            fpath = os.path.join(CACHE_DIR, fname)
+            if os.path.exists(fpath):
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                    entries = raw.get("candles", raw)
+                    candles = _parse_candles(entries)
+                    if candles:
+                        return candles
+                except Exception as err:
+                    logger.debug("[DATA-LOADER] Master %s read error: %s", fname, err)
+
+    # 2. Direct match for 5m
+    if tf_str == "5m":
+        fpath = os.path.join(CACHE_DIR, "xauusd_5m_2yr.json")
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                entries = raw.get("candles", raw)
+                candles = _parse_candles(entries)
+                if candles:
+                    return candles
+            except Exception as err:
+                logger.debug("[DATA-LOADER] Master 5m read error: %s", err)
+
+    # 3. Resample to higher timeframes (30m, 1h, 2h, 4h) from 15m
+    target_tf_enum = TF_ENUM_MAP.get(tf_str)
+    if target_tf_enum is not None and tf_str in ("30m", "1h", "2h", "4h"):
+        base_candles = _load_bundled_master_dataset("15m")
+        if base_candles:
+            try:
+                resampled = resample_candles(base_candles, target_tf_enum)
+                if resampled:
+                    return resampled
+            except Exception as r_err:
+                logger.debug("[DATA-LOADER] Resampling to %s failed: %s", tf_str, r_err)
+
+    return []
 
 
 def _parse_candles(entries: list[dict]) -> list[Candle]:
@@ -94,12 +191,15 @@ async def fetch_historical_candles(
     start_dt: datetime,
     end_dt: datetime,
     use_cache: bool = True,
+    filter_forex: bool = True,
 ) -> list[Candle]:
     """Fetch historical candles for symbol and timeframe between start_dt and end_dt.
 
     1. Checks for exact cache match.
     2. Searches for wider/master cache files covering [start_dt, end_dt] and slices candles.
-    3. Falls back to resilient Binance REST API pagination with retry & rate-limit backoff.
+    3. Searches committed master files (xauusd_15m_real.json, xauusd_5m_2yr.json) + auto-resampling.
+    4. Falls back to resilient Binance REST API pagination with retry & rate-limit backoff.
+    5. Applies Forex 5-Day Market Calendar Filter (strips Saturday/Sunday weekend bars).
     """
     os.makedirs(CACHE_DIR, exist_ok=True)
     tf_str = timeframe.lower()
@@ -128,7 +228,7 @@ async def fetch_historical_candles(
                     "[DATA-LOADER] Loaded %d candles from exact cache for %s [%s] (%s to %s)",
                     len(candles), symbol, tf_str, start_str, end_str
                 )
-                return candles
+                return filter_forex_trading_days(candles) if filter_forex else candles
         except Exception as cache_err:  # noqa: BLE001
             logger.warning("[DATA-LOADER] Cache read failed: %s, checking master candidates", cache_err)
 
@@ -153,7 +253,7 @@ async def fetch_historical_candles(
                 if c_end.tzinfo is None:
                     c_end = c_end.replace(tzinfo=timezone.utc)
 
-                # Check if candidate file contains the entire requested range
+                # Check if candidate file contains the requested range
                 covers_start = c_start <= start_dt
                 covers_end = (c_end >= end_dt) or (c_end.date() >= end_dt.date())
                 if covers_start and covers_end:
@@ -173,10 +273,22 @@ async def fetch_historical_candles(
                             len(sliced_candles), os.path.basename(c_path), symbol, tf_str, start_str, end_str
                         )
                         _save_cache(cache_path, symbol, tf_str, start_dt, end_dt, sliced_candles)
-                        return sliced_candles
+                        return filter_forex_trading_days(sliced_candles) if filter_forex else sliced_candles
             except Exception as slice_err:  # noqa: BLE001
                 logger.debug("[DATA-LOADER] Skipping candidate %s: %s", c_path, slice_err)
                 continue
+
+    # 3. Check bundled master datasets (offline fallback for Render US cloud)
+    bundled_candles = _load_bundled_master_dataset(tf_str)
+    if bundled_candles:
+        sliced_bundled = [c for c in bundled_candles if start_dt <= c.timestamp <= end_dt]
+        if sliced_bundled and len(sliced_bundled) >= 50:
+            logger.info(
+                "[DATA-LOADER] Sliced %d candles from bundled dataset for %s [%s]",
+                len(sliced_bundled), symbol, tf_str
+            )
+            _save_cache(cache_path, symbol, tf_str, start_dt, end_dt, sliced_bundled)
+            return filter_forex_trading_days(sliced_bundled) if filter_forex else sliced_bundled
 
     # 3. Fetch from Binance REST API with pagination and retry backoff
     start_ms = int(start_dt.timestamp() * 1000)
@@ -289,5 +401,5 @@ async def fetch_historical_candles(
     if candles and use_cache:
         _save_cache(cache_path, symbol, tf_str, start_dt, end_dt, candles)
 
-    return candles
+    return filter_forex_trading_days(candles) if filter_forex else candles
 

@@ -27,6 +27,7 @@ data/research/*.json
 !data/research/xauusd_15m_full.json
 !data/research/xauusd_15m_real.json
 !data/research/xauusd_5m_2yr.json
+!data/research/cache_xauusdt_*.json
 
 # IDE
 .vscode/

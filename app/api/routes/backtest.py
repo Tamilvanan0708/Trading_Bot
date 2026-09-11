@@ -61,6 +61,13 @@ async def run_backtest(req: BacktestRequest, db: AsyncSession = Depends(get_db_s
     }
 
 
+@router.get("/data-range")
+async def get_data_range():
+    """Returns available historical Forex dataset dates and metadata."""
+    from app.backtesting.data_loader import get_available_forex_data_range
+    return get_available_forex_data_range()
+
+
 @router.get("/{id}")
 async def get_backtest(id: str, db: AsyncSession = Depends(get_db_session)):
     """Retrieves detailed backtest report by ID."""

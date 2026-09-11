@@ -5221,10 +5221,22 @@ Routes["/backtest"] = (mount) => {
           <div class="section-title">🧪 BACKTEST LAB & HISTORICAL VERIFIER</div>
           <div class="muted" style="font-size:11px">Multi-Timeframe Deterministic Backtesting · Dynamic Compounding & Cent Account · Real Binance Data</div>
         </div>
-        <div class="toolbar">
-          <span class="badge badge-blue">OFFLINE SIMULATOR</span>
-          <span class="badge badge-green">REAL BINANCE CANDLES</span>
+        <div class="toolbar" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span class="badge" style="background:rgba(255,215,0,0.15);color:#ffd54f;border:1px solid rgba(255,215,0,0.3)">🏛️ FOREX 5-DAY MARKET (Mon–Fri UTC)</span>
+          <span class="badge badge-blue">⚡ OFFLINE MASTER DATA</span>
+          <span class="badge badge-green">COMPOUNDED RISK</span>
           <span class="badge badge-red">NO REAL MONEY</span>
+        </div>
+      </div>
+
+      <!-- FOREX 5-DAY CALENDAR & DATASET NOTICE -->
+      <div style="margin-bottom:var(--sp-2);padding:10px 14px;background:rgba(24,30,41,0.9);border:1px solid rgba(255,255,255,0.08);border-radius:6px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:11px">
+        <div style="color:var(--text-dim);display:flex;align-items:center;gap:8px">
+          <span style="color:#ffd54f;font-size:14px">ℹ️</span>
+          <span><b>Forex Trading Schedule:</b> Gold (XAUUSD) trades Mon 00:00 UTC to Fri 22:00 UTC. Synthetic weekend bars (Sat/Sun) are filtered out automatically.</span>
+        </div>
+        <div style="color:#90caf9">
+          <b>Available Data Range:</b> <span class="badge badge-blue" style="font-size:10px">2026-06-01 to 2026-09-10</span> (Render Fast-Load)
         </div>
       </div>
 
@@ -5301,12 +5313,12 @@ Routes["/backtest"] = (mount) => {
 
             <div style="flex:1;min-width:120px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">FROM DATE</label>
-              <input type="date" id="bt-from-date" class="form-input" value="${window.__btFromDate || '2026-08-01'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+              <input type="date" id="bt-from-date" class="form-input" min="2026-06-01" max="2026-09-10" value="${window.__btFromDate || '2026-07-01'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div style="flex:1;min-width:120px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TO DATE</label>
-              <input type="date" id="bt-to-date" class="form-input" value="${window.__btToDate || '2026-08-31'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+              <input type="date" id="bt-to-date" class="form-input" min="2026-06-01" max="2026-09-10" value="${window.__btToDate || '2026-07-31'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div>
@@ -5317,6 +5329,28 @@ Routes["/backtest"] = (mount) => {
           </div>
         </div>
       </div>
+
+      <!-- ANIMATED PROGRESS BAR (SHOWN DURING RUN) -->
+      ${isLoading ? `
+      <div class="card" style="border:1px solid rgba(0,230,118,0.4);background:rgba(0,230,118,0.03);margin-bottom:16px">
+        <div class="card-body" style="padding:20px;text-align:center">
+          <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:10px">
+            <div style="width:20px;height:20px;border:3px solid rgba(0,230,118,0.2);border-top-color:#00e676;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+            <span style="font-size:13px;font-weight:700;color:#69f0ae">SIMULATING FOREX STRATEGY...</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+            Applying <b>Forex 5-Day Filter (Mon–Fri)</b> & <b>Single Active Trade Lock</b> across timeframes
+          </div>
+          <div style="width:100%;max-width:460px;margin:0 auto;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;position:relative">
+            <div style="position:absolute;top:0;left:0;height:100%;width:35%;background:linear-gradient(90deg,#00e676,#69f0ae);border-radius:3px;animation:backtestProgress 1.4s ease-in-out infinite alternate"></div>
+          </div>
+        </div>
+      </div>
+      <style>
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes backtestProgress { 0% { left: 0%; width: 25%; } 100% { left: 75%; width: 25%; } }
+      </style>
+      ` : ''}
 
       <!-- RESULTS SUMMARY -->
       ${summaryHtml}
@@ -5455,6 +5489,7 @@ Routes["/backtest"] = (mount) => {
 
           const resData = await resp.json();
           backtestData = resData;
+          window.__lastBacktestData = resData;
           if (typeof UI !== "undefined" && UI.toast) {
             UI.toast("Backtest Complete", `Evaluated ${resData.summary?.total_trades || 0} trades`, "green");
           }
