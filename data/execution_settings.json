@@ -24,6 +24,6 @@
   "mt5_allowed_strategy": "Fib Retracement",
   "min_impulse_filter_enabled": true,
   "trend_filter_enabled": false,
-  "cross_tf_dedup_enabled": true,
+  "cross_tf_dedup_enabled": false,
   "fib_engine_mode": "classic"
 }

@@ -107,7 +107,7 @@ class ExecutionSettings(BaseModel):
         description="Filter counter-trend setups against macro trend alignment (default False for pure BOS Fib)"
     )
     cross_tf_dedup_enabled: bool = Field(
-        default=True,
+        default=False,
         description="De-duplicate concurrent trades across different timeframes with close entry & SL"
     )
     fib_engine_mode: Literal["classic", "experimental"] = Field(

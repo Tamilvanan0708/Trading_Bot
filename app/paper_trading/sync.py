@@ -267,27 +267,39 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 # If the price has already reached TP or SL and NOT fast_tp, do not open a stale trade
                                 if not is_fast_tp:
                                     if ref_price is not None and ref_price > 0:
-                                        if f_state.direction == "LONG" and (ref_price >= tp_px or ref_price <= sl_px):
-                                            logger.info(
-                                                "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond TP %.2f / SL %.2f",
-                                                sig_id, ref_price, tp_px, sl_px,
-                                            )
-                                            continue
-                                        if f_state.direction == "SHORT" and (ref_price <= tp_px or ref_price >= sl_px):
-                                            logger.info(
-                                                "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond TP %.2f / SL %.2f",
-                                                sig_id, ref_price, tp_px, sl_px,
-                                            )
-                                            continue
+                                        if f_state.direction == "LONG":
+                                            if ref_price >= tp_px:
+                                                is_fast_tp = True
+                                            elif ref_price <= sl_px:
+                                                logger.info(
+                                                    "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond SL %.2f",
+                                                    sig_id, ref_price, sl_px,
+                                                )
+                                                continue
+                                        elif f_state.direction == "SHORT":
+                                            if ref_price <= tp_px:
+                                                is_fast_tp = True
+                                            elif ref_price >= sl_px:
+                                                logger.info(
+                                                    "[PAPER-AUTO] Skipping stale %s: price %.2f already beyond SL %.2f",
+                                                    sig_id, ref_price, sl_px,
+                                                )
+                                                continue
                                     elif live_price is not None:
                                         in_regime = ref_price is None and 0.75 <= (live_price / entry_px) <= 1.33
                                         if in_regime:
-                                            if f_state.direction == "LONG" and (live_price >= tp_px or live_price <= sl_px):
-                                                logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond TP/SL)", sig_id, live_price)
-                                                continue
-                                            if f_state.direction == "SHORT" and (live_price <= tp_px or live_price >= sl_px):
-                                                logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond TP/SL)", sig_id, live_price)
-                                                continue
+                                            if f_state.direction == "LONG":
+                                                if live_price >= tp_px:
+                                                    is_fast_tp = True
+                                                elif live_price <= sl_px:
+                                                    logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond SL)", sig_id, live_price)
+                                                    continue
+                                            elif f_state.direction == "SHORT":
+                                                if live_price <= tp_px:
+                                                    is_fast_tp = True
+                                                elif live_price >= sl_px:
+                                                    logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond SL)", sig_id, live_price)
+                                                    continue
 
                                 # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
                                 # Only active if user explicitly enables cross_tf_dedup_enabled.

@@ -112,7 +112,7 @@ async def list_paper_trades(limit: int = 50, db: AsyncSession = Depends(get_db_s
     """Lists simulated paper trading positions from the database with live running points and PnL."""
     import asyncio
     try:
-        await asyncio.wait_for(sync_strategy_paper_trades(db), timeout=2.0)
+        await asyncio.wait_for(sync_strategy_paper_trades(db), timeout=8.0)
     except Exception:  # noqa: BLE001
         try:
             await db.rollback()
