@@ -5236,7 +5236,7 @@ Routes["/backtest"] = (mount) => {
           <span><b>Forex Trading Schedule:</b> Gold (XAUUSD) trades Mon 00:00 UTC to Fri 22:00 UTC. Synthetic weekend bars (Sat/Sun) are filtered out automatically.</span>
         </div>
         <div style="color:#90caf9">
-          <b>Available Data Range:</b> <span class="badge badge-blue" style="font-size:10px">2026-06-01 to 2026-09-10</span> (Render Fast-Load)
+          <b>Available Data Range:</b> <span class="badge badge-blue" style="font-size:10px">2025-12-11 to 2026-09-11</span> (9 Months / 275 Days Fast-Load)
         </div>
       </div>
 
@@ -5313,12 +5313,12 @@ Routes["/backtest"] = (mount) => {
 
             <div style="flex:1;min-width:120px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">FROM DATE</label>
-              <input type="date" id="bt-from-date" class="form-input" min="2026-06-01" max="2026-09-10" value="${window.__btFromDate || '2026-07-01'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+              <input type="date" id="bt-from-date" class="form-input" min="2025-12-11" max="2026-09-11" value="${window.__btFromDate || '2026-01-01'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div style="flex:1;min-width:120px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TO DATE</label>
-              <input type="date" id="bt-to-date" class="form-input" min="2026-06-01" max="2026-09-10" value="${window.__btToDate || '2026-07-31'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+              <input type="date" id="bt-to-date" class="form-input" min="2025-12-11" max="2026-09-11" value="${window.__btToDate || '2026-08-31'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div>

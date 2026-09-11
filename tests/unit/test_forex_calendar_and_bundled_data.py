@@ -55,8 +55,8 @@ def test_get_available_forex_data_range():
     dr = get_available_forex_data_range()
     assert dr["symbol"] == "XAUUSD"
     assert dr["market"] == "FOREX_5DAY"
-    assert "2026-06-01" in dr["min_date"]
-    assert "2026-09-10" in dr["max_date"]
+    assert "2025-12-11" in dr["min_date"]
+    assert "2026-09-11" in dr["max_date"]
     assert "15m" in dr["timeframes"]
 
 
@@ -78,5 +78,5 @@ def test_data_range_api_endpoint():
         assert resp.status_code == 200
         data = resp.json()
         assert data["market"] == "FOREX_5DAY"
-        assert data["min_date"] == "2026-06-01"
-        assert data["max_date"] == "2026-09-10"
+        assert data["min_date"] == "2025-12-11"
+        assert data["max_date"] == "2026-09-11"
