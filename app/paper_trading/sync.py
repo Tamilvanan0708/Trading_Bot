@@ -336,9 +336,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         )
                                         continue
 
-                                # --- MINIMUM IMPULSE RANGE FILTER ---
-                                # Rejects micro sideways consolidation noise (e.g. $1-$2 chop on Gold)
-                                if getattr(exec_cfg, "min_impulse_filter_enabled", True):
+                                # --- MINIMUM IMPULSE RANGE FILTER (DISABLED PER USER REQUEST) ---
+                                # Rejects micro sideways consolidation noise when enabled
+                                if getattr(exec_cfg, "min_impulse_filter_enabled", False):
                                     p1 = float(f_state.point_1_price or 0.0)
                                     p2 = float(f_state.point_2_price or 0.0)
                                     peak = float(f_state.current_high_price or 0.0)
@@ -459,23 +459,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         ai_short = "APPROVED (100% Rule-Based)"
 
                                     # --- HARD SAFETY: authoritative admission gate ---
-                                    # Blocks auto-open on degraded data quality, daily
-                                    # loss / daily trades / drawdown limits (TradingLimits),
-                                    # max open positions, and invalid signal geometry.
+                                    # Rule 1 (Max Open Trades), Rule 2 (Min Impulse / R:R), Rule 7 (Daily Loss/Limits)
+                                    # are removed per user specification. Geometry & data quality remain active.
                                     _gate = TradeAdmissionGate()
                                     try:
-                                        _open_count = int((await db.execute(
-                                            select(func.count()).select_from(PaperTradeModel).where(
-                                                PaperTradeModel.state == "OPEN",
-                                            )
-                                        )).scalar() or 0)
-                                        if _open_count >= _gate.settings.MAX_OPEN_TRADES:
-                                            logger.warning(
-                                                "[ADMISSION] Max open paper trades (%s) reached — auto-open of %s blocked.",
-                                                _gate.settings.MAX_OPEN_TRADES, sig_id,
-                                            )
-                                            continue
-
                                         _dq = None
                                         try:
                                             # Only consult the live service when it is actually
@@ -485,11 +472,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 _dq = await ls.data_quality()
                                         except Exception:  # noqa: BLE001
                                             _dq = None
-                                        admission = await _gate.evaluate(val_sig, repo=repo, data_quality=_dq)
+                                        # Pass repo=None to bypass daily trade/loss/consecutive loss limits (Rule 7 removed)
+                                        admission = await _gate.evaluate(val_sig, repo=None, data_quality=_dq)
                                         # Fib retracement tranche levels (0.618 -> 1.0 = 1R)
                                         # intentionally price below the confluence MIN_RISK_REWARD
-                                        # gate; every other FAIL condition (data quality, limits,
-                                        # direction, geometry) is enforced.
+                                        # gate; geometry and data quality are enforced.
                                         blocking = [r for r in admission.reasons if r.startswith("FAIL") and "R:R" not in r]
                                         if blocking:
                                             logger.warning(

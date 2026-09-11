@@ -99,7 +99,7 @@ class ExecutionSettings(BaseModel):
         description="Strictly allowed strategy for MT5 execution (only Fib Retracement)"
     )
     min_impulse_filter_enabled: bool = Field(
-        default=True,
+        default=False,
         description="Filter out micro sideways chop when setup impulse range is below threshold"
     )
     trend_filter_enabled: bool = Field(
