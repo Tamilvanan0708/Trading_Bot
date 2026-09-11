@@ -103,8 +103,12 @@ class ExecutionSettings(BaseModel):
         description="Filter out micro sideways chop when setup impulse range is below threshold"
     )
     trend_filter_enabled: bool = Field(
+        default=False,
+        description="Filter counter-trend setups against macro trend alignment (default False for pure BOS Fib)"
+    )
+    cross_tf_dedup_enabled: bool = Field(
         default=True,
-        description="Filter counter-trend setups against macro trend alignment"
+        description="De-duplicate concurrent trades across different timeframes with close entry & SL"
     )
     fib_engine_mode: Literal["classic", "experimental"] = Field(
         default="classic",

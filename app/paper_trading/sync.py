@@ -159,10 +159,12 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     f_state = fib_states.get(tf_key)
                     if not f_state or not getattr(f_state, "layers", None) or not getattr(f_state, "point_2_price", None):
                         continue
-
                     p2_ts = getattr(f_state, "point_2_timestamp", None)
                     anchor_ts = int(p2_ts.timestamp()) if (p2_ts and hasattr(p2_ts, "timestamp")) else int(f_state.point_2_price)
-                    current_anchor = f"{int(f_state.point_2_price)}_{anchor_ts}"
+                    p1_ts = getattr(f_state, "point_1_timestamp", None) or getattr(f_state, "bos_timestamp", None)
+                    bos_ts = int(p1_ts.timestamp()) if (p1_ts and hasattr(p1_ts, "timestamp")) else int(getattr(f_state, "point_1_price", 0) or 0)
+                    p1_px = int(getattr(f_state, "point_1_price", 0) or 0)
+                    current_anchor = f"{int(f_state.point_2_price)}_{anchor_ts}_{p1_px}_{bos_ts}"
 
                     for l_key, layer in f_state.layers.items():
                         ratio_val = 0.618 if l_key == "L1" else (0.500 if l_key == "L2" else 0.382)
@@ -257,9 +259,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                             # Stale-entry guard must use the MONITOR's own snapshot
                             # price — the same data the setup was computed from.
-                            # The process-global live-service price may come from a
-                            # different/regime-shifted source and silently skip every
-                            # slot (the cross-timeframe block this replaces).
                             slot = fib_svc.slots.get(tf_key) if isinstance(getattr(fib_svc, "slots", None), dict) else None
                             ref_price = getattr(slot, "live_price", None) or getattr(fib_svc, "live_price", None)
 
@@ -281,10 +280,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             )
                                             continue
                                     elif live_price is not None:
-                                        # Monitor exposes no price (custom engine); fall back to
-                                        # the global live price only when it is in the SAME regime
-                                        # as the setup (within 25% of entry) so an unrelated feed
-                                        # cannot silently block all slots.
                                         in_regime = ref_price is None and 0.75 <= (live_price / entry_px) <= 1.33
                                         if in_regime:
                                             if f_state.direction == "LONG" and (live_price >= tp_px or live_price <= sl_px):
@@ -295,41 +290,39 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 continue
 
                                 # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
-                                # If an open trade already exists on ANOTHER timeframe for the SAME direction:
-                                # (1) Entry within 5.0 pts AND Stop Loss within 2.5 pts, OR
-                                # (2) Matching Take Profit (within 2.5 pts) AND matching Stop Loss (within 2.5 pts)
-                                # this is the exact same macro setup detected across multiple timeframes (e.g. 5M & 15M).
-                                # Skip opening a duplicate trade to prevent double risk/exposure!
-                                norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
-                                dup_query = await db.execute(
-                                    select(PaperTradeModel).where(
-                                        PaperTradeModel.state == "OPEN",
-                                        PaperTradeModel.direction.in_(norm_dirs),
-                                        ~PaperTradeModel.signal_id.like(f"%_{tf_key.upper()}_%"),
-                                        or_(
-                                            and_(
-                                                func.abs(PaperTradeModel.target_entry - entry_px) <= 5.0,
-                                                func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                # Only active if user explicitly enables cross_tf_dedup_enabled.
+                                # By default, 5M, 15M, 30M, 1H execute in independent timeframe slots!
+                                if getattr(exec_cfg, "cross_tf_dedup_enabled", False):
+                                    norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
+                                    dup_query = await db.execute(
+                                        select(PaperTradeModel).where(
+                                            PaperTradeModel.state == "OPEN",
+                                            PaperTradeModel.direction.in_(norm_dirs),
+                                            ~PaperTradeModel.signal_id.like(f"%_{tf_key.upper()}_%"),
+                                            or_(
+                                                and_(
+                                                    func.abs(PaperTradeModel.target_entry - entry_px) <= 5.0,
+                                                    func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                                ),
+                                                and_(
+                                                    func.abs(PaperTradeModel.take_profit_1 - tp_px) <= 2.5,
+                                                    func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                                ),
                                             ),
-                                            and_(
-                                                func.abs(PaperTradeModel.take_profit_1 - tp_px) <= 2.5,
-                                                func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
-                                            ),
-                                        ),
+                                        )
                                     )
-                                )
-                                existing_dup = dup_query.scalars().first()
-                                if existing_dup:
-                                    logger.info(
-                                        "[PAPER-AUTO] De-duplication: Skipping duplicate trade on %s because active %s trade already exists at $%.2f (ID: %s, SL: $%.2f, TP: $%.2f)",
-                                        tf_key.upper(),
-                                        existing_dup.direction,
-                                        existing_dup.target_entry,
-                                        existing_dup.id[:8],
-                                        existing_dup.stop_loss,
-                                        existing_dup.take_profit_1,
-                                    )
-                                    continue
+                                    existing_dup = dup_query.scalars().first()
+                                    if existing_dup:
+                                        logger.info(
+                                            "[PAPER-AUTO] De-duplication: Skipping duplicate trade on %s because active %s trade already exists at $%.2f (ID: %s, SL: $%.2f, TP: $%.2f)",
+                                            tf_key.upper(),
+                                            existing_dup.direction,
+                                            existing_dup.target_entry,
+                                            existing_dup.id[:8],
+                                            existing_dup.stop_loss,
+                                            existing_dup.take_profit_1,
+                                        )
+                                        continue
 
                                 # --- MINIMUM IMPULSE RANGE FILTER ---
                                 # Rejects micro sideways consolidation noise (e.g. $1-$2 chop on Gold)
@@ -349,8 +342,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         continue
 
                                 # --- MACRO TREND ALIGNMENT FILTER (EMA) ---
-                                # Avoid taking counter-trend setups against the prevailing momentum
-                                if getattr(exec_cfg, "trend_filter_enabled", True) and slot and getattr(slot, "engine", None):
+                                # Optional filter: only checks if explicitly enabled by user
+                                if getattr(exec_cfg, "trend_filter_enabled", False) and slot and getattr(slot, "engine", None):
                                     candles_for_ema = getattr(slot.engine, "_candles", [])
                                     if len(candles_for_ema) >= 30 and entry_px > 500.0:
                                         from app.indicators.ema import calculate_ema
@@ -358,41 +351,18 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         ema_vals = calculate_ema(candles_for_ema, period=period)
                                         if ema_vals:
                                             latest_ema = ema_vals[-1]
-                                            if f_state.direction in ("LONG", "BUY") and entry_px < latest_ema:
+                                            if f_state.direction in ("LONG", "BUY") and entry_px < (latest_ema - 20.0):
                                                 logger.info(
                                                     "[PAPER-AUTO] Trend Filter: Skipping LONG trade on %s because entry $%.2f is counter-trend vs %d EMA $%.2f (Downtrend)",
                                                     tf_key.upper(), entry_px, period, latest_ema,
                                                 )
                                                 continue
-                                            elif f_state.direction in ("SHORT", "SELL") and entry_px > latest_ema:
+                                            elif f_state.direction in ("SHORT", "SELL") and entry_px > (latest_ema + 20.0):
                                                 logger.info(
                                                     "[PAPER-AUTO] Trend Filter: Skipping SHORT trade on %s because entry $%.2f is counter-trend vs %d EMA $%.2f (Uptrend)",
                                                     tf_key.upper(), entry_px, period, latest_ema,
                                                 )
                                                 continue
-
-                                    # Higher Timeframe (1H) Macro Trend Filter for fast timeframes (1m, 3m, 5m, 15m)
-                                    if tf_key in ("1m", "3m", "5m", "15m") and hasattr(fib_svc, "slots") and "1h" in fib_svc.slots:
-                                        slot_1h = fib_svc.slots.get("1h")
-                                        if slot_1h and getattr(slot_1h, "engine", None):
-                                            c_1h = getattr(slot_1h.engine, "_candles", [])
-                                            if len(c_1h) >= 20 and entry_px > 500.0:
-                                                from app.indicators.ema import calculate_ema
-                                                ema_1h_vals = calculate_ema(c_1h, period=min(50, len(c_1h)))
-                                                if ema_1h_vals:
-                                                    last_1h_ema = ema_1h_vals[-1]
-                                                    if f_state.direction in ("SHORT", "SELL") and entry_px > last_1h_ema:
-                                                        logger.info(
-                                                            "[PAPER-AUTO] 1H Macro Trend Filter: Skipping %s SHORT trade because price $%.2f is above 1H EMA $%.2f (1H Uptrend)",
-                                                            tf_key.upper(), entry_px, last_1h_ema,
-                                                        )
-                                                        continue
-                                                    elif f_state.direction in ("LONG", "BUY") and entry_px < last_1h_ema:
-                                                        logger.info(
-                                                            "[PAPER-AUTO] 1H Macro Trend Filter: Skipping %s LONG trade because price $%.2f is below 1H EMA $%.2f (1H Downtrend)",
-                                                            tf_key.upper(), entry_px, last_1h_ema,
-                                                        )
-                                                        continue
 
                                 _in_flight_signals.add(sig_id)
                                 try:

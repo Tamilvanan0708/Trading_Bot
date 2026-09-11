@@ -234,7 +234,13 @@ class PaperTradingService:
             )
             if isinstance(t.state_logs, list):
                 from app.paper_trading.state_machine import StateTransitionLog
-                logs = [StateTransitionLog(**log) for log in t.state_logs if isinstance(log, dict)]
+                logs = []
+                for log in t.state_logs:
+                    if isinstance(log, dict):
+                        try:
+                            logs.append(StateTransitionLog(**log))
+                        except Exception:
+                            pass
                 pos.history_logs = logs
             if t.exit_reason:
                 pos.exit_reason = t.exit_reason
