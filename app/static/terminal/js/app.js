@@ -5133,7 +5133,7 @@ Routes["/backtest"] = (mount) => {
         <div class="card" style="padding:10px 16px;margin-bottom:var(--sp-3);background:rgba(41,98,255,0.06);border-color:rgba(41,98,255,0.2)">
           <div class="row-between">
             <div style="font-size:12px;color:var(--text)">
-              📅 <b>Simulation Window:</b> ${summary.start_date} to ${summary.end_date} · <b>Profile:</b> <span class="badge ${summary.engine_mode === 'classic' ? 'badge-green' : 'badge-purple'}" style="font-size:10px">${(summary.engine_mode || 'classic').toUpperCase()} MODE</span> · <b>Timeframe:</b> <span class="badge badge-blue" style="font-size:10px">${summary.timeframe || 'ALL'}</span> · <b>Account:</b> <span class="badge ${isCentSummary ? 'badge-green' : 'badge-blue'}" style="font-size:10px">${currLabel}</span> · <b>Total Trades:</b> ${summary.total_trades}
+              📅 <b>Simulation Window:</b> ${summary.start_date} to ${summary.end_date} · <b>Timeframe:</b> <span class="badge badge-blue" style="font-size:10px">${summary.timeframe || 'ALL'}</span> · <b>Account:</b> <span class="badge ${isCentSummary ? 'badge-green' : 'badge-blue'}" style="font-size:10px">${currLabel}</span> · <b>Total Trades:</b> ${summary.total_trades}
             </div>
             <div style="font-size:12px">
               <b>Capital:</b> ${sumSym}${summary.initial_capital} ➜ <b style="color:${summary.net_profit_usd >= 0 ? '#00e676' : '#ef5350'}">${sumSym}${Number(summary.final_balance).toFixed(2)}</b>
@@ -5252,14 +5252,6 @@ Routes["/backtest"] = (mount) => {
                 <option value="SMC_WITH_FIB" ${window.__btStrategy === 'SMC_WITH_FIB' ? 'selected' : ''}>SMC with Fib (5M, 15M, 30M, 1H, 4H)</option>
                 <option value="FIB_GO_WITH_TREND" ${window.__btStrategy === 'FIB_GO_WITH_TREND' ? 'selected' : ''}>Fib Go with Trend (15M, 30M, 1H, 2H, 4H)</option>
                 <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>All 3 Strategies Combined</option>
-              </select>
-            </div>
-
-            <div style="flex:1;min-width:210px">
-              <label class="input-label" style="font-size:11px;font-weight:700;color:#69f0ae;display:block;margin-bottom:4px">🎯 ENGINE PROFILE</label>
-              <select id="bt-engine-mode" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(0,230,118,0.3);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
-                <option value="classic" ${(!window.__btEngineMode || window.__btEngineMode === 'classic') ? 'selected' : ''}>🏆 Classic Mode (Immediate HL + 22pt Span)</option>
-                <option value="experimental" ${window.__btEngineMode === 'experimental' ? 'selected' : ''}>🧪 Experimental Mode (Locked Macro Anchor)</option>
               </select>
             </div>
 
@@ -5432,7 +5424,7 @@ Routes["/backtest"] = (mount) => {
     if (runBtn) {
       runBtn.addEventListener("click", async () => {
         const strat = mount.querySelector("#bt-strategy")?.value || "FIB_WITH_RETRACEMENT";
-        const engMode = mount.querySelector("#bt-engine-mode")?.value || "classic";
+        const engMode = "classic";
         const tf = mount.querySelector("#bt-timeframe")?.value || "ALL";
         const cur = mount.querySelector("#bt-currency")?.value || "cent";
         const fDate = mount.querySelector("#bt-from-date")?.value || "2026-08-01";

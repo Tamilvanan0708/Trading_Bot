@@ -67,8 +67,8 @@ def filter_forex_trading_days(candles: list[Candle]) -> list[Candle]:
         # Exclude Saturday (weekday 5) entirely
         if wd == 5:
             continue
-        # Exclude Sunday (weekday 6) before 22:00 UTC market open
-        if wd == 6 and hr < 22:
+        # Exclude Sunday (weekday 6) entirely
+        if wd == 6:
             continue
         # Exclude Friday (weekday 4) after 22:00 UTC market close
         if wd == 4 and hr >= 22:

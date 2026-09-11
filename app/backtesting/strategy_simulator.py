@@ -511,13 +511,18 @@ class StrategyBacktester:
                                     continue
                             is_long = setup.direction == "LONG"
                             entry_px = float(l_data["entry_price"])
-                            sl_px = float(l_data.get("sl") or setup.sl_price or (entry_px - 8.0 if is_long else entry_px + 8.0))
+                            # Initial entry SL used for risk calculation & lot sizing
+                            initial_sl = float(l_data.get("initial_sl") or setup.sl_price or (entry_px - 8.0 if is_long else entry_px + 8.0))
+                            if abs(entry_px - initial_sl) < 1.0:
+                                initial_sl = (entry_px - 8.0) if is_long else (entry_px + 8.0)
+                            # Current SL may have been trailed by Smart Shield
+                            sl_px = float(l_data.get("sl") or initial_sl)
                             tp_px = float(l_data.get("tp") or (entry_px + 16.0 if is_long else entry_px - 16.0))
                             exit_reason = l_data["state"]
-                            exit_px = float(l_data.get("exit_price") or (tp_px if exit_reason == "TP_HIT" else (setup.sl_price or sl_px)))
+                            exit_px = float(l_data.get("exit_price") or (tp_px if exit_reason == "TP_HIT" else sl_px))
 
                             pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
-                            trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, entry_px, sl_px)
+                            trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, entry_px, initial_sl)
 
                             trades.append(BacktestTradeRecord(
                                 trade_id=f"RETR_{tf.upper()}_{l_key}_{int(ts.timestamp())}",
@@ -527,7 +532,7 @@ class StrategyBacktester:
                                 zero_level=float(setup.point_2_price or 0.0),
                                 entry_time=l_data.get("filled_at") or candle.timestamp.isoformat(),
                                 entry_price=entry_px,
-                                sl_price=sl_px,
+                                sl_price=initial_sl,
                                 tp_price=tp_px,
                                 exit_time=candle.timestamp.isoformat(),
                                 exit_price=exit_px,
@@ -624,11 +629,18 @@ class StrategyBacktester:
                 max_dd_usd = dd
                 max_dd_pct = round((dd / peak) * 100.0, 2) if peak > 0 else 0.0
 
-        # Daily progression breakdown
+        # Daily progression breakdown (grouped by Indian Standard Time trading day)
         daily_map: dict[str, dict[str, Any]] = {}
         running_equity = self.initial_capital
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
         for t in sorted(closed_trades, key=lambda x: x.exit_time):
-            day_str = t.exit_time[:10]  # "YYYY-MM-DD"
+            try:
+                exit_dt = datetime.fromisoformat(t.exit_time)
+                if exit_dt.tzinfo is None:
+                    exit_dt = exit_dt.replace(tzinfo=timezone.utc)
+                day_str = exit_dt.astimezone(ist_tz).strftime("%Y-%m-%d")
+            except Exception:
+                day_str = t.exit_time[:10]
             if day_str not in daily_map:
                 daily_map[day_str] = {
                     "date": day_str,

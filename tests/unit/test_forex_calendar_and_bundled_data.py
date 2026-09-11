@@ -42,10 +42,10 @@ def test_filter_forex_trading_days_saturday_purged():
     candles = [sat_candle, fri_candle, sun_day_candle, sun_night_candle, fri_night_candle]
     filtered = filter_forex_trading_days(candles)
 
-    # Only fri_candle (14:00) and sun_night_candle (22:30) should remain
-    assert len(filtered) == 2
+    # Strictly only fri_candle (14:00) should remain. Saturday, Sunday daytime & Sunday night are completely purged!
+    assert len(filtered) == 1
     assert fri_candle in filtered
-    assert sun_night_candle in filtered
+    assert sun_night_candle not in filtered
     assert sat_candle not in filtered
     assert sun_day_candle not in filtered
     assert fri_night_candle not in filtered
@@ -80,3 +80,31 @@ def test_data_range_api_endpoint():
         assert data["market"] == "FOREX_5DAY"
         assert data["min_date"] == "2025-12-11"
         assert data["max_date"] == "2026-09-11"
+
+
+@pytest.mark.asyncio
+async def test_fib_retracement_lot_size_uses_initial_sl():
+    from app.backtesting.strategy_simulator import StrategyBacktester
+    b = StrategyBacktester(initial_capital=10000.0, risk_percent=1.0)
+    s = datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc)
+    e = datetime(2026, 7, 1, 23, 59, tzinfo=timezone.utc)
+    res = await b.run("FIB_WITH_RETRACEMENT", s, e, timeframe="5m")
+    assert len(res["trades"]) > 0
+    for t in res["trades"]:
+        # Verify that no loss trade exceeds ~1.2% (₹120) of initial capital due to runaway 0.50 lot
+        if t["status"] == "LOSS":
+            assert abs(t["pnl_usd"]) <= 125.0, f"Trade {t['trade_id']} loss {t['pnl_usd']} exceeded risk limit!"
+        # Verify sl_price is never equal to entry_price in record
+        assert t["sl_price"] != t["entry_price"]
+
+
+@pytest.mark.asyncio
+async def test_daily_breakdown_zero_sundays():
+    from app.backtesting.strategy_simulator import StrategyBacktester
+    b = StrategyBacktester(initial_capital=10000.0, risk_percent=1.0)
+    s = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    e = datetime(2026, 7, 31, 23, 59, tzinfo=timezone.utc)
+    res = await b.run("FIB_WITH_RETRACEMENT", s, e, timeframe="5m")
+    for d in res["summary"]["daily_breakdown"]:
+        dt = datetime.strptime(d["date"], "%Y-%m-%d")
+        assert dt.weekday() != 6, f"Sunday found in daily breakdown: {d['date']}"
