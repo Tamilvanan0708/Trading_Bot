@@ -130,6 +130,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     if isinstance(_fib_slots, dict):
                         for _tf, _slot in _fib_slots.items():
                             _p = getattr(_slot, "live_price", None) or _fib_global
+                            if not _p and getattr(_slot, "engine", None) and getattr(_slot.engine, "_candles", None):
+                                _p = _slot.engine._candles[-1].close
                             if _p:
                                 fib_tf_price[str(_tf).lower()] = float(_p)
                 except Exception:  # noqa: BLE001
@@ -251,11 +253,21 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             # Within the same timeframe slot, if a trade with a DIFFERENT anchor is still open, wait.
                             tf_active_anchor = active_setup_by_tf.get(tf_key)
                             if tf_active_anchor and tf_active_anchor != current_anchor and not current_anchor.startswith(tf_active_anchor + "_"):
-                                logger.info(
-                                    "[PAPER-AUTO] Deferring %s: %s slot still busy with anchor %s",
-                                    sig_id, tf_key.upper(), tf_active_anchor,
-                                )
-                                continue
+                                # Verify if that previous trade is still genuinely OPEN in DB before deferring
+                                is_still_open = (await db.execute(
+                                    select(PaperTradeModel.id).where(
+                                        PaperTradeModel.state == "OPEN",
+                                        PaperTradeModel.signal_id.like(f"FIB_RETR_{tf_key.upper()}_%_{tf_active_anchor}"),
+                                    )
+                                )).scalars().first()
+                                if is_still_open:
+                                    logger.info(
+                                        "[PAPER-AUTO] Deferring %s: %s slot still busy with anchor %s",
+                                        sig_id, tf_key.upper(), tf_active_anchor,
+                                    )
+                                    continue
+                                else:
+                                    active_setup_by_tf.pop(tf_key, None)
 
                             existing = (await db.execute(
                                 select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
@@ -1170,9 +1182,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                 logger.warning("[PAPER-SYNC] Fib Trend sync error: %s", exc)
 
         # 4. Monitor OPEN trades against live price and resolve TP / SL
-        # CRITICAL: live_price MUST be a valid, realistic Gold price (> $1000)
-        # Never allow live_price == 0.0 or garbage ticks to trigger a false Stop Loss!
-        if live_price is not None and live_price > 1000.0:
+        # CRITICAL: effective_live_price MUST be a valid, realistic Gold price (> $1000)
+        effective_live_price = live_price if (live_price is not None and live_price > 1000.0) else None
+        if not effective_live_price and fib_tf_price:
+            for p_val in fib_tf_price.values():
+                if p_val and p_val > 1000.0:
+                    effective_live_price = p_val
+                    break
+
+        if effective_live_price is not None:
             open_trades = (await db.execute(
                 select(PaperTradeModel).where(PaperTradeModel.state == "OPEN")
             )).scalars().all()
@@ -1233,6 +1251,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     # the layer loop in the Fib section owns their lifecycle.
                     _parts = sig_upper.split("_")
                     price_px = fib_tf_price.get(_parts[2].lower(), None) if len(_parts) >= 3 else None
+                    if price_px is None:
+                        price_px = live_price
                     if price_px is None:
                         continue
 
