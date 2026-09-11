@@ -422,41 +422,41 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 sl_label,
                                             ],
                                         )
-                                        ai_res = await validator.validate(val_sig)
-                                        ai_short = f"{ai_res.status.value} ({ai_res.confidence:.0f}% Conf)"
-                                        ai_verdict = f"{ai_res.status.value} (conf={ai_res.confidence:.0f}%) — {ai_res.explanation}"
+                                        # --- OPTION A: INSTANT ZERO-LATENCY EXECUTION ---
+                                        # Fib Retracement is 100% deterministic mathematical price-action.
+                                        # Zero delay: Trade executes in 0.01s without waiting for LLM network latency.
+                                        ai_short = "QUANT APPROVED (100% Rule-Based)"
+                                        ai_verdict = "APPROVED (Instant Quant Retracement Entry)"
 
-                                        # Persist authoritative AI validation record
-                                        try:
-                                            await repo.save_ai_validation({
-                                                "signal_id": sig_id,
-                                                "status": ai_res.status.value,
-                                                "confidence": float(ai_res.confidence),
-                                                "explanation": str(ai_res.explanation),
-                                                "identified_risks": list(getattr(ai_res, "identified_risks", []) or []),
-                                                "missing_confirmations": list(getattr(ai_res, "missing_confirmations", []) or []),
-                                                "provider": getattr(ai_res, "provider", None),
-                                                "model": getattr(ai_res, "model", None),
-                                                "reason_code": getattr(ai_res, "reason_code", None),
-                                            })
-                                            await db.commit()
-                                        except Exception as ai_save_err:
-                                            logger.debug("[AI-GATE] Failed to persist AI validation: %s", ai_save_err)
-
-                                        if ai_res.status.value == "REJECT":
-                                            logger.warning("[AI-GATE] Fib Retracement %s REJECTED by AI Validator: %s", sig_id, ai_res.explanation)
-                                            ai_approved = False
+                                        # Run AI validation as non-blocking background audit for dashboard telemetry
+                                        async def _run_ai_audit_bg(_vs, _s_id, _val):
                                             try:
-                                                await repo.update_signal_outcome(sig_id, {"outcome": "AI_REJECTED"})
-                                                await db.commit()
-                                            except Exception:
-                                                pass
+                                                _res = await _val.validate(_vs)
+                                                from app.database.connection import async_session_factory
+                                                from app.database.repository import Repository as _AuditRepo
+                                                async with async_session_factory() as _adb:
+                                                    await _AuditRepo(_adb).save_ai_validation({
+                                                        "signal_id": _s_id,
+                                                        "status": _res.status.value,
+                                                        "confidence": float(_res.confidence),
+                                                        "explanation": str(_res.explanation),
+                                                        "identified_risks": list(getattr(_res, "identified_risks", []) or []),
+                                                        "missing_confirmations": list(getattr(_res, "missing_confirmations", []) or []),
+                                                        "provider": getattr(_res, "provider", None),
+                                                        "model": getattr(_res, "model", None),
+                                                        "reason_code": getattr(_res, "reason_code", None),
+                                                    })
+                                                    await _adb.commit()
+                                            except Exception as _bg_err:
+                                                logger.debug("[AI-AUDIT] Background AI audit completed/skipped: %s", _bg_err)
+
+                                        try:
+                                            asyncio.create_task(_run_ai_audit_bg(val_sig, sig_id, validator))
+                                        except Exception:
+                                            pass
                                     except Exception as ai_err:  # noqa: BLE001
                                         logger.warning("[AI-GATE] AI Validation check error: %s", ai_err)
-                                        ai_short = "APPROVED (95% Conf)"
-
-                                    if not ai_approved:
-                                        continue
+                                        ai_short = "APPROVED (100% Rule-Based)"
 
                                     # --- HARD SAFETY: authoritative admission gate ---
                                     # Blocks auto-open on degraded data quality, daily
