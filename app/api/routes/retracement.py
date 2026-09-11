@@ -500,10 +500,15 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
 
         # Attach authoritative Paper Trading broker order telemetry
         pt_info = (paper_trades_by_tf or {}).get(tf.lower())
-        s["paper_trade"] = pt_info if pt_info else {
-            "is_open": False,
-            "reason": "NO_ORDER_PLACED",
-        }
+        if pt_info:
+            s["paper_trade"] = pt_info
+        else:
+            other_active = next((other_pt for o_tf, other_pt in (paper_trades_by_tf or {}).items() if o_tf != tf.lower()), None)
+            reason = f"ACTIVE_ON_{other_active.get('timeframe', 'TF')}" if (other_active and is_trade_active) else "NO_ORDER_PLACED"
+            s["paper_trade"] = {
+                "is_open": False,
+                "reason": reason,
+            }
 
         raw_cards[tf] = s
 
@@ -571,7 +576,7 @@ async def get_fib_retracement_dashboard(
 
     multi_svc = get_retracement_multi_tf_service(symbol)
     try:
-        states = await asyncio.wait_for(multi_svc.advance(db), timeout=4.0)
+        states = await asyncio.wait_for(multi_svc.advance(db), timeout=10.0)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[STRATEGY] fib-retracement advance timeout/failed: %s", exc)
         states = multi_svc.current_state()
@@ -619,6 +624,7 @@ async def get_fib_retracement_dashboard(
                     "stop_loss": ot.stop_loss,
                     "take_profit": ot.take_profit_1,
                     "opened_at": ot.opened_at.isoformat() if ot.opened_at else None,
+                    "timeframe": tf.upper(),
                 }
     except Exception as pt_err:
         logger.warning("[STRATEGY] Error querying open paper trades for Fib: %s", pt_err)

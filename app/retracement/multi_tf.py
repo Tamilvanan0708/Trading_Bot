@@ -149,10 +149,19 @@ class RetracementMultiTFMonitor:
 
             async def _fetch(tf_name):
                 try:
-                    c = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf_name], limit=200), timeout=12.0)
-                    return tf_name, c
+                    c = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf_name], limit=200), timeout=6.0)
+                    if c and len(c) >= 50:
+                        return tf_name, c
                 except Exception:
-                    return tf_name, []
+                    pass
+                try:
+                    from app.data.research_fallback import load_research_fallback_candles
+                    c_fb = load_research_fallback_candles(self.symbol, TF_MAP[tf_name], limit=200)
+                    if c_fb:
+                        return tf_name, c_fb
+                except Exception:
+                    pass
+                return tf_name, []
 
             fetched = await asyncio.gather(*[_fetch(tf) for tf in self.timeframes], return_exceptions=True)
             for item in fetched:
