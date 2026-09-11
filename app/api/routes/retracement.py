@@ -474,7 +474,8 @@ async def advance_forward(symbol: str = "XAUUSD", timeframe: str = "15m"):
 # ---------------------------------------------------------------------------
 
 def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict,
-                               slots: dict, strategy_label: str) -> dict:
+                               slots: dict, strategy_label: str,
+                               paper_trades_by_tf: dict | None = None) -> dict:
     """Build the unified strategy dashboard payload for either strategy panel with Strict 1-Trade Active Lock."""
     TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h"]
     raw_cards = {}
@@ -496,6 +497,14 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
         s["is_entry_ready"] = is_entry_ready
         s["is_trade_active"] = is_trade_active
         s["has_live_data"] = slot.has_live_data if slot else False
+
+        # Attach authoritative Paper Trading broker order telemetry
+        pt_info = (paper_trades_by_tf or {}).get(tf.lower())
+        s["paper_trade"] = pt_info if pt_info else {
+            "is_open": False,
+            "reason": "NO_ORDER_PLACED",
+        }
+
         raw_cards[tf] = s
 
         if active_trade_tf is None and is_trade_active:
@@ -517,6 +526,11 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
         tf_cards[tf] = card
 
     primary_active_tf = active_trade_tfs[0] if active_trade_tfs else None
+    active_paper_trade_tfs = [
+        tf for tf in TIMEFRAMES_ORDER
+        if (paper_trades_by_tf or {}).get(tf.lower(), {}).get("is_open")
+    ]
+    primary_paper_tf = active_paper_trade_tfs[0] if active_paper_trade_tfs else None
 
     return {
         "strategy": strategy_label,
@@ -526,6 +540,8 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
         "timeframes_order": TIMEFRAMES_ORDER,
         "active_trade_tf": primary_active_tf,
         "active_trade_tfs": active_trade_tfs,
+        "active_paper_trade_tfs": active_paper_trade_tfs,
+        "primary_paper_trade_tf": primary_paper_tf,
         "cascading_active_tf": primary_active_tf,
         "timeframes": tf_cards,
     }
@@ -566,9 +582,51 @@ async def get_fib_retracement_dashboard(
             states[tf] = await RetracementRepository(db).load_latest_active(
                 symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
 
+    # Query live open paper trades from DB to reflect true execution status
+    open_paper_trades_by_tf = {}
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from app.database.models import PaperTradeModel
+
+        stmt = select(PaperTradeModel).options(selectinload(PaperTradeModel.signal)).where(
+            PaperTradeModel.state == "OPEN",
+            PaperTradeModel.symbol == symbol,
+        )
+        res = await db.execute(stmt)
+        open_trades = res.scalars().all()
+        for ot in open_trades:
+            sig_id = ot.signal_id or ""
+            strat_name = (ot.signal.strategy or "") if ot.signal else ""
+            if not sig_id.startswith("FIB_RETR_") and "RETRACEMENT" not in strat_name.upper():
+                continue
+            tf = None
+            if ot.signal and ot.signal.timeframe:
+                tf = ot.signal.timeframe.lower()
+            else:
+                for part in sig_id.upper().split("_"):
+                    if part in ("5M", "15M", "30M", "1H", "4H"):
+                        tf = part.lower()
+                        break
+            if tf:
+                open_paper_trades_by_tf[tf] = {
+                    "is_open": True,
+                    "trade_id": ot.id,
+                    "signal_id": ot.signal_id,
+                    "direction": ot.direction,
+                    "lot_size": ot.lot_size,
+                    "entry_price": ot.actual_entry or ot.target_entry,
+                    "stop_loss": ot.stop_loss,
+                    "take_profit": ot.take_profit_1,
+                    "opened_at": ot.opened_at.isoformat() if ot.opened_at else None,
+                }
+    except Exception as pt_err:
+        logger.warning("[STRATEGY] Error querying open paper trades for Fib: %s", pt_err)
+
     dash = _build_strategy_dashboard(
         symbol, live_price, data_status, states, multi_svc.slots,
-        strategy_label="FIB_WITH_RETRACEMENT")
+        strategy_label="FIB_WITH_RETRACEMENT",
+        paper_trades_by_tf=open_paper_trades_by_tf)
 
     ai_guardian = {}
     try:
@@ -650,6 +708,56 @@ async def get_smc_fib_dashboard(
             else:
                 card["cascade_status"] = "ACTIVE" if active_trade_tf else "SCANNING"
 
+    # Query live open paper trades for SMC With Fib
+    open_paper_trades_by_tf = {}
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from app.database.models import PaperTradeModel
+
+        stmt = select(PaperTradeModel).options(selectinload(PaperTradeModel.signal)).where(
+            PaperTradeModel.state == "OPEN",
+            PaperTradeModel.symbol == symbol,
+        )
+        res = await db.execute(stmt)
+        open_trades = res.scalars().all()
+        for ot in open_trades:
+            sig_id = ot.signal_id or ""
+            strat_name = (ot.signal.strategy or "") if ot.signal else ""
+            if not sig_id.startswith("SMC_FIB_") and "SMC" not in strat_name.upper():
+                continue
+            tf = None
+            if ot.signal and ot.signal.timeframe:
+                tf = ot.signal.timeframe.lower()
+            else:
+                for part in sig_id.upper().split("_"):
+                    if part in ("5M", "15M", "30M", "1H", "4H"):
+                        tf = part.lower()
+                        break
+            if tf:
+                open_paper_trades_by_tf[tf] = {
+                    "is_open": True,
+                    "trade_id": ot.id,
+                    "signal_id": ot.signal_id,
+                    "direction": ot.direction,
+                    "lot_size": ot.lot_size,
+                    "entry_price": ot.actual_entry or ot.target_entry,
+                    "stop_loss": ot.stop_loss,
+                    "take_profit": ot.take_profit_1,
+                    "opened_at": ot.opened_at.isoformat() if ot.opened_at else None,
+                }
+    except Exception as pt_err:
+        logger.warning("[STRATEGY] Error querying open paper trades for SMC: %s", pt_err)
+
+    for tf in TIMEFRAMES_ORDER:
+        card = states.get(tf)
+        if card:
+            pt_info = open_paper_trades_by_tf.get(tf.lower())
+            card["paper_trade"] = pt_info if pt_info else {
+                "is_open": False,
+                "reason": "NO_ORDER_PLACED",
+            }
+
     ai_guardian = {}
     try:
         from app.database.repository import Repository
@@ -675,6 +783,11 @@ async def get_smc_fib_dashboard(
     except Exception as ai_e:
         logger.warning("[STRATEGY] Error fetching AI guardian for SMC: %s", ai_e)
 
+    active_paper_trade_tfs = [
+        tf for tf in TIMEFRAMES_ORDER
+        if open_paper_trades_by_tf.get(tf.lower(), {}).get("is_open")
+    ]
+
     return {
         "strategy": "SMC_WITH_FIB",
         "symbol": symbol,
@@ -682,6 +795,8 @@ async def get_smc_fib_dashboard(
         "data_status": data_status,
         "timeframes_order": TIMEFRAMES_ORDER,
         "active_trade_tf": active_trade_tf,
+        "active_paper_trade_tfs": active_paper_trade_tfs,
+        "primary_paper_trade_tf": active_paper_trade_tfs[0] if active_paper_trade_tfs else None,
         "cascading_active_tf": active_trade_tf,
         "timeframes": states,
         "ai_guardian": ai_guardian,

@@ -4093,13 +4093,23 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const pts = m.current_movement_pts;
     const ptsCls = pts >= 0 ? "up" : "down";
     const ptsSign = pts >= 0 ? "+" : "";
+    const hasPaperTrade = d.paper_trade && d.paper_trade.is_open;
+    const statusBadge = hasPaperTrade
+      ? `<span class="badge badge-green">⚡ LIVE TRADE (${d.paper_trade.lot_size || 0.01} Lot)</span>`
+      : (d.is_trade_active
+          ? '<span class="badge badge-amber">🟡 SETUP IN ZONE (SCANNER)</span>'
+          : (isSetup ? '<span class="badge badge-blue">WAITING ENTRY</span>' : '<span class="badge badge-muted">NO SETUP</span>'));
+
+    const stateBadge = hasPaperTrade
+      ? '<span class="badge badge-green">TRADE_ACTIVE (BROKER OPEN)</span>'
+      : (d.is_trade_active ? '<span class="badge badge-amber">SETUP_IN_ZONE (NO ORDER)</span>' : `<span class="badge badge-blue">${state}</span>`);
 
     return `<div class="card" style="border-color:rgba(52,211,153,0.35);margin-bottom:var(--sp-3)">
       <div class="card-head">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           ${dirBadge}
           <span class="badge badge-blue">XAUUSD · ${TF_LABELS[tf] || tf.toUpperCase()}</span>
-          ${isSetup ? '<span class="badge badge-amber">ACTIVE</span>' : '<span class="badge badge-muted">NO SETUP</span>'}
+          ${statusBadge}
         </div>
         <div style="display:flex;gap:6px;align-items:center">
           ${touched ? '<span class="badge badge-green">ENTRY TOUCHED</span>' : '<span class="badge badge-blue">WAITING FOR ENTRY</span>'}
@@ -4124,7 +4134,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         </div>
         <div class="row-between" style="font-size:12px;color:var(--text-dim);border-top:1px solid var(--border);padding-top:8px">
           <div>R:R <b>1 : ${m.rr_ratio || "2.83"}</b> &nbsp;·&nbsp; ${d.smc?.zone ? `ZONE: <b style="color:var(--text-bright)">${d.smc.zone}</b>` : `BOS: <b>${d.bos?.price != null ? `$${Number(d.bos.price).toFixed(2)}` : "—"}</b>`}</div>
-          <div>STATE: <span class="badge ${d.is_trade_active ? "badge-green" : "badge-amber"}">${state}</span> &nbsp;·&nbsp; CURRENT MOVEMENT: <b class="${ptsCls}">${pts != null ? `${ptsSign}${pts} PTS` : "—"}</b></div>
+          <div>STATE: ${stateBadge} &nbsp;·&nbsp; CURRENT MOVEMENT: <b class="${ptsCls}">${pts != null ? `${ptsSign}${pts} PTS` : "—"}</b></div>
         </div>
       </div>
     </div>`;
@@ -4176,19 +4186,31 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   function renderTfButtons(d, curSelTf) {
     return TFS.map(tf => {
       const isSel = tf === curSelTf;
-      const isTradeActiveOnTf = d.timeframes?.[tf]?.is_trade_active;
+      const tfCard = d.timeframes?.[tf] || {};
+      const hasPaperTrade = tfCard.paper_trade && tfCard.paper_trade.is_open;
+      const isSetupInZone = tfCard.is_trade_active;
       const btnClass = isSel ? "btn btn-primary" : "btn btn-secondary";
-      const borderStyle = isTradeActiveOnTf ? "border:1px solid #00e676;box-shadow:0 0 8px rgba(0,230,118,0.3);" : "";
-      const activeBadge = isTradeActiveOnTf
-        ? `<span style="display:inline-flex;align-items:center;gap:4px;color:#00e676;font-size:10px;font-weight:800;margin-left:5px"><span class="dot dot-green" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#00e676;box-shadow:0 0 6px #00e676;animation:pulse 1.5s infinite"></span>ACTIVE</span>`
-        : "";
+
+      let borderStyle = "";
+      let activeBadge = "";
+      if (hasPaperTrade) {
+        borderStyle = "border:1px solid #00e676;box-shadow:0 0 8px rgba(0,230,118,0.3);";
+        activeBadge = `<span style="display:inline-flex;align-items:center;gap:4px;color:#00e676;font-size:10px;font-weight:800;margin-left:5px"><span class="dot dot-green" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#00e676;box-shadow:0 0 6px #00e676;animation:pulse 1.5s infinite"></span>TRADE OPEN</span>`;
+      } else if (isSetupInZone) {
+        borderStyle = "border:1px solid #f59e0b;box-shadow:0 0 8px rgba(245,158,11,0.25);";
+        activeBadge = `<span style="display:inline-flex;align-items:center;gap:4px;color:#f59e0b;font-size:10px;font-weight:800;margin-left:5px"><span class="dot dot-amber" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#f59e0b;box-shadow:0 0 6px #f59e0b"></span>IN ZONE</span>`;
+      }
       return `<button class="${btnClass}" onclick="window.__setStrategyTf('${strategyType}', '${tf}')" style="padding:6px 14px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;${borderStyle}">${TF_LABELS[tf]}${activeBadge}</button>`;
     }).join(" ");
   }
 
   function renderAiGuardianCard(aiData, tfData, tf) {
+    const hasPaperTrade = tfData?.paper_trade && tfData.paper_trade.is_open;
+    const isSetupInZone = tfData?.is_trade_active;
+
     if (!aiData) {
-      if (tfData?.is_trade_active) {
+      if (hasPaperTrade) {
+        const pt = tfData.paper_trade;
         return `<div class="ai-guardian-card approved">
           <div class="ai-guardian-header">
             <div class="ai-guardian-title">
@@ -4198,15 +4220,37 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
             </div>
             <div class="ai-guardian-badges">
               <span class="ai-verdict-pill approved">🟢 ACTIVE TRADE VALIDATED</span>
-              <span class="badge badge-dim">Model: GPT-4o-mini</span>
+              <span class="badge badge-dim">Lot: ${pt.lot_size != null ? pt.lot_size : 0.01}</span>
             </div>
           </div>
           <div class="ai-guardian-body">
             <div style="margin-bottom:6px">
-              <b>Guardian Decision:</b> <span style="color:#4ade80;font-weight:700">TRADE ACTIVE & RUNNING</span> — Position initiated following structural confirmation.
+              <b>Guardian Decision:</b> <span style="color:#4ade80;font-weight:700">PAPER TRADE ACTIVE & RUNNING</span> — Position initiated following structural confirmation.
             </div>
             <div class="ai-guardian-commentary approve-border">
-              <b>💬 AI Sentinel:</b> Setup confirmed at entry level. Strict SL protection and dynamic profit taking active.
+              <b>💬 AI Sentinel:</b> Order open at $${Number(pt.entry_price || tfData.entry || 0).toFixed(2)}. SL protected at $${Number(pt.stop_loss || tfData.sl || 0).toFixed(2)}.
+            </div>
+          </div>
+        </div>`;
+      } else if (isSetupInZone) {
+        return `<div class="ai-guardian-card standby" style="border-left: 3px solid #f59e0b;">
+          <div class="ai-guardian-header">
+            <div class="ai-guardian-title">
+              <span>🤖 AI SETUP GUARDIAN</span>
+              <span class="badge badge-dim">${TF_LABELS[tf] || tf.toUpperCase()} TIMEFRAME</span>
+              ${tfData.direction === "LONG" ? '<span class="badge badge-green" style="font-size:10px">▲ LONG</span>' : '<span class="badge badge-red" style="font-size:10px">▼ SHORT</span>'}
+            </div>
+            <div class="ai-guardian-badges">
+              <span class="ai-verdict-pill" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)">🟡 SETUP IN ZONE (OBSERVING)</span>
+              <span class="badge badge-dim">Scanner Only</span>
+            </div>
+          </div>
+          <div class="ai-guardian-body">
+            <div style="margin-bottom:6px">
+              <b>Guardian Decision:</b> <span style="color:#f59e0b;font-weight:700">MONITORING SETUP IN ZONE</span> — Price touched 0.618 Fib entry level on chart. No duplicate broker order placed.
+            </div>
+            <div class="ai-guardian-commentary" style="border-left: 3px solid #f59e0b; background: rgba(245,158,11,0.06);">
+              <b>💬 AI Sentinel:</b> Setup tracked on scanner. Paper trading is de-duplicated or awaiting separate slot execution.
             </div>
           </div>
         </div>`;
@@ -4228,16 +4272,26 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       </div>`;
     }
 
-    const isApproved = aiData.status === "APPROVE" || aiData.status === "APPROVED" || (aiData.status === "CAUTION" && (tfData?.is_trade_active || Number(aiData.confidence) >= 70));
+    const isApproved = aiData.status === "APPROVE" || aiData.status === "APPROVED" || (aiData.status === "CAUTION" && (hasPaperTrade || Number(aiData.confidence) >= 70));
     const isRejected = aiData.status === "REJECT" || aiData.status === "REJECTED";
-    const cardCls = isApproved ? "approved" : (isRejected ? "rejected" : "standby");
-    const pillCls = isApproved ? "approved" : (isRejected ? "rejected" : "standby");
-    const pillText = isApproved ? `🟢 AI APPROVED (${aiData.confidence != null ? Math.round(aiData.confidence) : 95}%)` : (isRejected ? `🔴 AI REJECTED (${aiData.confidence != null ? Math.round(aiData.confidence) : 35}%)` : `🟡 AI ${aiData.status} (${Math.round(aiData.confidence || 75)}%)`);
+    const cardCls = isApproved ? (hasPaperTrade ? "approved" : "standby") : (isRejected ? "rejected" : "standby");
+    const pillCls = isApproved ? (hasPaperTrade ? "approved" : "standby") : (isRejected ? "rejected" : "standby");
+    const pillText = hasPaperTrade
+      ? `🟢 ACTIVE TRADE RUNNING (${aiData.confidence != null ? Math.round(aiData.confidence) : 95}%)`
+      : (isApproved ? `🟡 AI APPROVED · SCANNER IN ZONE (${aiData.confidence != null ? Math.round(aiData.confidence) : 95}%)` : (isRejected ? `🔴 AI REJECTED (${aiData.confidence != null ? Math.round(aiData.confidence) : 35}%)` : `🟡 AI ${aiData.status} (${Math.round(aiData.confidence || 75)}%)`));
     const commentaryCls = isApproved ? "approve-border" : (isRejected ? "reject-border" : "");
 
     const dirBadge = (aiData.direction || tfData?.direction) === "LONG"
       ? '<span class="badge badge-green" style="font-size:10px">▲ LONG</span>'
       : '<span class="badge badge-red" style="font-size:10px">▼ SHORT</span>';
+
+    const decisionText = hasPaperTrade
+      ? '<span style="color:#4ade80;font-weight:700">PAPER TRADE ACTIVE & RUNNING</span> — Position initiated following structural confirmation.'
+      : (isApproved
+          ? '<span style="color:#fbbf24;font-weight:700">AI APPROVED · SCANNER ONLY</span> — Validated setup in zone. No open broker trade.'
+          : (isRejected
+              ? '<span style="color:#f87171;font-weight:700">TRADE REJECTED</span> — Execution blocked to protect capital against counter-trend or high-risk setup.'
+              : '<span style="color:#fbbf24;font-weight:700">CAUTION / MONITORING</span> — Signal observed with elevated market caution.'));
 
     return `<div class="ai-guardian-card ${cardCls}">
       <div class="ai-guardian-header">
@@ -4254,7 +4308,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       </div>
       <div class="ai-guardian-body">
         <div style="margin-bottom:6px">
-          <b>Guardian Decision:</b> ${isApproved ? '<span style="color:#4ade80;font-weight:700">TRADE APPROVED</span> — Passed macro trend, structure, and risk-reward checks.' : (isRejected ? '<span style="color:#f87171;font-weight:700">TRADE REJECTED</span> — Execution blocked to protect capital against counter-trend or high-risk setup.' : '<span style="color:#fbbf24;font-weight:700">CAUTION / MONITORING</span> — Signal observed with elevated market caution.')}
+          <b>Guardian Decision:</b> ${decisionText}
         </div>
         <div class="ai-guardian-commentary ${commentaryCls}">
           <b>💬 AI Reasoning:</b> ${UI.esc(aiData.explanation || "No explanation provided.")}
@@ -4359,15 +4413,26 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   }
 
   function renderLockMsg(d) {
+    const paperTradeTfs = d.active_paper_trade_tfs || [];
+    if (paperTradeTfs.length > 0) {
+      const names = paperTradeTfs.map(tf => TF_LABELS[tf] || tf.toUpperCase()).join(" · ");
+      return `<span class="badge badge-green" style="font-size:12px;display:inline-flex;align-items:center;gap:5px"><span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>⚡ LIVE TRADE: ${names} ACTIVE</span>`;
+    }
     const activeLockTf = d.active_trade_tf || d.cascading_active_tf;
     return activeLockTf
-      ? `<span class="badge badge-green" style="font-size:12px">⚡ MULTI-SLOT: ${TF_LABELS[activeLockTf] || activeLockTf.toUpperCase()} ACTIVE · CONCURRENT SCANNING</span>`
+      ? `<span class="badge badge-amber" style="font-size:12px">⚡ SETUP IN ZONE: ${TF_LABELS[activeLockTf] || activeLockTf.toUpperCase()} · SCANNER ACTIVE</span>`
       : `<span class="badge badge-blue" style="font-size:12px">⚡ MULTI-SLOT: 5M · 15M · 30M · 1H CONCURRENT SCANNING</span>`;
   }
 
   function renderSmcStatus(tfData, selectedTf) {
     const structBreak = tfData.structure?.break_type || (tfData.bos?.price ? (tfData.direction === "SHORT" ? "BEARISH BOS" : "BULLISH BOS") : "NONE");
     const breakLevel = tfData.structure?.break_price ? `$${Number(tfData.structure.break_price).toFixed(2)}` : (tfData.bos?.price ? `$${Number(tfData.bos.price).toFixed(2)}` : "—");
+    const hasPaperTrade = tfData.paper_trade && tfData.paper_trade.is_open;
+    const execMode = hasPaperTrade
+      ? `<span class="badge badge-green">⚡ LIVE PAPER TRADE (${tfData.paper_trade.lot_size || 0.01} Lot)</span>`
+      : (tfData.is_trade_active
+          ? '<span class="badge badge-amber">🟡 SETUP IN ZONE (SCANNER ONLY)</span>'
+          : '<span class="badge badge-blue">MULTI-SLOT SCANNING</span>');
     return `<div class="card-head"><span>STRUCTURE & SMC STATUS</span><span class="muted">${TF_LABELS[selectedTf] || selectedTf.toUpperCase()}</span></div>
     <div class="card-body">
       ${UI.kv([
@@ -4378,7 +4443,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         ["FVG Imbalances", tfData.smc?.active_fvgs_count != null ? `<b>${tfData.smc.active_fvgs_count} Active</b>` : "—"],
         ["SMC Zone", tfData.smc?.zone ? `<span class="badge ${tfData.smc.zone === "DISCOUNT" ? "badge-green" : "badge-red"}">${tfData.smc.zone} ZONE</span>` : "—"],
         ["50% Equilibrium", tfData.smc?.equilibrium_50 ? `$${Number(tfData.smc.equilibrium_50).toFixed(2)}` : "—"],
-        ["Execution Mode", tfData.is_trade_active ? '<span class="badge badge-green">⚡ ACTIVE TRADE RUNNING</span>' : '<span class="badge badge-blue">MULTI-SLOT SCANNING</span>'],
+        ["Execution Mode", execMode],
       ])}
     </div>`;
   }

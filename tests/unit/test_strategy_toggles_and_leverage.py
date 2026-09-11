@@ -137,4 +137,65 @@ def test_signals_endpoint_dynamic_lots():
         assert len(tfs) > 1, f"Expected multiple timeframes, got: {tfs}"
 
 
+def test_fib_retracement_dashboard_paper_trade_sync():
+    """Verify that Fib Retracement dashboard provides accurate paper_trade telemetry."""
+    from fastapi.testclient import TestClient
+    from app.api.app import create_app
 
+    app = create_app()
+    with TestClient(app) as client:
+        res = client.get("/retracement/strategy/fib-retracement/XAUUSD")
+        assert res.status_code == 200
+        data = res.json()
+        assert "timeframes" in data
+        assert "active_paper_trade_tfs" in data
+        assert isinstance(data["active_paper_trade_tfs"], list)
+
+        for tf in ["5m", "15m", "30m", "1h"]:
+            assert tf in data["timeframes"]
+            card = data["timeframes"][tf]
+            assert "paper_trade" in card
+            assert "is_open" in card["paper_trade"]
+
+
+@pytest.mark.asyncio
+async def test_fib_retracement_dashboard_reflects_active_order(in_memory_db):
+    """Verify that an active open trade in the DB is properly surfaced on its timeframe."""
+    import uuid
+    from datetime import datetime, timezone
+    from app.database.models import PaperTradeModel
+    from app.api.routes.retracement import get_fib_retracement_dashboard
+
+    # Insert a 15M open paper trade
+    trade = PaperTradeModel(
+        id=str(uuid.uuid4()),
+        signal_id="FIB_RETR_15M_L1_4393_123456",
+        symbol="XAUUSD",
+        direction="SHORT",
+        state="OPEN",
+        lot_size=0.03,
+        risk_amount=30.0,
+        target_entry=4378.28,
+        actual_entry=4378.28,
+        stop_loss=4415.68,
+        take_profit_1=4340.87,
+        take_profit_2=4340.87,
+        take_profit_3=4340.87,
+        opened_at=datetime.now(timezone.utc),
+    )
+    in_memory_db.add(trade)
+    await in_memory_db.commit()
+
+    res = await get_fib_retracement_dashboard(symbol="XAUUSD", db=in_memory_db)
+    assert "15m" in res["active_paper_trade_tfs"]
+    assert res["primary_paper_trade_tf"] == "15m"
+
+    # 15M card should show paper_trade.is_open == True
+    card_15m = res["timeframes"]["15m"]
+    assert card_15m["paper_trade"]["is_open"] is True
+    assert card_15m["paper_trade"]["lot_size"] == 0.03
+    assert card_15m["paper_trade"]["direction"] == "SHORT"
+
+    # 1H and 30M cards should show paper_trade.is_open == False
+    assert res["timeframes"]["1h"]["paper_trade"]["is_open"] is False
+    assert res["timeframes"]["30m"]["paper_trade"]["is_open"] is False

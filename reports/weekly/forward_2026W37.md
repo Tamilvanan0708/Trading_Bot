@@ -1,8 +1,8 @@
 # Weekly forward-observation report
-Generated: 2026-09-10T02:48:51.325917+00:00
+Generated: 2026-09-10T09:34:00.796835+00:00
 Window: last 7 day(s) from 2026-09-03
 
-Forward-candidate signals in window: **39**
+Forward-candidate signals in window: **37**
 
 ## Candidate summary
 | Candidate | Config | Status | Signals | Closed | Win% | Expectancy(R) | Health |
@@ -15,15 +15,15 @@ Forward-candidate signals in window: **39**
 | Outcome | Count |
 |---|---|
 | CANCELLED | 21 |
-| PENDING | 7 |
-| TP_HIT | 5 |
+| PENDING | 6 |
+| TP_HIT | 4 |
 | FILLED | 3 |
 | SL_HIT | 2 |
 | BREAKEVEN_HIT | 1 |
 
 ## Regime / session split
-- **regime**: TRENDING=39
-- **session**: LONDON=39
+- **regime**: TRENDING=37
+- **session**: LONDON=37
 
 ## Promotion policy
 No automatic promotion. Candidates must clear 100+ forward
