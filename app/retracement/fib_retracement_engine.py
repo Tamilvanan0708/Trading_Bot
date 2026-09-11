@@ -138,6 +138,32 @@ class DualRetracementEngine:
             return 9.0
         return 12.0
 
+    def _sanitize_anchor_swing(self, swing_idx: int, point_type: str) -> float:
+        """Sanitize anchor price by filtering out abnormal flash news spike wicks.
+        If a candle has an extreme wick (> 2x body and > 4 pts on Gold), anchor at the genuine body base.
+        """
+        if swing_idx < 0 or swing_idx >= len(self._candles):
+            return 0.0
+        c = self._candles[swing_idx]
+        body = abs(c.close - c.open)
+        c_range = c.high - c.low
+        is_gold = c.close > 500.0 or c.open > 500.0
+
+        if point_type == "LOW":
+            lower_wick = min(c.open, c.close) - c.low
+            min_wick_pts = 4.0 if is_gold else 0.5
+            if lower_wick >= min_wick_pts and lower_wick > (2.0 * max(body, 0.5)):
+                # Return genuine body base (consolidation floor) instead of abnormal spike wick
+                return round(min(c.open, c.close), 2)
+            return round(c.low, 2)
+        else:
+            upper_wick = c.high - max(c.open, c.close)
+            min_wick_pts = 4.0 if is_gold else 0.5
+            if upper_wick >= min_wick_pts and upper_wick > (2.0 * max(body, 0.5)):
+                # Return genuine body top (consolidation ceiling) instead of abnormal spike wick
+                return round(max(c.open, c.close), 2)
+            return round(c.high, 2)
+
     def process_candle(self, candle: Candle) -> list[RetracementEvent]:
         self._candles.append(candle)
         if len(self._candles) < 20:
@@ -228,7 +254,7 @@ class DualRetracementEngine:
                     ]
                     anchor_low = min(lows_before_bos, key=lambda s: s.price) if lows_before_bos else confirmed_lows[-1]
 
-                p2_low = anchor_low.price
+                p2_low = self._sanitize_anchor_swing(anchor_low.index, "LOW")
                 p2_ts = anchor_low.timestamp
 
                 # Minimum Impulse Range Filter: reject noisy sideways chop
@@ -302,7 +328,7 @@ class DualRetracementEngine:
                     ]
                     anchor_high = max(highs_before_bos, key=lambda s: s.price) if highs_before_bos else confirmed_highs[-1]
 
-                p2_high = anchor_high.price
+                p2_high = self._sanitize_anchor_swing(anchor_high.index, "HIGH")
                 p2_ts = anchor_high.timestamp
 
                 # Minimum Impulse Range Filter: reject noisy sideways chop
@@ -408,7 +434,7 @@ class DualRetracementEngine:
                             return []
                         anchor_low = min(lows_before, key=lambda s: s.price)
 
-                    anchor_low_price = anchor_low.price
+                    anchor_low_price = self._sanitize_anchor_swing(anchor_low.index, "LOW")
                     leg_range = candle.high - anchor_low_price
                     if leg_range < self._min_impulse_range():
                         return []
@@ -422,14 +448,14 @@ class DualRetracementEngine:
                         point_1_timestamp=last_sh.timestamp,
                         bos_price=last_sh.price,
                         bos_timestamp=last_sh.timestamp,
-                        point_2_price=anchor_low.price,
+                        point_2_price=anchor_low_price,
                         point_2_timestamp=anchor_low.timestamp,
                         current_high_price=candle.high,
                         current_high_timestamp=candle.timestamp,
                         dynamic_tp=candle.high,
                         validation_passed=True,
                     )
-                    self._apply_bullish_fib(new_setup, anchor_low.price, candle.high)
+                    self._apply_bullish_fib(new_setup, anchor_low_price, candle.high)
                     self.setup = new_setup
                     self._candles_since_bos = 0
                     return [RetracementEvent(
@@ -460,7 +486,7 @@ class DualRetracementEngine:
                             return []
                         anchor_high = max(highs_before, key=lambda s: s.price)
 
-                    anchor_high_price = anchor_high.price
+                    anchor_high_price = self._sanitize_anchor_swing(anchor_high.index, "HIGH")
                     leg_range = anchor_high_price - candle.low
                     if leg_range < self._min_impulse_range():
                         return []
@@ -474,14 +500,14 @@ class DualRetracementEngine:
                         point_1_timestamp=last_sl.timestamp,
                         bos_price=last_sl.price,
                         bos_timestamp=last_sl.timestamp,
-                        point_2_price=anchor_high.price,
+                        point_2_price=anchor_high_price,
                         point_2_timestamp=anchor_high.timestamp,
                         current_high_price=candle.low,
                         current_high_timestamp=candle.timestamp,
                         dynamic_tp=candle.low,
                         validation_passed=True,
                     )
-                    self._apply_bearish_fib(new_setup, anchor_high.price, candle.low)
+                    self._apply_bearish_fib(new_setup, anchor_high_price, candle.low)
                     self.setup = new_setup
                     self._candles_since_bos = 0
                     return [RetracementEvent(
@@ -552,6 +578,7 @@ class DualRetracementEngine:
                 setup.invalidation_reason = f"Reversed by Bullish BOS at {candle.close:.2f}."
                 self._archived_setups.append(setup)
 
+                p2_low = self._sanitize_anchor_swing(anchor_low.index, "LOW")
                 new_setup = RetracementSetup(
                     symbol=self.symbol,
                     timeframe=self.timeframe,
@@ -561,14 +588,14 @@ class DualRetracementEngine:
                     point_1_timestamp=last_sh.timestamp,
                     bos_price=last_sh.price,
                     bos_timestamp=last_sh.timestamp,
-                    point_2_price=anchor_low.price,
+                    point_2_price=p2_low,
                     point_2_timestamp=anchor_low.timestamp,
                     current_high_price=candle.high,
                     current_high_timestamp=candle.timestamp,
                     dynamic_tp=candle.high,
                     validation_passed=True,
                 )
-                self._apply_bullish_fib(new_setup, anchor_low.price, candle.high)
+                self._apply_bullish_fib(new_setup, p2_low, candle.high)
                 self.setup = new_setup
                 self._candles_since_bos = 0
                 return [RetracementEvent(
@@ -606,6 +633,7 @@ class DualRetracementEngine:
                 setup.invalidation_reason = f"Reversed by Bearish BOS at {candle.close:.2f}."
                 self._archived_setups.append(setup)
 
+                p2_high = self._sanitize_anchor_swing(anchor_high.index, "HIGH")
                 new_setup = RetracementSetup(
                     symbol=self.symbol,
                     timeframe=self.timeframe,
@@ -615,14 +643,14 @@ class DualRetracementEngine:
                     point_1_timestamp=last_sl.timestamp,
                     bos_price=last_sl.price,
                     bos_timestamp=last_sl.timestamp,
-                    point_2_price=anchor_high.price,
+                    point_2_price=p2_high,
                     point_2_timestamp=anchor_high.timestamp,
                     current_high_price=candle.low,
                     current_high_timestamp=candle.timestamp,
                     dynamic_tp=candle.low,
                     validation_passed=True,
                 )
-                self._apply_bearish_fib(new_setup, anchor_high.price, candle.low)
+                self._apply_bearish_fib(new_setup, p2_high, candle.low)
                 self.setup = new_setup
                 self._candles_since_bos = 0
                 return [RetracementEvent(
@@ -685,8 +713,9 @@ class DualRetracementEngine:
                         c_lows = [s for s in swings if s.point_type == "LOW" and s.index + self.right_bars <= len(self._candles) - 1]
                         higher_lows = [s for s in c_lows if s.timestamp > setup.point_2_timestamp and s.price > setup.point_2_price and (candle.high - s.price) >= 10.0]
                         if higher_lows:
-                            setup.point_2_price = higher_lows[-1].price
-                            setup.point_2_timestamp = higher_lows[-1].timestamp
+                            target_hl = higher_lows[-1]
+                            setup.point_2_price = self._sanitize_anchor_swing(target_hl.index, "LOW")
+                            setup.point_2_timestamp = target_hl.timestamp
                     self._apply_bullish_fib(setup, setup.point_2_price, candle.high)
 
             # 2. Instant Touch Execution: execute L1/L2/L3 immediately upon line touch
@@ -751,8 +780,9 @@ class DualRetracementEngine:
                         c_highs = [s for s in swings if s.point_type == "HIGH" and s.index + self.right_bars <= len(self._candles) - 1]
                         lower_highs = [s for s in c_highs if s.timestamp > setup.point_2_timestamp and s.price < setup.point_2_price and (s.price - candle.low) >= 10.0]
                         if lower_highs:
-                            setup.point_2_price = lower_highs[-1].price
-                            setup.point_2_timestamp = lower_highs[-1].timestamp
+                            target_lh = lower_highs[-1]
+                            setup.point_2_price = self._sanitize_anchor_swing(target_lh.index, "HIGH")
+                            setup.point_2_timestamp = target_lh.timestamp
                     self._apply_bearish_fib(setup, setup.point_2_price, candle.low)
 
             # 2. Instant Touch Execution: execute L1/L2/L3 immediately upon line touch
