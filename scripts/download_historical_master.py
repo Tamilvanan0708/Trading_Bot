@@ -99,7 +99,9 @@ async def download_timeframe(interval: str, output_filenames: list[str]):
     print(f"[{interval}] Total clean candles: {len(candles)} (from {candles[0]['timestamp']} to {candles[-1]['timestamp']})")
     
     payload = {
-        "symbol": "XAUUSD",
+        "data_label": "REAL DATA (Binance XAUUSDT futures)",
+        "source": "fapi.binance.com",
+        "symbol": "XAUUSDT",
         "timeframe": interval,
         "start_dt": candles[0]["timestamp"],
         "end_dt": candles[-1]["timestamp"],

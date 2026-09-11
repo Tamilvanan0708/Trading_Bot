@@ -3396,11 +3396,17 @@ Routes["/paper"] = (mount) => {
   let isUpdating = false;
 
   renderWith(async () => {
-    const [acct, pt, ov] = await Promise.allSettled([API.account(), API.paperTrades(), API.overview("XAUUSD")]);
+    const [acct, pt, ov, execSet] = await Promise.allSettled([
+      API.account(),
+      API.paperTrades(),
+      API.overview("XAUUSD"),
+      API.getExecutionSettings ? API.getExecutionSettings() : Promise.resolve(null)
+    ]);
     return {
       acct: acct.status === "fulfilled" ? acct.value : null,
       pt: pt.status === "fulfilled" ? pt.value : [],
-      ov: ov.status === "fulfilled" ? ov.value : null
+      ov: ov.status === "fulfilled" ? ov.value : null,
+      execSet: execSet.status === "fulfilled" ? execSet.value : null,
     };
   }, (d) => {
     const acct = d.acct || {};
@@ -3409,6 +3415,12 @@ Routes["/paper"] = (mount) => {
     const safety = (d.ov && d.ov.safety) || {};
     const blocked = safety.headline === "PAPER_TRADING_BLOCKED" || safety.headline === "SIGNALS_BLOCKED";
     const obsMode = safety.observation_mode || false;
+    const settings = d.execSet || {};
+
+    const stratFibRetr = settings.strategy_fib_retracement !== false;
+    const stratSmcFib = settings.strategy_smc_fib === true;
+    const stratFibTrend = settings.strategy_fib_trend === true;
+    const activeRiskPct = settings.risk_percent != null ? settings.risk_percent : 1.0;
 
     // Currency and leverage sync from backend execution settings / account
     const isCent = acct.account_currency === "cent";
@@ -3695,6 +3707,30 @@ Routes["/paper"] = (mount) => {
         <div style="display:flex;align-items:center;gap:8px">
           <span class="badge badge-green" style="display:flex;align-items:center;gap:4px"><span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>LIVE AUTO-REFRESH</span>
           ${blocked ? '<span class="badge badge-red">BLOCKED</span>' : '<span class="badge badge-green">ENABLED</span>'}
+        </div>
+      </div>
+
+      <!-- 1.5 Live Strategy & Risk Hub (Suggestion A) -->
+      <div style="background:rgba(17,24,39,0.7);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span style="font-size:11px;font-weight:800;color:var(--text-dim);letter-spacing:0.5px">STRATEGIES:</span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="badge ${stratFibRetr ? 'badge-green' : 'badge-red'}" style="padding:4px 9px;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;gap:5px">
+              ${stratFibRetr ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 🎯 Fib Retracement: ${stratFibRetr ? 'ACTIVE' : 'OFF'}
+            </span>
+            <span class="badge" style="padding:4px 9px;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;gap:5px;${stratSmcFib ? 'background:rgba(0,230,118,0.15);color:#00e676;border:1px solid #00e676' : 'color:#ff5252;border:1px solid rgba(255,82,82,0.3);background:rgba(255,82,82,0.08)'}">
+              ${stratSmcFib ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 💎 SMC With Fib: ${stratSmcFib ? 'ACTIVE' : 'STANDBY'}
+            </span>
+            <span class="badge" style="padding:4px 9px;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;gap:5px;${stratFibTrend ? 'background:rgba(0,230,118,0.15);color:#00e676;border:1px solid #00e676' : 'color:#ff5252;border:1px solid rgba(255,82,82,0.3);background:rgba(255,82,82,0.08)'}">
+              ${stratFibTrend ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 📈 Fib Go Trend: ${stratFibTrend ? 'ACTIVE' : 'STANDBY'}
+            </span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;font-size:12px">
+          <span>Risk: <b style="color:#00e5ff">${activeRiskPct}%</b></span>
+          <span>Lev: <b style="color:#ce93d8">1:${leverage}</b></span>
+          <span>Acct: <b style="color:#fff">${isCent ? 'Cent (₹ INR)' : 'USD ($)'}</b></span>
+          <a href="#settings" class="btn btn-sm btn-secondary" style="padding:4px 12px;font-size:11px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;gap:4px">⚙️ Configure</a>
         </div>
       </div>
 
@@ -4502,20 +4538,39 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), 15000);
     try {
-      const r = await fetch(endpoint, { signal: controller.signal });
+      const [r, execSet] = await Promise.allSettled([
+        fetch(endpoint, { signal: controller.signal }),
+        API.getExecutionSettings ? API.getExecutionSettings() : Promise.resolve(null)
+      ]);
       clearTimeout(tid);
-      if (!r.ok) throw new Error("Strategy endpoint failed: " + r.status);
-      const strat = await r.json();
-      return { strat };
+      let strat = {};
+      if (r.status === "fulfilled" && r.value.ok) {
+        strat = await r.value.json();
+      }
+      return {
+        strat,
+        settings: execSet.status === "fulfilled" ? execSet.value : null
+      };
     } catch (err) {
       clearTimeout(tid);
       throw err;
     }
   }, (data) => {
     const d = data.strat || {};
+    const settings = data.settings || {};
     const price = d.live_price || 4428.0;
     const tfData = d.timeframes?.[selectedTf] || {};
     const activeCascadeTf = d.cascading_active_tf;
+
+    // Check if current strategy is active in settings (Suggestion B)
+    let isStratEnabled = true;
+    if (strategyType === "FIB_WITH_RETRACEMENT") {
+      isStratEnabled = settings.strategy_fib_retracement !== false;
+    } else if (strategyType === "SMC_WITH_FIB") {
+      isStratEnabled = settings.strategy_smc_fib === true;
+    } else if (strategyType === "FIB_GO_WITH_TREND") {
+      isStratEnabled = settings.strategy_fib_trend === true;
+    }
 
     const tfButtons = renderTfButtons(d, selectedTf);
     const activeLockMsg = renderLockMsg(d);
@@ -4533,10 +4588,36 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         <div class="toolbar" style="margin:0">
           <span class="badge badge-green" style="display:flex;align-items:center;gap:4px"><span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>LIVE AUTO-REFRESH</span>
           <span id="strat-lock-msg-wrap">${activeLockMsg}</span>
+          ${isStratEnabled ? '<span class="badge badge-green">🟢 ACTIVE</span>' : '<span class="badge badge-red">🔴 STANDBY</span>'}
           <span class="badge badge-blue">SIGNAL ONLY</span>
           <span class="badge badge-red">REAL MONEY DISABLED</span>
         </div>
       </div>
+
+      <!-- STRATEGY ACTIVE / STANDBY STATUS BANNER (Suggestion B) -->
+      ${!isStratEnabled ? `
+        <div style="background:rgba(239,83,80,0.12);border:1px solid rgba(239,83,80,0.4);border-radius:8px;padding:12px 18px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:22px">🔴</span>
+            <div>
+              <div style="font-weight:700;color:#ff5252;font-size:13.5px">STRATEGY STANDBY / DISABLED IN SETTINGS</div>
+              <div style="font-size:11.5px;color:var(--text-muted)">Execution is currently paused. No paper trades or MT5 orders will be placed for this strategy.</div>
+            </div>
+          </div>
+          <a href="#settings" class="btn btn-sm btn-secondary" style="font-size:11px;font-weight:700;padding:5px 14px;text-decoration:none;display:inline-flex;align-items:center;gap:5px">⚙️ Enable in Settings</a>
+        </div>
+      ` : `
+        <div style="background:rgba(0,230,118,0.08);border:1px solid rgba(0,230,118,0.3);border-radius:8px;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="dot dot-green" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#00e676;box-shadow:0 0 8px #00e676;animation:pulse 1.5s infinite"></span>
+            <div>
+              <div style="font-weight:700;color:#00e676;font-size:13px">STRATEGY ACTIVE & RUNNING</div>
+              <div style="font-size:11px;color:var(--text-muted)">Scanning 5M, 15M, 30M, 1H concurrently. Paper trading and live signals are armed.</div>
+            </div>
+          </div>
+          <a href="#settings" class="btn btn-sm btn-secondary" style="font-size:11px;padding:4px 12px;text-decoration:none">⚙️ Settings</a>
+        </div>
+      `}
 
       <!-- TIMEFRAME SELECTOR -->
       <div class="card" style="padding:10px 14px">

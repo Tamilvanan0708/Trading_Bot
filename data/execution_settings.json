@@ -16,7 +16,7 @@
   "smart_shield_level": "0.618",
   "account_leverage": 500,
   "strategy_fib_retracement": true,
-  "strategy_smc_fib": true,
+  "strategy_smc_fib": false,
   "strategy_fib_trend": false,
   "mt5_bridge_enabled": false,
   "mt5_symbol": "XAUUSD-VIP",

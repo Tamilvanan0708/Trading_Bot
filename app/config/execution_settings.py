@@ -75,7 +75,7 @@ class ExecutionSettings(BaseModel):
         description="Enable Fib With Retracement strategy execution"
     )
     strategy_smc_fib: bool = Field(
-        default=True,
+        default=False,
         description="Enable SMC With Fib strategy execution"
     )
     strategy_fib_trend: bool = Field(
@@ -113,22 +113,28 @@ class ExecutionSettings(BaseModel):
 
 
 _CURRENT_SETTINGS: ExecutionSettings | None = None
+_LAST_CONFIG_MTIME: float = 0.0
 
 
 def get_execution_settings() -> ExecutionSettings:
-    """Retrieve current runtime execution settings, loading from file if available."""
-    global _CURRENT_SETTINGS
-    if _CURRENT_SETTINGS is not None:
-        return _CURRENT_SETTINGS
+    """Retrieve current runtime execution settings, loading from file if available with mtime reload."""
+    global _CURRENT_SETTINGS, _LAST_CONFIG_MTIME
 
     if CONFIG_FILE.exists():
         try:
+            mtime = CONFIG_FILE.stat().st_mtime
+            if _CURRENT_SETTINGS is not None and mtime == _LAST_CONFIG_MTIME:
+                return _CURRENT_SETTINGS
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 _CURRENT_SETTINGS = ExecutionSettings(**data)
+                _LAST_CONFIG_MTIME = mtime
                 return _CURRENT_SETTINGS
         except Exception:
             pass
+
+    if _CURRENT_SETTINGS is not None:
+        return _CURRENT_SETTINGS
 
     _CURRENT_SETTINGS = ExecutionSettings()
     return _CURRENT_SETTINGS
@@ -136,11 +142,16 @@ def get_execution_settings() -> ExecutionSettings:
 
 def save_execution_settings(new_settings: ExecutionSettings) -> ExecutionSettings:
     """Save execution settings to disk and update cache."""
-    global _CURRENT_SETTINGS
+    global _CURRENT_SETTINGS, _LAST_CONFIG_MTIME
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(new_settings.model_dump(), f, indent=2)
     _CURRENT_SETTINGS = new_settings
+    if CONFIG_FILE.exists():
+        try:
+            _LAST_CONFIG_MTIME = CONFIG_FILE.stat().st_mtime
+        except Exception:
+            pass
     return _CURRENT_SETTINGS
 
 

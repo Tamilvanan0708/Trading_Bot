@@ -10,7 +10,7 @@ def test_execution_settings_defaults():
     cfg = ExecutionSettings()
     assert cfg.account_leverage == 500
     assert cfg.strategy_fib_retracement is True
-    assert cfg.strategy_smc_fib is True
+    assert cfg.strategy_smc_fib is False
     assert cfg.strategy_fib_trend is False
     assert cfg.smart_shield_enabled is True
     assert cfg.smart_shield_level == "0.618"
@@ -199,3 +199,33 @@ async def test_fib_retracement_dashboard_reflects_active_order(in_memory_db):
     # 1H and 30M cards should show paper_trade.is_open == False
     assert res["timeframes"]["1h"]["paper_trade"]["is_open"] is False
     assert res["timeframes"]["30m"]["paper_trade"]["is_open"] is False
+
+
+def test_execution_settings_mtime_reload(tmp_path, monkeypatch):
+    """Test that modifying execution_settings.json dynamically updates get_execution_settings()."""
+    import json
+    import time
+    from app.config import execution_settings as es_module
+
+    test_file = tmp_path / "execution_settings.json"
+    monkeypatch.setattr(es_module, "CONFIG_FILE", test_file)
+    monkeypatch.setattr(es_module, "_CURRENT_SETTINGS", None)
+    monkeypatch.setattr(es_module, "_LAST_CONFIG_MTIME", 0.0)
+
+    # Initial save
+    initial = es_module.ExecutionSettings(strategy_fib_retracement=True, strategy_smc_fib=False, strategy_fib_trend=False)
+    es_module.save_execution_settings(initial)
+
+    loaded_1 = es_module.get_execution_settings()
+    assert loaded_1.strategy_fib_retracement is True
+    assert loaded_1.strategy_smc_fib is False
+
+    # Simulate modifying file from UI/external process
+    time.sleep(0.05)  # ensure distinct mtime timestamp
+    with open(test_file, "w", encoding="utf-8") as f:
+        json.dump({"strategy_fib_retracement": True, "strategy_smc_fib": True, "strategy_fib_trend": False}, f)
+
+    # Calling get_execution_settings() without restarting must pick up the new value
+    loaded_2 = es_module.get_execution_settings()
+    assert loaded_2.strategy_smc_fib is True
+
