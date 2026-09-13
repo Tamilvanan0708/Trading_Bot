@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.routes import (
     ai,
@@ -73,6 +74,10 @@ def create_app() -> FastAPI:
         allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+    app.add_middleware(
+        GZipMiddleware,
+        minimum_size=1000,
     )
 
     @app.get("/", include_in_schema=False)

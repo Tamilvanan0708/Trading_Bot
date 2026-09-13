@@ -127,10 +127,10 @@ function wireShell() {
 }
 
 const AutoRefresh = {
-  speed: 2000,
+  speed: 4000,
   modes: [
-    { speed: 2000, label: "⚡ 2s AUTO", color: "#22c55e", bg: "rgba(34,197,94,0.12)" },
-    { speed: 5000, label: "⏱️ 5s AUTO", color: "#60a5fa", bg: "rgba(96,165,250,0.12)" },
+    { speed: 4000, label: "⚡ 4s AUTO", color: "#22c55e", bg: "rgba(34,197,94,0.12)" },
+    { speed: 8000, label: "⏱️ 8s AUTO", color: "#60a5fa", bg: "rgba(96,165,250,0.12)" },
     { speed: 0, label: "⏸️ PAUSED", color: "#8b97a8", bg: "rgba(139,151,168,0.12)" },
   ],
   currentIdx: 0,
@@ -159,6 +159,16 @@ const AutoRefresh = {
   }
 };
 let _pricePollTimer = null;
+let _isPageHidden = false;
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    _isPageHidden = document.hidden;
+    if (!_isPageHidden && AutoRefresh.speed > 0) {
+      if (typeof pollPrice === "function") pollPrice();
+      if (typeof pollTopbar === "function") pollTopbar();
+    }
+  });
+}
 
 function setConn(id, ok) {
   const el = document.getElementById(id);
@@ -213,6 +223,7 @@ function updateTopbar(st, feed, dq, tg) {
 }
 
 async function pollTopbar() {
+  if (_isPageHidden) return;
   try {
     const [st, feed, dq, tg] = await Promise.allSettled([API.systemStatus(), API.feedHealth(), API.dataQuality(), API.telegramStatus()]);
     const stV = st.status === "fulfilled" ? st.value.status || st.value : null;
@@ -226,6 +237,7 @@ async function pollTopbar() {
 }
 
 async function pollPrice() {
+  if (_isPageHidden) return;
   try {
     const m = await API.liveQuote();
     if (!m || m.price == null) return;
@@ -677,11 +689,11 @@ Routes["/overview"] = (mount) => {
     if (el) el.textContent = Number(AppState.price).toFixed(2);
   }
   loadOverview();
-  _overviewTimer = setInterval(loadOverview, AutoRefresh.speed || 2500);
+  _overviewTimer = setInterval(loadOverview, AutoRefresh.speed || 4000);
 };
 
 async function loadOverview() {
-  if (AutoRefresh.speed === 0 || _isOverviewLoading) return;
+  if (_isPageHidden || AutoRefresh.speed === 0 || _isOverviewLoading) return;
   _isOverviewLoading = true;
   try {
     const [ovRes, fibRes, smcRes, trendRes, ptRes, acctRes] = await Promise.allSettled([
@@ -3545,7 +3557,7 @@ Routes["/paper"] = (mount) => {
 
     // In-place poller update function
     async function updatePaperInPlace() {
-      if (AutoRefresh.speed === 0 || isUpdating) return;
+      if (_isPageHidden || AutoRefresh.speed === 0 || isUpdating) return;
       isUpdating = true;
       try {
         const [acctRes, ptRes] = await Promise.allSettled([API.account(), API.paperTrades()]);
@@ -3697,7 +3709,7 @@ Routes["/paper"] = (mount) => {
       wireChartButtons();
 
       if (_paperTimer) clearInterval(_paperTimer);
-      _paperTimer = setInterval(updatePaperInPlace, AutoRefresh.speed || 2000);
+      _paperTimer = setInterval(updatePaperInPlace, AutoRefresh.speed || 4000);
     }, 50);
 
     return `<div class="stack">
@@ -4379,7 +4391,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   let isStratUpdating = false;
 
   async function updateStratInPlace() {
-    if (AutoRefresh.speed === 0 || isStratUpdating) return;
+    if (_isPageHidden || AutoRefresh.speed === 0 || isStratUpdating) return;
     const curHash = location.hash.replace(/^#\/?/, "");
     if (strategyType === "SMC_WITH_FIB" && !curHash.startsWith("smc-fib")) return;
     if (strategyType === "FIB_WITH_RETRACEMENT" && !curHash.startsWith("fib-retracement")) return;
@@ -4539,7 +4551,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     if (_stratTimer) clearInterval(_stratTimer);
     _stratTimer = setInterval(() => {
       updateStratInPlace();
-    }, AutoRefresh.speed || 2000);
+    }, AutoRefresh.speed || 4000);
 
     window.__viewCleanup = () => {
       if (_stratTimer) {
@@ -6266,6 +6278,6 @@ document.addEventListener("DOMContentLoaded", () => {
   pollTopbar();
   pollPrice();
   setInterval(pollTopbar, REFRESH_MS);
-  _pricePollTimer = setInterval(pollPrice, AutoRefresh.speed || 2000);
+  _pricePollTimer = setInterval(pollPrice, AutoRefresh.speed || 4000);
   // The Overview view self-updates incrementally via its own timer (see Routes["/overview"]).
 });
