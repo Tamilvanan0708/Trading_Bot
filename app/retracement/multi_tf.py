@@ -158,18 +158,11 @@ class RetracementMultiTFMonitor:
             async def _fetch(tf_name):
                 tf_limit = tf_limits.get(tf_name, 100)
                 try:
-                    c = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf_name], limit=tf_limit), timeout=6.0)
+                    c = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf_name], limit=tf_limit), timeout=8.0)
                     if c and len(c) >= 30:
                         return tf_name, c
-                except Exception:
-                    pass
-                try:
-                    from app.data.research_fallback import load_research_fallback_candles
-                    c_fb = load_research_fallback_candles(self.symbol, TF_MAP[tf_name], limit=tf_limit)
-                    if c_fb:
-                        return tf_name, c_fb
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("[RETR-MULTI] bootstrap REST fetch for %s failed: %s", tf_name, exc)
                 return tf_name, []
 
             fetched = await asyncio.gather(*[_fetch(tf) for tf in self.timeframes], return_exceptions=True)
@@ -212,16 +205,30 @@ class RetracementMultiTFMonitor:
 
             raw_results: dict[str, RetracementSetup | None] = {}
 
-            # Check if any slot has fewer than 50 candles
-            slots_needing_candles = [
-                tf for tf in self.timeframes
-                if (
-                    snap is None
-                    or len(list(snap.get_series(TF_MAP[tf]))) < 50
-                    or self.slots[tf].last_processed_ts is None
-                    or len(self.slots[tf].engine._candles) < 50
-                )
-            ]
+            # Check if any slot has fewer than 30 candles or has a stale gap
+            slots_needing_candles = []
+            now_utc = datetime.now(timezone.utc)
+            for tf in self.timeframes:
+                series = list(snap.get_series(TF_MAP[tf])) if snap is not None else []
+                is_stale = False
+                if not series or len(series) < 30:
+                    is_stale = True
+                elif len(series) >= 10:
+                    last_c_ts = series[-1].timestamp
+                    if last_c_ts.tzinfo is None:
+                        last_c_ts = last_c_ts.replace(tzinfo=timezone.utc)
+                    if (now_utc - last_c_ts).total_seconds() > 3600:
+                        is_stale = True
+                    else:
+                        recent = series[-25:]
+                        for i in range(len(recent) - 1):
+                            t_prev = recent[i].timestamp.replace(tzinfo=timezone.utc) if recent[i].timestamp.tzinfo is None else recent[i].timestamp
+                            t_next = recent[i+1].timestamp.replace(tzinfo=timezone.utc) if recent[i+1].timestamp.tzinfo is None else recent[i+1].timestamp
+                            if (t_next - t_prev).total_seconds() > 14400:
+                                is_stale = True
+                                break
+                if is_stale or self.slots[tf].last_processed_ts is None or len(self.slots[tf].engine._candles) < 30:
+                    slots_needing_candles.append(tf)
 
             hist_candles: dict[str, list] = {}
             if slots_needing_candles:
@@ -232,7 +239,26 @@ class RetracementMultiTFMonitor:
                 snap_candles = list(snap.get_series(TF_MAP[tf])) if snap is not None else []
                 candles: list = []
 
-                if len(snap_candles) >= 50:
+                has_large_gap = False
+                if len(snap_candles) >= 10:
+                    recent = snap_candles[-25:]
+                    for i in range(len(recent) - 1):
+                        t_prev = recent[i].timestamp.replace(tzinfo=timezone.utc) if recent[i].timestamp.tzinfo is None else recent[i].timestamp
+                        t_next = recent[i+1].timestamp.replace(tzinfo=timezone.utc) if recent[i+1].timestamp.tzinfo is None else recent[i+1].timestamp
+                        if (t_next - t_prev).total_seconds() > 14400:
+                            has_large_gap = True
+                            break
+
+                if hist_candles.get(tf) and (has_large_gap or len(snap_candles) < 30):
+                    candles = hist_candles[tf]
+                    if snap_candles:
+                        last_hist_ts = candles[-1].timestamp if candles else None
+                        new_live = [c for c in snap_candles if last_hist_ts is None or c.timestamp > last_hist_ts]
+                        candles = candles + new_live
+                    slot.live_price = self.live_price
+                    slot.data_status = "HEALTHY"
+                    slot.has_live_data = True
+                elif len(snap_candles) >= 30 and not has_large_gap:
                     candles = snap_candles
                     slot.live_price = self.live_price
                     slot.data_status = "HEALTHY"

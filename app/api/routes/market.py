@@ -191,6 +191,13 @@ async def get_data_quality():
     return dq.model_dump(mode="json")
 
 
+@router.post("/refresh")
+async def force_refresh_market_data():
+    """Trigger an immediate emergency history refresh for live candles."""
+    service = get_live_service()
+    return await service.request_emergency_refresh()
+
+
 @router.get("/live/health")
 async def get_live_health():
     """Returns feed health status for all registered live feeds + AI provider state."""

@@ -464,9 +464,16 @@ class LiveMarketDataService:
         method provides immediate, cooldown-gated refresh for disconnect/
         degraded scenarios.
         """
-        interval = self.settings.LIVE_HISTORY_REFRESH_INTERVAL_MINUTES * 60
         while self._running:
             try:
+                # If degraded or failed, retry every 25s instead of waiting 15 minutes
+                is_unhealthy = (
+                    self._refresh_status == "FAILED"
+                    or self._history_fallback
+                    or len(self._closed_15m) < 20
+                    or len(self._closed_5m) < 20
+                )
+                interval = 25 if is_unhealthy else (self.settings.LIVE_HISTORY_REFRESH_INTERVAL_MINUTES * 60)
                 await asyncio.sleep(interval)
                 await self.refresh_history()
             except asyncio.CancelledError:

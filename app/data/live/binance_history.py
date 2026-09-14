@@ -29,6 +29,16 @@ BINANCE_REST_BASE_URLS = [
     "https://fapi3.binance.com",
 ]
 
+DEFAULT_BINANCE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+}
+
+_BINANCE_SEMAPHORE = asyncio.Semaphore(2)
+_LAST_BINANCE_CALL_TS = 0.0
+
 # TimeFrame -> Binance kline interval (futures XAUUSDT supported set)
 _INTERVAL_MAP = {
     TimeFrame.M5: "5m",
@@ -74,34 +84,57 @@ class BinanceHistoryProvider(MarketDataProvider):
         quality degraded — never silently replaced with a proxy instrument
         (PAXGUSDT) or stale cached history reported as fresh.
         """
+        global _LAST_BINANCE_CALL_TS
         max_retries = self.settings.BINANCE_HISTORY_MAX_RETRIES
         timeout = httpx.Timeout(self.settings.BINANCE_HISTORY_TIMEOUT_SECONDS)
         backoff = self.settings.BINANCE_HISTORY_RETRY_BACKOFF
         last_exc: Exception | None = None
 
-        for attempt in range(max_retries + 1):
-            url = BINANCE_REST_BASE_URLS[attempt % len(BINANCE_REST_BASE_URLS)]
-            try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    res = await client.get(f"{url}/fapi/v1/klines", params=params)
-                    if res.status_code != 200:
-                        raise RuntimeError(
-                            f"Binance history HTTP {res.status_code}: {res.text[:200]}"
-                        )
-                    data = res.json()
-                    if not isinstance(data, list):
-                        raise RuntimeError(f"Binance history returned unexpected payload: {type(data)}")
-                    return data
-            except Exception as exc:  # noqa: BLE001 - retry all transport/HTTP errors
-                last_exc = exc
-                if attempt >= max_retries:
-                    break
-                delay = backoff * (2 ** attempt)
-                logger.warning(
-                    "Binance history fetch attempt %d/%d on %s failed (%s); retrying in %.1fs",
-                    attempt + 1, max_retries + 1, url, exc, delay,
-                )
-                await asyncio.sleep(delay)
+        async with _BINANCE_SEMAPHORE:
+            for attempt in range(max_retries + 1):
+                url = BINANCE_REST_BASE_URLS[attempt % len(BINANCE_REST_BASE_URLS)]
+                try:
+                    # Concurrency throttle to prevent startup burst 429 errors
+                    now_loop = asyncio.get_event_loop().time()
+                    elapsed = now_loop - _LAST_BINANCE_CALL_TS
+                    if elapsed < 0.15:
+                        await asyncio.sleep(0.15 - elapsed)
+                    _LAST_BINANCE_CALL_TS = asyncio.get_event_loop().time()
+
+                    async with httpx.AsyncClient(timeout=timeout) as client:
+                        try:
+                            res = await client.get(f"{url}/fapi/v1/klines", params=params, headers=DEFAULT_BINANCE_HEADERS)
+                        except TypeError:
+                            res = await client.get(f"{url}/fapi/v1/klines", params=params)
+
+                        if res.status_code == 429:
+                            retry_after = res.headers.get("Retry-After")
+                            delay = float(retry_after) if retry_after and retry_after.isdigit() else 3.5
+                            logger.warning(
+                                "Binance HTTP 429 on %s; backing off %.1fs (attempt %d/%d)",
+                                url, delay, attempt + 1, max_retries + 1,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+
+                        if res.status_code != 200:
+                            raise RuntimeError(
+                                f"Binance history HTTP {res.status_code}: {res.text[:200]}"
+                            )
+                        data = res.json()
+                        if not isinstance(data, list):
+                            raise RuntimeError(f"Binance history returned unexpected payload: {type(data)}")
+                        return data
+                except Exception as exc:  # noqa: BLE001 - retry all transport/HTTP errors
+                    last_exc = exc
+                    if attempt >= max_retries:
+                        break
+                    delay = backoff * (2 ** attempt)
+                    logger.warning(
+                        "Binance history fetch attempt %d/%d on %s failed (%s); retrying in %.1fs",
+                        attempt + 1, max_retries + 1, url, exc, delay,
+                    )
+                    await asyncio.sleep(delay)
 
         raise RuntimeError(f"Binance history fetch failed after {max_retries + 1} attempts: {last_exc}")
 
