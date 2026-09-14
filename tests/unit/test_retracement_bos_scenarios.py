@@ -34,6 +34,7 @@ from app.data.models import Candle
 from app.retracement.engine import RetracementBOSEngine, format_report
 from app.retracement.models import (
     RetracementEventType,
+    RetracementSetup,
     RetracementState,
 )
 
@@ -465,3 +466,85 @@ async def test_tp_before_freeze_persists():
         assert restored.tp_locked is True
 
     await engine_.dispose()
+
+
+def test_weekend_session_rollover_expires_pre_weekend_setup():
+    """A setup formed on Friday must expire when Monday trading opens."""
+    from app.retracement.fib_retracement_engine import DualRetracementEngine
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="15m")
+    friday_ts = datetime(2026, 9, 11, 14, 0, tzinfo=timezone.utc)  # Friday
+    engine.setup = RetracementSetup(
+        symbol="XAUUSD",
+        timeframe="15m",
+        direction="LONG",
+        state=RetracementState.TRADE_ACTIVE,
+        bos_price=4350.0,
+        bos_timestamp=friday_ts,
+        point_1_price=4350.0,
+        point_1_timestamp=friday_ts,
+        point_2_price=4300.0,
+        point_2_timestamp=friday_ts,
+        entry_price=4330.0,
+        sl_price=4290.0,
+        dynamic_tp=4380.0,
+        locked_tp=4380.0,
+        entry_touched=True,
+    )
+    # Seed 20 historical candles
+    c_ts = friday_ts
+    for _ in range(20):
+        engine._candles.append(Candle(timestamp=c_ts, open=4330.0, high=4335.0, low=4325.0, close=4330.0, volume=10.0))
+        c_ts += timedelta(minutes=15)
+
+    # Monday candle arrives
+    monday_ts = datetime(2026, 9, 14, 0, 15, tzinfo=timezone.utc)  # Monday
+    monday_candle = Candle(timestamp=monday_ts, open=4335.0, high=4340.0, low=4330.0, close=4338.0, volume=10.0)
+    events = engine.process_candle(monday_candle)
+
+    # Pre-weekend setup must be expired
+    assert any(e.event_type == RetracementEventType.INVALIDATED for e in events)
+    archived = engine.archive_completed()
+    assert archived is not None
+    assert archived.state == RetracementState.INVALIDATED
+    assert "Weekend session expired" in archived.invalidation_reason
+
+
+def test_active_trade_timeout_expires_after_max_candles():
+    """An active trade that lingers past max trade candles without TP/SL must time out."""
+    from app.retracement.fib_retracement_engine import DualRetracementEngine
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="1m")
+    ts = datetime(2026, 9, 14, 10, 0, tzinfo=timezone.utc)
+    engine.setup = RetracementSetup(
+        symbol="XAUUSD",
+        timeframe="1m",
+        direction="LONG",
+        state=RetracementState.TRADE_ACTIVE,
+        bos_price=4350.0,
+        bos_timestamp=ts,
+        point_1_price=4350.0,
+        point_1_timestamp=ts,
+        point_2_price=4300.0,
+        point_2_timestamp=ts,
+        entry_price=4330.0,
+        sl_price=4290.0,
+        dynamic_tp=4380.0,
+        locked_tp=4380.0,
+        entry_touched=True,
+        layers={"L1": {"layer": "L1", "state": "FILLED", "entry_price": 4330.0, "tp": 4380.0, "sl": 4290.0}},
+    )
+    for _ in range(20):
+        engine._candles.append(Candle(timestamp=ts, open=4330.0, high=4335.0, low=4325.0, close=4330.0, volume=10.0))
+        ts += timedelta(minutes=1)
+
+    # Process 45 candles (max trade bars for 1m is 40)
+    final_events = []
+    for _ in range(45):
+        c = Candle(timestamp=ts, open=4330.0, high=4335.0, low=4325.0, close=4330.0, volume=10.0)
+        evs = engine.process_candle(c)
+        if evs:
+            final_events.extend(evs)
+        ts += timedelta(minutes=1)
+
+    assert any(e.event_type == RetracementEventType.COMPLETED and e.metadata.get("reason") == "TIMEOUT" for e in final_events)
+    assert engine.setup.state == RetracementState.COMPLETED
+    assert engine.setup.outcome == "TIMEOUT"

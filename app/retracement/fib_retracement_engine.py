@@ -79,6 +79,7 @@ class DualRetracementEngine:
         self._events: list[RetracementEvent] = []
         self._archived_setups: list[RetracementSetup] = []
         self._candles_since_bos: int = 0
+        self._candles_since_entry: int = 0
         self._max_expiry_candles: int = 200
         self._last_traded_bos_high_ts: datetime | None = None
         self._last_traded_bos_low_ts: datetime | None = None
@@ -89,6 +90,7 @@ class DualRetracementEngine:
         self._events = []
         self._archived_setups = []
         self._candles_since_bos = 0
+        self._candles_since_entry = 0
         self._last_traded_bos_high_ts = None
         self._last_traded_bos_low_ts = None
 
@@ -164,6 +166,35 @@ class DualRetracementEngine:
                 return round(max(c.open, c.close), 2)
             return round(c.high, 2)
 
+    def _is_stale_session(self, setup: RetracementSetup, candle: Candle) -> bool:
+        """Check if an existing setup originated before a market session boundary.
+
+        Gold/Forex markets close on Friday (~21:00-22:00 UTC) and reopen Sunday (~21:00-22:00 UTC).
+        Any setup created before Friday 22:00 UTC is invalid once the new trading week
+        opens (Sunday >= 21:00 UTC or Monday). Additionally, any setup older than 48 hours
+        is considered expired for intraday trading.
+        """
+        setup_ts = setup.bos_timestamp or setup.point_1_timestamp or setup.created_at
+        if setup_ts is None or candle.timestamp is None:
+            return False
+
+        # Weekend boundary: setup formed Friday or earlier, candle is in new week (Sunday >= 21:00 or Monday)
+        if setup_ts.weekday() in (4, 5) and (candle.timestamp.weekday() == 0 or (candle.timestamp.weekday() == 6 and candle.timestamp.hour >= 21)):
+            return True
+
+        # Consecutive candle weekend gap > 24 hours
+        if len(self._candles) >= 2:
+            prev_candle = self._candles[-2]
+            if (candle.timestamp - prev_candle.timestamp).total_seconds() > 24 * 3600:
+                if setup_ts <= prev_candle.timestamp:
+                    return True
+
+        # Absolute staleness: older than 48 hours for intraday timeframes
+        if (candle.timestamp - setup_ts).total_seconds() > 48 * 3600:
+            return True
+
+        return False
+
     def process_candle(self, candle: Candle) -> list[RetracementEvent]:
         self._candles.append(candle)
         if len(self._candles) < 20:
@@ -174,6 +205,31 @@ class DualRetracementEngine:
             self._candles = self._candles[-300:]
 
         events: list[RetracementEvent] = []
+
+        # 0. Session rollover & staleness check
+        if self.setup is not None and self.setup.state not in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
+            if self._is_stale_session(self.setup, candle):
+                stale_setup = self.setup
+                stale_setup.state = RetracementState.INVALIDATED
+                stale_setup.invalidation_reason = "Weekend session expired (new trading session opened)."
+                for layer in stale_setup.layers.values():
+                    if layer.get("state") == "FILLED":
+                        layer["state"] = "EXPIRED"
+                        layer["exit_price"] = candle.open
+                self._archived_setups.append(stale_setup)
+                events.append(RetracementEvent(
+                    setup_id=stale_setup.setup_id,
+                    event_type=RetracementEventType.INVALIDATED,
+                    state_before=stale_setup.state,
+                    state_after=RetracementState.INVALIDATED,
+                    timestamp=candle.timestamp,
+                    price=candle.open,
+                    metadata={"reason": "WEEKEND_SESSION_EXPIRED"},
+                ))
+                self.setup = None
+                self._candles_since_bos = 0
+                self._candles_since_entry = 0
+
         if self.setup is None:
             events.extend(self._detect_bos(candle))
         elif self.setup.state in (RetracementState.BOS_DETECTED, RetracementState.POINT_2_IDENTIFIED, RetracementState.FIB_ACTIVE, RetracementState.TP_DYNAMIC):
@@ -183,10 +239,6 @@ class DualRetracementEngine:
 
         # Auto-archive: if setup is now completed/invalidated, clear it and immediately try to detect a new BOS
         if self.setup is not None and self.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
-            # Do NOT auto-archive or clear self.setup here — the caller
-            # (live.py / multi_tf.py) needs to observe the completed state
-            # so it can finalize the DB row.  The caller will call
-            # archive_completed() after reading the state.
             pass
 
         self._events.extend(events)
@@ -534,14 +586,22 @@ class DualRetracementEngine:
             return 48
         return 80
 
-    def _detect_opposite_bos(self, candle: Candle) -> list[RetracementEvent]:
-        """Detect if market structure shifted in the opposite direction while waiting for entry.
+    def _max_trade_bars(self) -> int:
+        tf = str(self.timeframe).lower()
+        if tf in ("1m", "3m", "5m"):
+            return 40
+        if tf == "15m":
+            return 60
+        return 80
+
+    def _detect_opposite_bos(self, candle: Candle, allow_active: bool = False) -> list[RetracementEvent]:
+        """Detect if market structure shifted in the opposite direction while waiting for entry or in active trade.
 
         If waiting for SHORT entry and a Bullish BOS occurs, or waiting for LONG entry
         and a Bearish BOS occurs, the stale setup is invalidated and superseded immediately.
         """
         setup = self.setup
-        if setup is None or setup.layers:
+        if setup is None or (setup.layers and not allow_active):
             return []
 
         swings = detect_swings(self._candles, left_bars=self.left_bars, right_bars=self.right_bars)
@@ -907,6 +967,50 @@ class DualRetracementEngine:
             return []
         events: list[RetracementEvent] = []
 
+        # 0. Active trade candle timeout (stagnation guard)
+        self._candles_since_entry += 1
+        max_trade = self._max_trade_bars()
+        if self._candles_since_entry > max_trade:
+            setup.state = RetracementState.COMPLETED
+            setup.outcome = "TIMEOUT"
+            setup.completion_reason = f"Trade expired after {max_trade} active candles without TP/SL."
+            for layer in setup.layers.values():
+                if layer.get("state") == "FILLED":
+                    layer["state"] = "TIMEOUT"
+                    layer["exit_price"] = candle.close
+            events.append(RetracementEvent(
+                setup_id=setup.setup_id,
+                event_type=RetracementEventType.COMPLETED,
+                state_before=RetracementState.TRADE_ACTIVE,
+                state_after=RetracementState.COMPLETED,
+                timestamp=candle.timestamp,
+                price=candle.close,
+                metadata={"reason": "TIMEOUT"},
+            ))
+            return events
+
+        # 0b. Opposite BOS check during active trade (structural reversal guard)
+        opp_events = self._detect_opposite_bos(candle, allow_active=True)
+        if opp_events:
+            setup.state = RetracementState.COMPLETED
+            setup.outcome = "OPPOSITE_BOS"
+            setup.completion_reason = "Trade closed due to opposite market structure BOS break."
+            for layer in setup.layers.values():
+                if layer.get("state") == "FILLED":
+                    layer["state"] = "OPPOSITE_BOS"
+                    layer["exit_price"] = candle.close
+            events.append(RetracementEvent(
+                setup_id=setup.setup_id,
+                event_type=RetracementEventType.SL_HIT,
+                state_before=RetracementState.TRADE_ACTIVE,
+                state_after=RetracementState.COMPLETED,
+                timestamp=candle.timestamp,
+                price=candle.close,
+                metadata={"reason": "OPPOSITE_BOS"},
+            ))
+            events.extend(opp_events)
+            return events
+
         # Freeze the L1 TP (1.000) on the first layer fill if not already locked.
         if setup.layers and "L1" in setup.layers:
             l1 = setup.layers["L1"]
@@ -1063,6 +1167,8 @@ class DualRetracementEngine:
             completed = self.setup
             self.setup = None
             return completed
+        if self._archived_setups and self.setup is None:
+            return self._archived_setups[-1]
         return None
 
 

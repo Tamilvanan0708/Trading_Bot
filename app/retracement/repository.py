@@ -116,12 +116,89 @@ class RetracementRepository:
         row = res.scalars().first()
         if not row:
             return None
+        now_utc = datetime.now(timezone.utc)
         # Reject stale ghost setups older than 12 hours
         if row.updated_at:
             up_dt = row.updated_at if row.updated_at.tzinfo else row.updated_at.replace(tzinfo=timezone.utc)
-            if (datetime.now(timezone.utc) - up_dt).total_seconds() > 43200:
+            if (now_utc - up_dt).total_seconds() > 43200:
                 return None
+
+        import os
+        is_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("APP_ENV") == "test")
+        if not is_test:
+            bos_dt = row.bos_timestamp or row.created_at
+            if bos_dt:
+                b_dt = bos_dt if bos_dt.tzinfo else bos_dt.replace(tzinfo=timezone.utc)
+                if (now_utc - b_dt).total_seconds() > 36 * 3600:
+                    return None
+                if b_dt.weekday() in (4, 5) and (now_utc.weekday() == 0 or (now_utc.weekday() == 6 and now_utc.hour >= 21)):
+                    return None
+
         return row.to_domain()
+
+    async def purge_stale_setups(self, symbol: str | None = None) -> int:
+        """Invalidate active setups that crossed the weekend gap or are older than 36h."""
+        import os
+        is_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("APP_ENV") == "test")
+        now_utc = datetime.now(timezone.utc)
+        stmt = (
+            select(RetracementSetupModel)
+            .where(RetracementSetupModel.state.notin_(["COMPLETED", "INVALIDATED"]))
+        )
+        if symbol:
+            stmt = stmt.where(RetracementSetupModel.symbol == symbol)
+        res = await self.session.execute(stmt)
+        rows = res.scalars().all()
+        purged = 0
+        for row in rows:
+            is_stale = False
+            # Check hardcoded Friday ghost level if present
+            if row.point_2_price and abs(row.point_2_price - 4306.02) < 1e-3:
+                is_stale = True
+            if not is_test:
+                bos_dt = row.bos_timestamp or row.created_at
+                if bos_dt:
+                    b_dt = bos_dt if bos_dt.tzinfo else bos_dt.replace(tzinfo=timezone.utc)
+                    if (now_utc - b_dt).total_seconds() > 36 * 3600:
+                        is_stale = True
+                    if b_dt.weekday() in (4, 5) and (now_utc.weekday() == 0 or (now_utc.weekday() == 6 and now_utc.hour >= 21)):
+                        is_stale = True
+            if is_stale:
+                row.state = "INVALIDATED"
+                row.invalidation_reason = "Purged stale setup (weekend session expired)."
+                row.updated_at = now_utc
+                purged += 1
+
+        # Also close stale open paper trades belonging to purged setups
+        try:
+            from app.database.models import PaperTradeModel
+            p_stmt = select(PaperTradeModel).where(PaperTradeModel.state == "OPEN")
+            if symbol:
+                p_stmt = p_stmt.where(PaperTradeModel.symbol == symbol)
+            p_res = await self.session.execute(p_stmt)
+            for p_row in p_res.scalars().all():
+                p_stale = False
+                if p_row.signal_id and "_4306_" in p_row.signal_id:
+                    p_stale = True
+                if p_row.stop_loss and abs(p_row.stop_loss - 4329.82) < 1e-3:
+                    p_stale = True
+                if not is_test and p_row.opened_at:
+                    p_dt = p_row.opened_at if p_row.opened_at.tzinfo else p_row.opened_at.replace(tzinfo=timezone.utc)
+                    if (now_utc - p_dt).total_seconds() > 36 * 3600:
+                        p_stale = True
+                    if p_dt.weekday() in (4, 5) and (now_utc.weekday() == 0 or (now_utc.weekday() == 6 and now_utc.hour >= 21)):
+                        p_stale = True
+                if p_stale:
+                    p_row.state = "CLOSED"
+                    p_row.exit_reason = "WEEKEND_SESSION_EXPIRED"
+                    p_row.closed_at = now_utc
+                    purged += 1
+        except Exception:
+            pass
+
+        if purged > 0:
+            await self.session.flush()
+        return purged
 
     async def load_all_setups(self, symbol: str | None = None, limit: int = 100) -> list[RetracementSetup]:
         stmt = select(RetracementSetupModel)

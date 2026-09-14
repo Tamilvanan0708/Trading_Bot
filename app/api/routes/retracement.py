@@ -191,20 +191,31 @@ async def _load_real_candles(symbol: str = "XAUUSD"):
 
 
 @router.post("/reset")
-async def reset_all_engines():
+async def reset_all_engines(db: AsyncSession = Depends(get_db_session)):
     """Force-clear ALL in-memory engine state for Fib Retracement and SMC Fib strategies.
+    Also purges stale active setups from the database so they are not revived.
 
     Call this after a code deploy or when the engine is stuck in a stale TRADE_ACTIVE state.
     The engines will re-seed themselves from live candles on the next GET request.
     """
     from app.retracement.multi_tf import get_retracement_multi_tf_service
     from app.retracement.smc_fib_multi_tf import get_smc_fib_multi_tf_service
+    from app.retracement.repository import RetracementRepository
 
     fib_svc = get_retracement_multi_tf_service("XAUUSD")
     smc_svc = get_smc_fib_multi_tf_service("XAUUSD")
     fib_svc.reset()
     smc_svc.reset()
-    return {"status": "OK", "message": "All engine states cleared. Re-seeding on next request."}
+
+    purged = 0
+    try:
+        repo = RetracementRepository(db)
+        purged = await repo.purge_stale_setups("XAUUSD")
+        await db.commit()
+    except Exception as exc:
+        logger.warning("[RETR] Error purging stale setups on reset: %s", exc)
+
+    return {"status": "OK", "message": f"All engine states cleared and {purged} stale setups purged from DB. Re-seeding on next request."}
 
 
 @router.post("/{symbol}/run")

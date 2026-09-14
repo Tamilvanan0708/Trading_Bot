@@ -147,16 +147,25 @@ class RetracementMultiTFMonitor:
             provider = BinanceHistoryProvider(get_settings())
             result = {}
 
+            tf_limits = {
+                "5m": 120,
+                "15m": 100,
+                "30m": 80,
+                "1h": 60,
+                "4h": 50,
+            }
+
             async def _fetch(tf_name):
+                tf_limit = tf_limits.get(tf_name, 100)
                 try:
-                    c = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf_name], limit=200), timeout=6.0)
-                    if c and len(c) >= 50:
+                    c = await asyncio.wait_for(provider.get_ohlcv(self.symbol, TF_MAP[tf_name], limit=tf_limit), timeout=6.0)
+                    if c and len(c) >= 30:
                         return tf_name, c
                 except Exception:
                     pass
                 try:
                     from app.data.research_fallback import load_research_fallback_candles
-                    c_fb = load_research_fallback_candles(self.symbol, TF_MAP[tf_name], limit=200)
+                    c_fb = load_research_fallback_candles(self.symbol, TF_MAP[tf_name], limit=tf_limit)
                     if c_fb:
                         return tf_name, c_fb
                 except Exception:
@@ -280,6 +289,10 @@ class RetracementMultiTFMonitor:
             slot.reset()
         self.live_price = None
         self.data_status = "NO_DATA"
+        self._cached_hist_candles = {}
+        self._last_bootstrap_ts = 0
+        self._last_snap_key = None
+        self._last_advance_results = None
 
     def current_state(self) -> dict[str, RetracementSetup | None]:
         """Snapshot of the current active setup per timeframe (no I/O)."""
