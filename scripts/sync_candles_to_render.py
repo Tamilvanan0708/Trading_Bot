@@ -56,7 +56,7 @@ def get_5m_status():
     with urllib.request.urlopen(url) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
-def main():
+def run_sync():
     print("1. Fetching 120 5M candles from Binance...")
     c5 = fetch_binance("5m", 120)
     print(f"   Fetched {len(c5)} 5M candles. First: {time.ctime(c5[0]['time'])}, Last: {time.ctime(c5[-1]['time'])}")
@@ -73,11 +73,7 @@ def main():
     r15 = ingest("15m", c15)
     print(f"   Render response: {r15}")
 
-    print("\n5. Resetting Retracement Engine to re-seed from fresh candles...")
-    r_reset = reset_retracement()
-    print(f"   Reset response: {r_reset}")
-
-    print("\n6. Checking 5M status on Render...")
+    print("\n5. Checking 5M status on Render...")
     status = get_5m_status()
     tf5 = status.get("timeframes", {}).get("5m", {})
     print(f"   5M State: {tf5.get('state')}")
@@ -86,6 +82,19 @@ def main():
     print(f"   SL: {tf5.get('sl', {}).get('price')}")
     print(f"   TP: {tf5.get('tp', {}).get('dynamic')}")
     print(f"   Live Price: {status.get('live_price')}")
+
+def main():
+    import sys
+    if "--loop" in sys.argv:
+        print("Starting continuous candle sync daemon (every 15s)...")
+        while True:
+            try:
+                run_sync()
+            except Exception as e:
+                print("Sync error:", e)
+            time.sleep(15)
+    else:
+        run_sync()
 
 if __name__ == "__main__":
     main()

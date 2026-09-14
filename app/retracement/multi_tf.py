@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.constants import TimeFrame
@@ -195,15 +195,26 @@ class RetracementMultiTFMonitor:
             elif snap and snap.current_price:
                 self.live_price = snap.current_price
 
+            snap_tfs = tuple(
+                (tf, len(getattr(snap, tf, [])), getattr(snap, tf)[-1].timestamp if getattr(snap, tf, []) else None)
+                for tf in ("m5", "m15", "m30", "h1", "h4")
+            ) if snap else None
             snap_key = (
-                snap.timestamp if snap else None,
-                len(snap.m15) if (snap and hasattr(snap, "m15")) else 0,
+                snap_tfs,
                 live_price if live_price is not None else (snap.current_price if snap else None),
             )
             if snap is not None and getattr(self, "_last_snap_key", None) == snap_key and getattr(self, "_last_advance_results", None) is not None:
                 return self._last_advance_results
 
             raw_results: dict[str, RetracementSetup | None] = {}
+
+            forming_map = {}
+            try:
+                service = get_live_service()
+                if hasattr(service, "_forming_by_tf"):
+                    forming_map = service._forming_by_tf
+            except Exception:
+                pass
 
             # Check if any slot has fewer than 30 candles or has a stale gap
             slots_needing_candles = []
@@ -280,8 +291,9 @@ class RetracementMultiTFMonitor:
                 else:
                     slot.data_status = "NO_DATA"
                     slot.has_live_data = False
-                eff_price = live_price if (live_price is not None and live_price > 0) else (self.live_price or getattr(slot, "live_price", None))
-                raw_results[tf] = self._advance_slot(slot, candles, live_price=eff_price)
+                eff_price = live_price if (live_price is not None and live_price > 0) else None
+                forming_c = forming_map.get(TF_MAP.get(tf))
+                raw_results[tf] = self._advance_slot(slot, candles, live_price=eff_price, forming_candle=forming_c)
 
             # Option 1A: Multi-Slot Parallel Execution — each timeframe maintains its own active slot
             results = raw_results
@@ -291,7 +303,7 @@ class RetracementMultiTFMonitor:
             self._last_advance_results = results
             return results
 
-    def _advance_slot(self, slot: _TFSlot, candles: list, live_price: float | None = None) -> RetracementSetup | None:
+    def _advance_slot(self, slot: _TFSlot, candles: list, live_price: float | None = None, forming_candle: Any = None) -> RetracementSetup | None:
         """Advance ONE timeframe engine with its own newly-closed candles and live price tick."""
         from app.config.execution_settings import get_execution_settings
         slot.engine.engine_mode = getattr(get_execution_settings(), "fib_engine_mode", "classic")
@@ -310,6 +322,27 @@ class RetracementMultiTFMonitor:
                     if archived is not None:
                         completed.append(archived)
                 slot.last_processed_ts = new_candles[-1].timestamp
+
+        # Dynamic target tracking & early entry on forming candle extremes without waiting for candle close
+        if forming_candle is not None and slot.engine.setup and slot.engine.setup.state == RetracementState.TP_DYNAMIC:
+            setup = slot.engine.setup
+            if setup.direction == "SHORT":
+                if hasattr(forming_candle, "low") and forming_candle.low < (setup.current_high_price or float("inf")):
+                    setup.current_high_price = forming_candle.low
+                    setup.current_high_timestamp = getattr(forming_candle, "timestamp", datetime.now(timezone.utc))
+                    slot.engine._apply_bearish_fib(setup, setup.point_2_price, forming_candle.low)
+                if hasattr(forming_candle, "high") and setup.entry_price is not None and forming_candle.high >= setup.entry_price:
+                    slot.engine.evaluate_live_price(forming_candle.high, timestamp=getattr(forming_candle, "timestamp", None))
+            elif setup.direction == "LONG":
+                if hasattr(forming_candle, "high") and forming_candle.high > (setup.current_high_price or 0.0):
+                    setup.current_high_price = forming_candle.high
+                    setup.current_high_timestamp = getattr(forming_candle, "timestamp", datetime.now(timezone.utc))
+                    slot.engine._apply_bullish_fib(setup, setup.point_2_price, forming_candle.high)
+                if hasattr(forming_candle, "low") and setup.entry_price is not None and forming_candle.low <= setup.entry_price:
+                    slot.engine.evaluate_live_price(forming_candle.low, timestamp=getattr(forming_candle, "timestamp", None))
+            archived = slot.engine.archive_completed()
+            if archived is not None:
+                completed.append(archived)
 
         # Instant Tick Touch Execution: Only evaluate real-time live price when an actual live tick is provided
         if live_price is not None and live_price > 0:

@@ -39,22 +39,46 @@ def detect_swings(
 
     for i in range(left_bars, n - right_bars):
         curr = candles[i]
+
+        # 1. High check (support single peak or plateau up to 3 bars ending at i)
         is_swing_high = True
-        is_swing_low = True
-
-        # Check left
-        for l in range(1, left_bars + 1):
-            if candles[i - l].high >= curr.high:
-                is_swing_high = False
-            if candles[i - l].low <= curr.low:
-                is_swing_low = False
-
-        # Check right
         for r in range(1, right_bars + 1):
             if candles[i + r].high >= curr.high:
                 is_swing_high = False
+                break
+
+        if is_swing_high:
+            k = 0
+            while k < 3 and (i - k) >= 0 and candles[i - k].high == curr.high:
+                k += 1
+            plateau_start = i - k + 1
+            if plateau_start < left_bars:
+                is_swing_high = False
+            else:
+                for l in range(1, left_bars + 1):
+                    if candles[plateau_start - l].high >= curr.high:
+                        is_swing_high = False
+                        break
+
+        # 2. Low check (support single trough or plateau up to 3 bars ending at i)
+        is_swing_low = True
+        for r in range(1, right_bars + 1):
             if candles[i + r].low <= curr.low:
                 is_swing_low = False
+                break
+
+        if is_swing_low:
+            k = 0
+            while k < 3 and (i - k) >= 0 and candles[i - k].low == curr.low:
+                k += 1
+            plateau_start = i - k + 1
+            if plateau_start < left_bars:
+                is_swing_low = False
+            else:
+                for l in range(1, left_bars + 1):
+                    if candles[plateau_start - l].low <= curr.low:
+                        is_swing_low = False
+                        break
 
         if is_swing_high:
             swings.append(
