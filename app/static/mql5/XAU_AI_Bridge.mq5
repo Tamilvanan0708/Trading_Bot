@@ -13,8 +13,8 @@
 
 //--- Inputs
 input group "=== Bot Connection Settings ==="
-input string   InpBotURL        = "http://127.0.0.1:8000"; // Python Bot URL (or Render URL)
-input string   InpSymbolOverride= "XAUUSD";                 // Broker Symbol (leave blank to use chart symbol)
+input string   InpBotURL        = "https://trading-bot-pt0d.onrender.com"; // Live Render Bot URL
+input string   InpSymbolOverride= "";                                      // Broker Symbol (leave blank to use chart symbol, e.g. XAUUSD-VIP)
 input int      InpMagicNumber   = 777888;                   // EA Magic Number
 input int      InpPollIntervalMs= 250;                      // Order Poll Interval in Milliseconds
 input int      InpSlippagePts   = 50;                       // Max Slippage in Points
