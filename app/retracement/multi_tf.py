@@ -254,7 +254,8 @@ class RetracementMultiTFMonitor:
                 else:
                     slot.data_status = "NO_DATA"
                     slot.has_live_data = False
-                raw_results[tf] = self._advance_slot(slot, candles, live_price=live_price)
+                eff_price = live_price if (live_price is not None and live_price > 0) else (self.live_price or getattr(slot, "live_price", None))
+                raw_results[tf] = self._advance_slot(slot, candles, live_price=eff_price)
 
             # Option 1A: Multi-Slot Parallel Execution — each timeframe maintains its own active slot
             results = raw_results

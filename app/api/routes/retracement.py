@@ -645,7 +645,7 @@ async def get_fib_retracement_dashboard(
             states[tf] = await RetracementRepository(db).load_latest_active(
                 symbol, strategy="RETRACEMENT_BOS_V1", timeframe=tf)
 
-    # Immediately synchronize any filled layers into paper trades in background
+    # Immediately synchronize any filled layers into paper trades
     try:
         from app.paper_trading.sync import sync_strategy_paper_trades
         has_active = any(
@@ -653,14 +653,10 @@ async def get_fib_retracement_dashboard(
             for st in states.values() if st is not None
         )
         if has_active:
-            async def _bg_sync():
-                from app.database.connection import async_session_factory
-                try:
-                    async with async_session_factory() as _s_db:
-                        await sync_strategy_paper_trades(_s_db, force=True)
-                except Exception as _b_err:
-                    logger.debug("[STRATEGY] bg fib-retracement sync error: %s", _b_err)
-            asyncio.create_task(_bg_sync())
+            try:
+                await asyncio.wait_for(sync_strategy_paper_trades(db, force=True), timeout=3.0)
+            except Exception as _sync_e:
+                logger.debug("[STRATEGY] fib-retracement sync error: %s", _sync_e)
     except Exception as sync_err:  # noqa: BLE001
         logger.debug("[STRATEGY] fib-retracement sync error: %s", sync_err)
 

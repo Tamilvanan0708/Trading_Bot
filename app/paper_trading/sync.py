@@ -66,7 +66,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         # 0b. Catch-up sync: Synchronize closed paper trades with parent signal outcomes
         try:
             closed_pts = (await db.execute(
-                select(PaperTradeModel).where(PaperTradeModel.state == "CLOSED")
+                select(PaperTradeModel).where(PaperTradeModel.state == "CLOSED").order_by(PaperTradeModel.closed_at.desc()).limit(15)
             )).scalars().all()
             dirty = False
             for cpt in closed_pts:
@@ -81,8 +81,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         elif cpt.exit_reason == "SL_HIT":
                             sig.sl_hit = True
                         dirty = True
-            # Sanitize any inverted Stop Losses in signals table
-            all_sigs = (await db.execute(select(SignalModel))).scalars().all()
+            # Sanitize any inverted Stop Losses in signals table for active/pending signals
+            all_sigs = (await db.execute(
+                select(SignalModel).where(SignalModel.outcome.in_(("OPEN", "PENDING", "FILLED", None))).limit(25)
+            )).scalars().all()
             for s_item in all_sigs:
                 if s_item.direction == "LONG" and s_item.stop_loss and s_item.entry_price and s_item.stop_loss >= s_item.entry_price:
                     s_item.stop_loss = round(s_item.entry_price - 8.19, 2)
@@ -176,10 +178,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         continue
                     p2_ts = getattr(f_state, "point_2_timestamp", None)
                     anchor_ts = int(p2_ts.timestamp()) if (p2_ts and hasattr(p2_ts, "timestamp")) else int(f_state.point_2_price)
-                    p1_ts = getattr(f_state, "point_1_timestamp", None) or getattr(f_state, "bos_timestamp", None)
-                    bos_ts = int(p1_ts.timestamp()) if (p1_ts and hasattr(p1_ts, "timestamp")) else int(getattr(f_state, "point_1_price", 0) or 0)
-                    p1_px = int(getattr(f_state, "point_1_price", 0) or 0)
-                    current_anchor = f"{int(f_state.point_2_price)}_{anchor_ts}_{p1_px}_{bos_ts}"
+                    current_anchor = f"{int(f_state.point_2_price)}_{anchor_ts}"
 
                     for l_key, layer in f_state.layers.items():
                         ratio_val = 0.618 if l_key == "L1" else (0.500 if l_key == "L2" else 0.382)
@@ -246,7 +245,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             elif existing_sig and existing_sig.outcome != l_state:
                                 await repo.update_signal_outcome(sig_id, {"outcome": l_state})
                                 await db.commit()
-                        except Exception:
+                        except Exception as sig_err:
+                            logger.warning("[PAPER-SYNC] Failed to save/update signal %s: %s", sig_id, sig_err)
                             await db.rollback()
 
                         if layer.get("state") in ("FILLED", "TP_HIT", "ESCAPE_CLOSED", "SL_HIT"):
@@ -561,8 +561,14 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             *([{"event": "TP_HIT", "price": tp_px, "pnl": realized_pnl, "time": datetime.now(timezone.utc).isoformat()}] if is_fast_tp else []),
                                         ],
                                     )
-                                    db.add(new_trade)
-                                    await db.commit()
+                                    try:
+                                        db.add(new_trade)
+                                        await db.commit()
+                                    except Exception as trade_err:
+                                        await db.rollback()
+                                        logger.error("[PAPER-AUTO] Failed to save paper trade %s: %s", sig_id, trade_err)
+                                        continue
+
                                     if not is_fast_tp:
                                         active_setup_by_tf[tf_key] = current_anchor
                                     logger.info(

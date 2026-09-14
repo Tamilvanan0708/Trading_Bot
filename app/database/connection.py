@@ -129,6 +129,21 @@ async def _migrate_columns() -> None:
             else:
                 logger.debug("Migration notice for %s.%s: %s", table, column, exc)
 
+    # Widen id and signal_id columns to VARCHAR(128) so long signal IDs never truncate
+    if is_postgres:
+        for table, col in [
+            ("signals", "id"),
+            ("paper_trades", "signal_id"),
+            ("ai_validations", "signal_id"),
+            ("notification_logs", "signal_id"),
+        ]:
+            try:
+                async with engine.begin() as conn:
+                    await conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {col} TYPE VARCHAR(128)"))
+                logger.info("Migration: widened %s.%s to VARCHAR(128)", table, col)
+            except Exception as alter_exc:
+                logger.debug("Migration notice for %s.%s widen: %s", table, col, alter_exc)
+
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """Dependency injection helper for database sessions."""

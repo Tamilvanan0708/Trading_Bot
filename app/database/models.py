@@ -32,7 +32,7 @@ def get_utc_now() -> datetime:
 class SignalModel(Base):
     __tablename__ = "signals"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
+    id = Column(String(128), primary_key=True, default=generate_uuid)
     created_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
     symbol = Column(String(20), nullable=False, index=True)
     strategy = Column(String(50), nullable=False)
@@ -76,7 +76,7 @@ class AIValidationModel(Base):
     __tablename__ = "ai_validations"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    signal_id = Column(String(36), ForeignKey("signals.id", ondelete="CASCADE"), nullable=False, unique=True)
+    signal_id = Column(String(128), ForeignKey("signals.id", ondelete="CASCADE"), nullable=False, unique=True)
     created_at = Column(DateTime(timezone=True), default=get_utc_now)
     status = Column(String(20), nullable=False)  # APPROVE, REJECT, CAUTION, UNAVAILABLE
     confidence = Column(Float, nullable=False)
@@ -95,7 +95,7 @@ class PaperTradeModel(Base):
     __tablename__ = "paper_trades"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    signal_id = Column(String(36), ForeignKey("signals.id", ondelete="SET NULL"), nullable=True)
+    signal_id = Column(String(128), ForeignKey("signals.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
     symbol = Column(String(20), nullable=False)
     direction = Column(String(10), nullable=False)
@@ -152,7 +152,7 @@ class NotificationLogModel(Base):
     message_content = Column(Text, nullable=False)
     status = Column(String(20), nullable=False)  # SENT, FAILED, SKIPPED
     error_message = Column(Text, nullable=True)
-    signal_id = Column(String(36), nullable=True, index=True)
+    signal_id = Column(String(128), nullable=True, index=True)
 
 
 class SystemStateModel(Base):
