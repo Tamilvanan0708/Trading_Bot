@@ -8,6 +8,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.core.constants import TimeFrame
 from app.data.csv_provider import CsvMarketDataProvider
@@ -256,6 +257,16 @@ async def ingest_candles(payload: CandleIngestPayload):
             service._closed_15m = sorted(existing.values(), key=lambda c: c.timestamp)[-400:]
             service._history_fallback = False
             service._refresh_status = "SUCCESS"
+
+    try:
+        from app.retracement.multi_tf import get_retracement_multi_tf_service
+        multi_svc = get_retracement_multi_tf_service(payload.symbol)
+        slot = multi_svc.slots.get(tf_str)
+        if slot:
+            slot.last_processed_ts = None
+            slot.engine.reset()
+    except Exception:
+        pass
 
     return {"status": "INGESTED", "count": len(new_candles), "tf": tf_str}
 
