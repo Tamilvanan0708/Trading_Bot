@@ -83,6 +83,7 @@ class DualRetracementEngine:
         self._max_expiry_candles: int = 200
         self._last_traded_bos_high_ts: datetime | None = None
         self._last_traded_bos_low_ts: datetime | None = None
+        self.last_completed: RetracementSetup | None = None
 
     def reset(self) -> None:
         self.setup = None
@@ -93,6 +94,7 @@ class DualRetracementEngine:
         self._candles_since_entry = 0
         self._last_traded_bos_high_ts = None
         self._last_traded_bos_low_ts = None
+        self.last_completed = None
 
     def _anchor_lookback_bars(self) -> int:
         """Timeframe-aware anchor lookback.
@@ -1531,8 +1533,17 @@ class DualRetracementEngine:
         return events
 
     def archive_completed(self) -> RetracementSetup | None:
+        """Archive a completed/invalidated setup and retain it as last_completed.
+
+        Saves the finished setup into last_completed before clearing self.setup
+        so that sync.py can authoritatively close DB paper trades even after the
+        engine has moved on (setup = None) via live-tick resolution.
+        """
         if self.setup is not None and self.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
             completed = self.setup
+            self._archived_setups.append(completed)
+            # Retain the last completed setup so sync.py can read outcome / layer exits
+            self.last_completed: RetracementSetup | None = completed
             self.setup = None
             return completed
         if self._archived_setups and self.setup is None:

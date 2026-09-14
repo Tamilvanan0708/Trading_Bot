@@ -152,6 +152,82 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     )
                 )).scalars().all()
 
+                # ── ORPHAN RECONCILIATION SWEEP ───────────────────────────────────────
+                # If a FIB_RETR paper trade is OPEN in DB but the corresponding engine
+                # slot has no active setup (engine completed via live tick and cleared
+                # self.setup = None before sync.py could see it), force-close the DB
+                # record using the outcome stored in engine.last_completed.
+                # This prevents:
+                #   (a) Ghost "⚡ LIVE TRADE: 5M ACTIVE" banners when bot is scanning.
+                #   (b) Timeframe slot being blocked (active_setup_by_tf lock) so new
+                #       scalp BOS setups can be traded immediately after TP.
+                _fib_slots_map = getattr(fib_svc, "slots", {}) or {}
+                for _ot in existing_open_trades:
+                    if not _ot.signal_id:
+                        continue
+                    _parts = _ot.signal_id.split("_")
+                    if len(_parts) < 3:
+                        continue
+                    _ot_tf = _parts[2].lower()
+                    _slot = _fib_slots_map.get(_ot_tf)
+                    if _slot is None:
+                        continue
+                    _engine = getattr(_slot, "engine", None)
+                    if _engine is None:
+                        continue
+                    # Only sweep if engine has no active setup right now
+                    if getattr(_engine, "setup", None) is not None:
+                        continue
+                    # Determine exit price and reason from last_completed
+                    _lc = getattr(_engine, "last_completed", None)
+                    _outcome = getattr(_lc, "outcome", None) if _lc else None
+                    _locked_tp = getattr(_lc, "locked_tp", None) if _lc else None
+                    _sl_price = getattr(_lc, "sl_price", None) if _lc else None
+                    _direction = _ot.direction or (getattr(_lc, "direction", None) if _lc else None)
+                    _entry_px = float(_ot.actual_entry or _ot.target_entry or 0.0)
+                    if _outcome == "SL_HIT" and _sl_price:
+                        _exit_px = float(_sl_price)
+                        _exit_reason = "SL_HIT"
+                    elif _locked_tp:
+                        _exit_px = float(_locked_tp)
+                        _exit_reason = "TP_HIT"
+                    else:
+                        _exit_px = fib_tf_price.get(_ot_tf) or live_price or _entry_px
+                        _exit_reason = "ENGINE_RESET_ORPHAN"
+                    _pts = round(
+                        (_exit_px - _entry_px) if _direction == "LONG" else (_entry_px - _exit_px), 2
+                    ) if _entry_px else 0.0
+                    _ot.state = "CLOSED"
+                    _ot.exit_price = round(_exit_px, 2)
+                    _ot.exit_reason = _exit_reason
+                    _ot.realized_pnl = round(_pts * (_ot.lot_size or 0.01) * 100.0, 2)
+                    _ot.realized_r = round(_pts / max(0.1, abs(_entry_px - float(_ot.stop_loss or _entry_px + 1))), 2)
+                    _ot.closed_at = datetime.now(timezone.utc)
+                    logger.info(
+                        "[PAPER-ORPHAN] Force-closed orphaned FIB_RETR trade %s (%s) @ %.2f reason=%s pnl=$%.2f",
+                        _ot.signal_id, _ot_tf.upper(), _exit_px, _exit_reason, _ot.realized_pnl,
+                    )
+                    try:
+                        await db.commit()
+                        # Dispatch MT5 bridge close if live execution is enabled
+                        if exec_cfg.mt5_bridge_enabled:
+                            try:
+                                from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                get_mt5_bridge_manager().enqueue_close(
+                                    paper_trade_id=_ot.id,
+                                    symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                    reason=_exit_reason,
+                                    direction=_direction or "LONG",
+                                )
+                            except Exception as _mt5_err:
+                                logger.warning("[MT5-BRIDGE] Orphan close dispatch failed: %s", _mt5_err)
+                    except Exception as _commit_err:
+                        logger.warning("[PAPER-ORPHAN] DB commit failed for orphan close %s: %s", _ot.signal_id, _commit_err)
+                        await db.rollback()
+
+                # Refresh open trades list after orphan sweep (closed records excluded)
+                existing_open_trades = [t for t in existing_open_trades if t.state == "OPEN"]
+
                 # Map active timeframe -> base_anchor of the active setup
                 active_setup_by_tf: dict[str, str] = {}
                 for ot in existing_open_trades:

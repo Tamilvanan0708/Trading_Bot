@@ -4238,7 +4238,10 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     return TFS.map(tf => {
       const isSel = tf === curSelTf;
       const tfCard = d.timeframes?.[tf] || {};
-      const hasPaperTrade = tfCard.paper_trade && tfCard.paper_trade.is_open;
+      // Only show ACTIVE badge when BOTH the paper trade is open AND the engine
+      // has a genuinely active setup state (not NO_SETUP / WAITING_FOR_BOS).
+      const engineIsActive = tfCard.state && tfCard.state !== "NO_SETUP" && tfCard.state !== "WAITING_FOR_BOS" && tfCard.state !== "SCANNING";
+      const hasPaperTrade = tfCard.paper_trade && tfCard.paper_trade.is_open && engineIsActive;
       const isEntryTouched = !hasPaperTrade && tfCard.is_trade_active;
       const isEntryReady = tfCard.is_entry_ready;
       const btnClass = isSel ? "btn btn-primary" : "btn btn-secondary";
@@ -4357,7 +4360,15 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   }
 
   function renderLockMsg(d) {
-    const paperTradeTfs = d.active_paper_trade_tfs || [];
+    // Only show ACTIVE banner for timeframes where BOTH:
+    //   (a) a paper trade is open in DB, AND
+    //   (b) the engine has an active non-NO_SETUP state.
+    // This prevents ghost "⚡ LIVE TRADE: 5M ACTIVE" when the engine has already
+    // completed and is scanning for the next BOS.
+    const paperTradeTfs = (d.active_paper_trade_tfs || []).filter(tf => {
+      const tfData = (d.timeframes || {})[tf] || {};
+      return tfData.state && tfData.state !== "NO_SETUP" && tfData.state !== "WAITING_FOR_BOS" && tfData.state !== "SCANNING";
+    });
     if (paperTradeTfs.length > 0) {
       const names = paperTradeTfs.map(tf => TF_LABELS[tf] || tf.toUpperCase()).join(" · ");
       return `<span class="badge badge-green" style="font-size:12px;display:inline-flex;align-items:center;gap:5px"><span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>⚡ LIVE TRADE: ${names} ACTIVE</span>`;
@@ -4374,7 +4385,9 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   function renderSmcStatus(tfData, selectedTf) {
     const structBreak = tfData.structure?.break_type || (tfData.bos?.price ? (tfData.direction === "SHORT" ? "BEARISH BOS" : "BULLISH BOS") : "NONE");
     const breakLevel = tfData.structure?.break_price ? `$${Number(tfData.structure.break_price).toFixed(2)}` : (tfData.bos?.price ? `$${Number(tfData.bos.price).toFixed(2)}` : "—");
-    const hasPaperTrade = tfData.paper_trade && tfData.paper_trade.is_open;
+    // Only show ACTIVE execution mode when the engine is genuinely in an active state.
+    const engineIsActive = tfData.state && tfData.state !== "NO_SETUP" && tfData.state !== "WAITING_FOR_BOS" && tfData.state !== "SCANNING";
+    const hasPaperTrade = tfData.paper_trade && tfData.paper_trade.is_open && engineIsActive;
     const isEntryTouched = !hasPaperTrade && tfData.is_trade_active;
     const execMode = hasPaperTrade
       ? `<span class="badge badge-green">🟢 ACTIVE (${(tfData.paper_trade && tfData.paper_trade.lot_size) || 0.01} Lot)</span>`
