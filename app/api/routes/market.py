@@ -198,6 +198,68 @@ async def force_refresh_market_data():
     return await service.request_emergency_refresh()
 
 
+class CandleIngestItem(BaseModel):
+    time: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0.0
+
+
+class CandleIngestPayload(BaseModel):
+    symbol: str = "XAUUSD"
+    timeframe: str = "5m"
+    candles: list[CandleIngestItem]
+
+
+@router.post("/candles/ingest")
+async def ingest_candles(payload: CandleIngestPayload):
+    """Allow client/bridge to inject historical closed candles directly into memory.
+    Bypasses cloud IP bans on Binance REST API completely.
+    """
+    from datetime import datetime, timezone
+    from app.data.models import Candle
+
+    tf_str = payload.timeframe.lower()
+    service = get_live_service()
+
+    new_candles = []
+    for c in payload.candles:
+        ts = datetime.fromtimestamp(c.time, tz=timezone.utc)
+        new_candles.append(Candle(
+            symbol=payload.symbol,
+            timeframe=payload.timeframe,
+            timestamp=ts,
+            open=c.open,
+            high=c.high,
+            low=c.low,
+            close=c.close,
+            volume=c.volume,
+        ))
+
+    if not new_candles:
+        return {"status": "EMPTY"}
+
+    new_candles.sort(key=lambda x: x.timestamp)
+
+    async with service._lock:
+        if tf_str in ("5m", "m5"):
+            existing = {c.timestamp: c for c in service._closed_5m}
+            for c in new_candles:
+                existing[c.timestamp] = c
+            service._closed_5m = sorted(existing.values(), key=lambda c: c.timestamp)[-400:]
+        elif tf_str in ("15m", "m15"):
+            existing = {c.timestamp: c for c in service._closed_15m}
+            for c in new_candles:
+                existing[c.timestamp] = c
+            service._closed_15m = sorted(existing.values(), key=lambda c: c.timestamp)[-400:]
+            service._history_fallback = False
+            service._refresh_status = "SUCCESS"
+
+    return {"status": "INGESTED", "count": len(new_candles), "tf": tf_str}
+
+
 @router.get("/live/health")
 async def get_live_health():
     """Returns feed health status for all registered live feeds + AI provider state."""

@@ -21,8 +21,9 @@ from app.data.ingestion import validate_candles
 from app.data.models import Candle, MultiTimeframeSnapshot
 from app.data.provider import MarketDataProvider
 
-BINANCE_REST_BASE_URL = "https://fapi.binance.com"
+BINANCE_REST_BASE_URL = "https://www.binance.com"
 BINANCE_REST_BASE_URLS = [
+    "https://www.binance.com",
     "https://fapi.binance.com",
     "https://fapi1.binance.com",
     "https://fapi2.binance.com",
@@ -107,14 +108,11 @@ class BinanceHistoryProvider(MarketDataProvider):
                         except TypeError:
                             res = await client.get(f"{url}/fapi/v1/klines", params=params)
 
-                        if res.status_code == 429:
-                            retry_after = res.headers.get("Retry-After")
-                            delay = float(retry_after) if retry_after and retry_after.isdigit() else 3.5
+                        if res.status_code in (418, 429):
                             logger.warning(
-                                "Binance HTTP 429 on %s; backing off %.1fs (attempt %d/%d)",
-                                url, delay, attempt + 1, max_retries + 1,
+                                "Binance HTTP %d (rate limit/IP ban) on %s; trying next mirror (attempt %d/%d)",
+                                res.status_code, url, attempt + 1, max_retries + 1,
                             )
-                            await asyncio.sleep(delay)
                             continue
 
                         if res.status_code != 200:
