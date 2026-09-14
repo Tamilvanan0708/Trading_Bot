@@ -594,7 +594,7 @@ async def get_fib_retracement_dashboard(
             (getattr(st, "entry_touched", False) and not getattr(st, "outcome", None))
             for st in states.values() if st is not None
         )
-        await asyncio.wait_for(sync_strategy_paper_trades(db, force=has_active), timeout=5.0)
+        await asyncio.wait_for(sync_strategy_paper_trades(db, force=has_active), timeout=15.0)
     except Exception as sync_err:  # noqa: BLE001
         logger.debug("[STRATEGY] fib-retracement sync error: %s", sync_err)
 

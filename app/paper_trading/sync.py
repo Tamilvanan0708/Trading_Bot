@@ -495,9 +495,13 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         # Pass repo=None to bypass daily trade/loss/consecutive loss limits (Rule 7 removed)
                                         admission = await _gate.evaluate(val_sig, repo=None, data_quality=_dq)
                                         # Fib retracement tranche levels (0.618 -> 1.0 = 1R)
-                                        # intentionally price below the confluence MIN_RISK_REWARD
-                                        # gate; geometry and data quality are enforced.
-                                        blocking = [r for r in admission.reasons if r.startswith("FAIL") and "R:R" not in r]
+                                        # intentionally price below the confluence MIN_RISK_REWARD gate.
+                                        # Geometry is strictly enforced; transient history freshness lag
+                                        # (e.g. market open, container cold-start) must not block valid closed-candle setups.
+                                        blocking = [
+                                            r for r in admission.reasons
+                                            if r.startswith("FAIL") and "R:R" not in r and "Data Quality Gate" not in r
+                                        ]
                                         if blocking:
                                             logger.warning(
                                                 "[ADMISSION] Fib Retracement %s blocked: %s",
@@ -620,7 +624,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 f"⚡ *Multi-Slot:* {tf_key.upper()} Active (15M, 30M, 1H scanning in parallel)\n"
                                                 f"━━━━━━━━━━━━━━━━━━━━"
                                             )
-                                            await tg.send_raw_alert(msg)
+                                            asyncio.create_task(tg.send_raw_alert(msg))
                                         except Exception as tg_err:  # noqa: BLE001
                                             logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                                 finally:

@@ -406,3 +406,73 @@ async def test_fast_tp_layer_captured_and_records_profit(in_memory_db: AsyncSess
     assert t.exit_price == 4402.0
     assert t.actual_entry == 4407.0
     assert t.realized_pnl is not None and t.realized_pnl > 0.0, f"Expected positive realized PnL, got {t.realized_pnl}"
+
+
+@pytest.mark.asyncio
+async def test_paper_trading_degraded_data_quality_does_not_block_fib_retracement(in_memory_db: AsyncSession):
+    """Verifies that transient data quality degradation (e.g. startup / weekend gap) does NOT block valid Fib Retracement paper trades."""
+    from app.data.live.service import DataQualityStatus
+    from app.paper_trading import sync as pt_sync
+    from app.retracement.models import RetracementSetup, RetracementState
+
+    p2_time = datetime(2026, 9, 14, 2, 0, tzinfo=timezone.utc)
+    setup = RetracementSetup(
+        setup_id="test_dq_unblock_1h",
+        strategy="RETRACEMENT_BOS_V1",
+        symbol="XAUUSD",
+        timeframe="1h",
+        state=RetracementState.TRADE_ACTIVE,
+        direction="LONG",
+        point_1_price=4365.0,
+        point_2_price=4306.0,
+        point_2_timestamp=p2_time,
+        sl_price=4329.82,
+        fib_0_236=4329.82,
+        fib_0_618=4368.35,
+        fib_0_500=4356.45,
+        fib_0_382=4344.55,
+        fib_1_000=4406.88,
+        layers={
+            "L1": {"state": "FILLED", "entry_price": 4368.35, "tp": 4406.88, "sl": 4329.82},
+        },
+    )
+
+    class FakeMonitor:
+        timeframes = ["1h"]
+        slots = {"1h": type("Slot", (), {"live_price": 4350.0})()}
+        live_price = 4350.0
+        async def advance(self, db):
+            return {"1h": setup}
+
+    class FakeLiveService:
+        _running = True
+        _startup_task = None
+        async def data_quality(self):
+            return DataQualityStatus(
+                provider="binance",
+                degraded=True,
+                degradation_reason="Historical data stale (weekend gap)",
+            )
+        async def get_latest_price(self, sym):
+            return 4350.0
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: FakeMonitor())
+    monkeypatch.setattr(pt_sync, "get_live_service", lambda: FakeLiveService())
+
+    await sync_strategy_paper_trades(in_memory_db, force=True)
+    monkeypatch.undo()
+
+    # The trade MUST be open in paper trades despite degraded data quality!
+    open_trades = (await in_memory_db.execute(
+        select(PaperTradeModel).where(
+            PaperTradeModel.signal_id.like("FIB_RETR_1H_L1_%"),
+            PaperTradeModel.state == "OPEN",
+        )
+    )).scalars().all()
+    assert len(open_trades) == 1, "Fib Retracement trade must successfully open even when Data Quality is degraded!"
+    trade = open_trades[0]
+    assert trade.actual_entry == 4368.35
+    assert trade.stop_loss == 4329.82
+    assert trade.take_profit_1 == 4406.88
+

@@ -4142,14 +4142,18 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const ptsCls = pts >= 0 ? "up" : "down";
     const ptsSign = pts >= 0 ? "+" : "";
     const hasPaperTrade = d.paper_trade && d.paper_trade.is_open;
-    const isTradeActive = hasPaperTrade || d.is_trade_active;
-    const statusBadge = isTradeActive
+    const isEntryTouched = !hasPaperTrade && d.is_trade_active;
+    const statusBadge = hasPaperTrade
       ? `<span class="badge badge-green">🟢 ACTIVE (${(d.paper_trade && d.paper_trade.lot_size) || 0.01} Lot)</span>`
-      : (isSetup ? '<span class="badge badge-blue">WAITING FOR ENTRY</span>' : '<span class="badge badge-muted">SCANNING</span>');
+      : (isEntryTouched
+          ? '<span class="badge badge-amber">⚡ ENTRY TOUCHED (PENDING ORDER)</span>'
+          : (isSetup ? '<span class="badge badge-blue">WAITING FOR ENTRY</span>' : '<span class="badge badge-muted">SCANNING</span>'));
 
-    const stateBadge = isTradeActive
+    const stateBadge = hasPaperTrade
       ? '<span class="badge badge-green">TRADE_ACTIVE (LIVE)</span>'
-      : `<span class="badge badge-blue">${state}</span>`;
+      : (isEntryTouched
+          ? '<span class="badge badge-amber">ENTRY_TOUCHED (PENDING ORDER)</span>'
+          : `<span class="badge badge-blue">${state}</span>`);
 
     return `<div class="card" style="border-color:rgba(52,211,153,0.35);margin-bottom:var(--sp-3)">
       <div class="card-head">
@@ -4233,17 +4237,19 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   function renderTfButtons(d, curSelTf) {
     return TFS.map(tf => {
       const isSel = tf === curSelTf;
-      const tfCard = d.timeframes?.[tf] || {};
       const hasPaperTrade = tfCard.paper_trade && tfCard.paper_trade.is_open;
-      const isTradeActive = tfCard.is_trade_active || hasPaperTrade;
+      const isEntryTouched = !hasPaperTrade && tfCard.is_trade_active;
       const isEntryReady = tfCard.is_entry_ready;
       const btnClass = isSel ? "btn btn-primary" : "btn btn-secondary";
 
       let borderStyle = "";
       let activeBadge = "";
-      if (isTradeActive) {
+      if (hasPaperTrade) {
         borderStyle = "border:1px solid #00e676;box-shadow:0 0 8px rgba(0,230,118,0.3);";
         activeBadge = `<span style="display:inline-flex;align-items:center;gap:4px;color:#00e676;font-size:10px;font-weight:800;margin-left:5px"><span class="dot dot-green" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#00e676;box-shadow:0 0 6px #00e676;animation:pulse 1.5s infinite"></span>ACTIVE</span>`;
+      } else if (isEntryTouched) {
+        borderStyle = "border:1px solid #f59e0b;box-shadow:0 0 6px rgba(245,158,11,0.25);";
+        activeBadge = `<span style="display:inline-flex;align-items:center;gap:4px;color:#f59e0b;font-size:10px;font-weight:800;margin-left:5px"><span class="dot dot-amber" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f59e0b"></span>TOUCHED</span>`;
       } else if (isEntryReady) {
         borderStyle = "border:1px solid #38bdf8;box-shadow:0 0 6px rgba(56,189,248,0.2);";
         activeBadge = `<span style="display:inline-flex;align-items:center;gap:4px;color:#38bdf8;font-size:10px;font-weight:800;margin-left:5px"><span class="dot dot-blue" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#38bdf8"></span>WAITING</span>`;
@@ -4368,10 +4374,12 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const structBreak = tfData.structure?.break_type || (tfData.bos?.price ? (tfData.direction === "SHORT" ? "BEARISH BOS" : "BULLISH BOS") : "NONE");
     const breakLevel = tfData.structure?.break_price ? `$${Number(tfData.structure.break_price).toFixed(2)}` : (tfData.bos?.price ? `$${Number(tfData.bos.price).toFixed(2)}` : "—");
     const hasPaperTrade = tfData.paper_trade && tfData.paper_trade.is_open;
-    const isTradeActive = hasPaperTrade || tfData.is_trade_active;
-    const execMode = isTradeActive
+    const isEntryTouched = !hasPaperTrade && tfData.is_trade_active;
+    const execMode = hasPaperTrade
       ? `<span class="badge badge-green">🟢 ACTIVE (${(tfData.paper_trade && tfData.paper_trade.lot_size) || 0.01} Lot)</span>`
-      : '<span class="badge badge-blue">MULTI-SLOT SCANNING</span>';
+      : (isEntryTouched
+          ? '<span class="badge badge-amber">⚡ ENTRY TOUCHED (PENDING ORDER)</span>'
+          : '<span class="badge badge-blue">MULTI-SLOT SCANNING</span>');
     return `<div class="card-head"><span>STRUCTURE & SMC STATUS</span><span class="muted">${TF_LABELS[selectedTf] || selectedTf.toUpperCase()}</span></div>
     <div class="card-body">
       ${UI.kv([
