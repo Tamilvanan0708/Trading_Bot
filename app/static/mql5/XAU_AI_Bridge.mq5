@@ -171,7 +171,7 @@ void ProcessAllOrders(string response)
    for(int i = arr_start + 1; i < len; i++)
    {
       ushort c = StringGetCharacter(response, i);
-      string ch = CharToString(c);
+      string ch = CharToString((uchar)c);
       
       if(escaped)
       {
@@ -527,7 +527,7 @@ void ExecuteIncomingOrder(string json)
       sent = OrderSend(request, trade_result);
       rc = trade_result.retcode;
    }
-   else if(rc == TRADE_RETCODE_TIMEOUT || rc == TRADE_RETCODE_ERROR || rc == TRADE_RETCODE_RECONNECT || (!sent && rc == 0))
+   else if(rc == TRADE_RETCODE_TIMEOUT || rc == TRADE_RETCODE_ERROR || rc == TRADE_RETCODE_CONNECTION || (!sent && rc == 0))
    {
       // Execution status unknown — NEVER re-send. Check whether the position actually filled.
       Sleep(500);
