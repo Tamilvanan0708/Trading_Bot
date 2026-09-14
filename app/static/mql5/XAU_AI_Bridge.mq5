@@ -446,18 +446,18 @@ void ExecuteIncomingOrder(string json)
    // 2. Protect against [Invalid stops]: Ensure SL and TP are on valid sides of market price
    if(is_buy)
    {
-      if(sl >= price || sl <= 0.0) sl = 0.0;
+      if(sl >= price || sl <= 0.0) sl = (sl_pts > 0.0) ? (price - sl_pts) : (price - 3.0);
       if(tp <= price || tp <= 0.0)
       {
-         tp = (tp_pts > 0.0) ? (price + tp_pts) : (price + 2.0);
+         tp = (tp_pts > 0.0) ? (price + tp_pts) : (price + 3.0);
       }
    }
    else
    {
-      if(sl <= price || sl <= 0.0) sl = 0.0;
+      if(sl <= price || sl <= 0.0) sl = (sl_pts > 0.0) ? (price + sl_pts) : (price + 3.0);
       if(tp >= price || tp <= 0.0)
       {
-         tp = (tp_pts > 0.0) ? (price - tp_pts) : (price - 2.0);
+         tp = (tp_pts > 0.0) ? (price - tp_pts) : (price - 3.0);
       }
    }
    

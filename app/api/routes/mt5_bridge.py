@@ -96,6 +96,8 @@ async def trigger_test_order(payload: TestTradePayload):
         "entry_price": 0.0,
         "stop_loss": 0.0,
         "take_profit_1": 0.0,
+        "sl_pts": 3.0,
+        "tp_pts": 5.0,
         "lot_size": payload.lots,
         "is_test": True,
     }
