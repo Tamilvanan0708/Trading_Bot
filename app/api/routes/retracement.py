@@ -47,6 +47,49 @@ def _serialize_setup(setup, live_price=None, data_status=None, symbol="XAUUSD",
             },
         }
 
+    # Real-Time Live Tick Defensive Check: If live price breached SL or TP, resolve immediately
+    if setup is not None and live_price is not None and live_price > 0:
+        if setup.state == RetracementState.TRADE_ACTIVE or setup.entry_touched:
+            if setup.direction == "LONG":
+                if setup.sl_price is not None and live_price <= setup.sl_price:
+                    setup.state = RetracementState.COMPLETED
+                    setup.outcome = "SL_HIT"
+                    setup.completion_reason = f"Stop Loss hit at {setup.sl_price:.2f} (live touch: {live_price:.2f})"
+                elif setup.locked_tp is not None and live_price >= setup.locked_tp:
+                    setup.state = RetracementState.COMPLETED
+                    setup.outcome = "TP_HIT"
+                    setup.completion_reason = f"Take Profit hit at {setup.locked_tp:.2f} (live touch: {live_price:.2f})"
+            elif setup.direction == "SHORT":
+                if setup.sl_price is not None and live_price >= setup.sl_price:
+                    setup.state = RetracementState.COMPLETED
+                    setup.outcome = "SL_HIT"
+                    setup.completion_reason = f"Stop Loss hit at {setup.sl_price:.2f} (live touch: {live_price:.2f})"
+                elif setup.locked_tp is not None and live_price <= setup.locked_tp:
+                    setup.state = RetracementState.COMPLETED
+                    setup.outcome = "TP_HIT"
+                    setup.completion_reason = f"Take Profit hit at {setup.locked_tp:.2f} (live touch: {live_price:.2f})"
+        elif setup.state == RetracementState.TP_DYNAMIC and not setup.entry_touched:
+            if setup.direction == "LONG":
+                if setup.sl_price is not None and live_price <= setup.sl_price:
+                    setup.state = RetracementState.INVALIDATED
+                    setup.invalidation_reason = f"Price touched Stop Loss ({setup.sl_price:.2f}) before entry."
+                elif setup.entry_price is not None and live_price <= setup.entry_price:
+                    setup.entry_touched = True
+                    setup.state = RetracementState.TRADE_ACTIVE
+                    if not setup.tp_locked and setup.fib_1_000 is not None:
+                        setup.locked_tp = setup.fib_1_000
+                        setup.tp_locked = True
+            elif setup.direction == "SHORT":
+                if setup.sl_price is not None and live_price >= setup.sl_price:
+                    setup.state = RetracementState.INVALIDATED
+                    setup.invalidation_reason = f"Price touched Stop Loss ({setup.sl_price:.2f}) before entry."
+                elif setup.entry_price is not None and live_price >= setup.entry_price:
+                    setup.entry_touched = True
+                    setup.state = RetracementState.TRADE_ACTIVE
+                    if not setup.tp_locked and setup.fib_1_000 is not None:
+                        setup.locked_tp = setup.fib_1_000
+                        setup.tp_locked = True
+
     ai_status = getattr(setup, "ai_status", None)
     if not ai_status:
         if setup.state in (RetracementState.NO_SETUP, RetracementState.INVALIDATED):
@@ -137,7 +180,7 @@ def _serialize_setup(setup, live_price=None, data_status=None, symbol="XAUUSD",
                 if setup.direction == "LONG"
                 else (float(setup.entry_price) - float(live_price)),
                 2,
-            ) if (live_price is not None and setup.entry_price and setup.entry_touched) else 0.0,
+            ) if (live_price is not None and setup.entry_price and setup.entry_touched and not getattr(setup, "outcome", None)) else 0.0,
         },
         "invalidation_reason": setup.invalidation_reason or None,
         "completion_reason": setup.completion_reason or None,
@@ -504,7 +547,11 @@ def _build_strategy_dashboard(symbol: str, live_price, data_status, states: dict
             and s.get("state") not in ("NO_SETUP", "INVALIDATED", "COMPLETED")
         )
         is_entry_touched = setup is not None and getattr(setup, "entry_touched", False)
-        is_trade_active = is_entry_touched and not getattr(setup, "outcome", None)
+        is_trade_active = (
+            is_entry_touched
+            and not getattr(setup, "outcome", None)
+            and s.get("state") not in ("NO_SETUP", "INVALIDATED", "COMPLETED")
+        )
         s["is_entry_ready"] = is_entry_ready
         s["is_trade_active"] = is_trade_active
         s["has_live_data"] = slot.has_live_data if slot else False
@@ -587,7 +634,7 @@ async def get_fib_retracement_dashboard(
 
     multi_svc = get_retracement_multi_tf_service(symbol)
     try:
-        states = await asyncio.wait_for(multi_svc.advance(db), timeout=10.0)
+        states = await asyncio.wait_for(multi_svc.advance(db, live_price=live_price), timeout=10.0)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[STRATEGY] fib-retracement advance timeout/failed: %s", exc)
         states = multi_svc.current_state()

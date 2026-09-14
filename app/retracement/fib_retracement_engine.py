@@ -1162,6 +1162,374 @@ class DualRetracementEngine:
 
         return events
 
+    def evaluate_live_price(self, live_price: float, timestamp: datetime | None = None) -> list[RetracementEvent]:
+        """Instant Real-Time Tick Touch Execution for Entry, TP, and SL.
+        
+        Evaluates the real-time live price / forming tick against the active setup without
+        waiting for the current candle to close:
+        - If in TP_DYNAMIC:
+          * If price touches or crosses 0.618 Entry: immediately triggers ENTRY_TOUCHED, fills L1, freezes TP, and sets state to TRADE_ACTIVE.
+          * If price breaches Stop Loss before entry: immediately invalidates the setup.
+          * If price makes a new high/low: expands dynamic target.
+        - If in TRADE_ACTIVE:
+          * If price touches or breaches Stop Loss: immediately completes trade as SL_HIT, closing open layers.
+          * If price touches or reaches Take Profit: immediately completes trade as TP_HIT, closing open layers.
+          * Checks deeper layers (L2 @ 0.500, L3 @ 0.382) and layer TPs with Smart Shield breakeven.
+        """
+        setup = self.setup
+        if setup is None or setup.state in (RetracementState.NO_SETUP, RetracementState.COMPLETED, RetracementState.INVALIDATED):
+            return []
+
+        ts = timestamp or (self._candles[-1].timestamp if self._candles else datetime.now(timezone.utc))
+        events: list[RetracementEvent] = []
+
+        # ------------------------------------------------------------------
+        # 1. TP_DYNAMIC: Setup waiting for entry touch
+        # ------------------------------------------------------------------
+        if setup.state == RetracementState.TP_DYNAMIC:
+            if setup.direction == "LONG":
+                # Pre-entry SL breach: if price drops below SL (0.236) before entry, invalidate
+                if setup.sl_price is not None and live_price <= setup.sl_price:
+                    setup.state = RetracementState.INVALIDATED
+                    setup.invalidation_reason = f"Price touched Stop Loss ({setup.sl_price:.2f}) before entry."
+                    events.append(RetracementEvent(
+                        setup_id=setup.setup_id,
+                        event_type=RetracementEventType.INVALIDATED,
+                        state_before=RetracementState.TP_DYNAMIC,
+                        state_after=RetracementState.INVALIDATED,
+                        timestamp=ts,
+                        price=live_price,
+                        metadata={"reason": "PRE_ENTRY_SL_TOUCH", "live_tick": True},
+                    ))
+                    return events
+
+                # Dynamic Target Expansion if price makes a new high
+                if live_price > (setup.current_high_price or 0.0):
+                    setup.current_high_price = live_price
+                    setup.current_high_timestamp = ts
+                    self._apply_bullish_fib(setup, setup.point_2_price, live_price)
+
+                # Instant Entry Touch: if price touches or dips below 0.618
+                if setup.entry_price is not None and live_price <= setup.entry_price:
+                    if "L1" not in setup.layers:
+                        setup.layers["L1"] = {
+                            "layer": "L1",
+                            "entry_ratio": 0.618,
+                            "entry_price": round(setup.entry_price, 2),
+                            "tp": round(setup.fib_1_000, 2) if setup.fib_1_000 else round(setup.dynamic_tp or setup.entry_price, 2),
+                            "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "lots": 0.01,
+                            "state": "FILLED",
+                            "filled_at": ts.isoformat(),
+                        }
+                    setup.entry_touched = True
+                    setup.entry_timestamp = ts
+                    if not setup.tp_locked and setup.fib_1_000 is not None:
+                        setup.tp_before_freeze = setup.dynamic_tp
+                        setup.locked_tp = setup.fib_1_000
+                        setup.tp_locked = True
+                    setup.state = RetracementState.TRADE_ACTIVE
+                    events.append(RetracementEvent(
+                        setup_id=setup.setup_id,
+                        event_type=RetracementEventType.ENTRY_TOUCHED,
+                        state_before=RetracementState.TP_DYNAMIC,
+                        state_after=RetracementState.TRADE_ACTIVE,
+                        timestamp=ts,
+                        price=setup.entry_price,
+                        metadata={"layer": "L1", "lots": 0.01, "live_tick": True},
+                    ))
+
+                    # Check if the same tick also filled deeper layers L2 / L3
+                    if setup.fib_0_500 is not None and live_price <= setup.fib_0_500 and "L2" not in setup.layers:
+                        setup.layers["L2"] = {
+                            "layer": "L2",
+                            "entry_ratio": 0.500,
+                            "entry_price": round(setup.fib_0_500, 2),
+                            "tp": round(setup.fib_0_618, 2),
+                            "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "lots": 0.01,
+                            "state": "FILLED",
+                            "filled_at": ts.isoformat(),
+                        }
+                    if setup.fib_0_382 is not None and live_price <= setup.fib_0_382 and "L3" not in setup.layers:
+                        setup.layers["L3"] = {
+                            "layer": "L3",
+                            "entry_ratio": 0.382,
+                            "entry_price": round(setup.fib_0_382, 2),
+                            "tp": round(setup.fib_0_618, 2),
+                            "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "lots": 0.01,
+                            "state": "FILLED",
+                            "filled_at": ts.isoformat(),
+                        }
+
+                    # Same-tick SL check: if the move also breached SL (0.236)
+                    if setup.sl_price is not None and live_price <= setup.sl_price:
+                        setup.state = RetracementState.COMPLETED
+                        setup.outcome = "SL_HIT"
+                        setup.completion_reason = f"Stop Loss hit at {setup.sl_price:.2f} (live touch: {live_price:.2f})"
+                        for layer in setup.layers.values():
+                            if layer.get("state") == "FILLED":
+                                layer["state"] = "SL_HIT"
+                                layer["exit_price"] = setup.sl_price
+                        events.append(RetracementEvent(
+                            setup_id=setup.setup_id,
+                            event_type=RetracementEventType.SL_HIT,
+                            state_before=RetracementState.TRADE_ACTIVE,
+                            state_after=RetracementState.COMPLETED,
+                            timestamp=ts,
+                            price=setup.sl_price,
+                            metadata={"live_tick": True},
+                        ))
+                    return events
+
+            else:  # SHORT
+                # Pre-entry SL breach: if price rises above SL (0.236) before entry, invalidate
+                if setup.sl_price is not None and live_price >= setup.sl_price:
+                    setup.state = RetracementState.INVALIDATED
+                    setup.invalidation_reason = f"Price touched Stop Loss ({setup.sl_price:.2f}) before entry."
+                    events.append(RetracementEvent(
+                        setup_id=setup.setup_id,
+                        event_type=RetracementEventType.INVALIDATED,
+                        state_before=RetracementState.TP_DYNAMIC,
+                        state_after=RetracementState.INVALIDATED,
+                        timestamp=ts,
+                        price=live_price,
+                        metadata={"reason": "PRE_ENTRY_SL_TOUCH", "live_tick": True},
+                    ))
+                    return events
+
+                # Dynamic Target Expansion if price makes a new low
+                if live_price < (setup.current_high_price or float("inf")):
+                    setup.current_high_price = live_price
+                    setup.current_high_timestamp = ts
+                    self._apply_bearish_fib(setup, setup.point_2_price, live_price)
+
+                # Instant Entry Touch: if price touches or rises above 0.618
+                if setup.entry_price is not None and live_price >= setup.entry_price:
+                    if "L1" not in setup.layers:
+                        setup.layers["L1"] = {
+                            "layer": "L1",
+                            "entry_ratio": 0.618,
+                            "entry_price": round(setup.entry_price, 2),
+                            "tp": round(setup.fib_1_000, 2) if setup.fib_1_000 else round(setup.dynamic_tp or setup.entry_price, 2),
+                            "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "lots": 0.01,
+                            "state": "FILLED",
+                            "filled_at": ts.isoformat(),
+                        }
+                    setup.entry_touched = True
+                    setup.entry_timestamp = ts
+                    if not setup.tp_locked and setup.fib_1_000 is not None:
+                        setup.tp_before_freeze = setup.dynamic_tp
+                        setup.locked_tp = setup.fib_1_000
+                        setup.tp_locked = True
+                    setup.state = RetracementState.TRADE_ACTIVE
+                    events.append(RetracementEvent(
+                        setup_id=setup.setup_id,
+                        event_type=RetracementEventType.ENTRY_TOUCHED,
+                        state_before=RetracementState.TP_DYNAMIC,
+                        state_after=RetracementState.TRADE_ACTIVE,
+                        timestamp=ts,
+                        price=setup.entry_price,
+                        metadata={"layer": "L1", "lots": 0.01, "live_tick": True},
+                    ))
+
+                    # Check deeper layers L2 / L3
+                    if setup.fib_0_500 is not None and live_price >= setup.fib_0_500 and "L2" not in setup.layers:
+                        setup.layers["L2"] = {
+                            "layer": "L2",
+                            "entry_ratio": 0.500,
+                            "entry_price": round(setup.fib_0_500, 2),
+                            "tp": round(setup.fib_0_618, 2),
+                            "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "lots": 0.01,
+                            "state": "FILLED",
+                            "filled_at": ts.isoformat(),
+                        }
+                    if setup.fib_0_382 is not None and live_price >= setup.fib_0_382 and "L3" not in setup.layers:
+                        setup.layers["L3"] = {
+                            "layer": "L3",
+                            "entry_ratio": 0.382,
+                            "entry_price": round(setup.fib_0_382, 2),
+                            "tp": round(setup.fib_0_618, 2),
+                            "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "lots": 0.01,
+                            "state": "FILLED",
+                            "filled_at": ts.isoformat(),
+                        }
+
+                    # Same-tick SL check: if the move also breached SL (0.236)
+                    if setup.sl_price is not None and live_price >= setup.sl_price:
+                        setup.state = RetracementState.COMPLETED
+                        setup.outcome = "SL_HIT"
+                        setup.completion_reason = f"Stop Loss hit at {setup.sl_price:.2f} (live touch: {live_price:.2f})"
+                        for layer in setup.layers.values():
+                            if layer.get("state") == "FILLED":
+                                layer["state"] = "SL_HIT"
+                                layer["exit_price"] = setup.sl_price
+                        events.append(RetracementEvent(
+                            setup_id=setup.setup_id,
+                            event_type=RetracementEventType.SL_HIT,
+                            state_before=RetracementState.TRADE_ACTIVE,
+                            state_after=RetracementState.COMPLETED,
+                            timestamp=ts,
+                            price=setup.sl_price,
+                            metadata={"live_tick": True},
+                        ))
+                    return events
+
+        # ------------------------------------------------------------------
+        # 2. TRADE_ACTIVE: Active trade monitoring for Stop Loss & Take Profit
+        # ------------------------------------------------------------------
+        if setup.state == RetracementState.TRADE_ACTIVE:
+            # Check and fill deeper layers (L2, L3) on live pullback
+            if len(setup.layers) < 3:
+                if setup.direction == "LONG":
+                    if "L2" not in setup.layers and setup.fib_0_500 is not None and live_price <= setup.fib_0_500:
+                        setup.layers["L2"] = {
+                            "layer": "L2", "entry_ratio": 0.500, "entry_price": round(setup.fib_0_500, 2),
+                            "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None, "lots": 0.01,
+                            "state": "FILLED", "filled_at": ts.isoformat(),
+                        }
+                    if "L3" not in setup.layers and setup.fib_0_382 is not None and live_price <= setup.fib_0_382:
+                        setup.layers["L3"] = {
+                            "layer": "L3", "entry_ratio": 0.382, "entry_price": round(setup.fib_0_382, 2),
+                            "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None, "lots": 0.01,
+                            "state": "FILLED", "filled_at": ts.isoformat(),
+                        }
+                else:  # SHORT
+                    if "L2" not in setup.layers and setup.fib_0_500 is not None and live_price >= setup.fib_0_500:
+                        setup.layers["L2"] = {
+                            "layer": "L2", "entry_ratio": 0.500, "entry_price": round(setup.fib_0_500, 2),
+                            "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None, "lots": 0.01,
+                            "state": "FILLED", "filled_at": ts.isoformat(),
+                        }
+                    if "L3" not in setup.layers and setup.fib_0_382 is not None and live_price >= setup.fib_0_382:
+                        setup.layers["L3"] = {
+                            "layer": "L3", "entry_ratio": 0.382, "entry_price": round(setup.fib_0_382, 2),
+                            "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None, "lots": 0.01,
+                            "state": "FILLED", "filled_at": ts.isoformat(),
+                        }
+
+            # 2a. Global Stop Loss Check (0.236)
+            sl_hit = False
+            if setup.sl_price is not None:
+                sl_hit = (live_price <= setup.sl_price) if setup.direction == "LONG" else (live_price >= setup.sl_price)
+
+            if sl_hit:
+                setup.state = RetracementState.COMPLETED
+                setup.outcome = "SL_HIT"
+                setup.completion_reason = f"Stop Loss hit at {setup.sl_price:.2f} (live touch: {live_price:.2f})"
+                for layer in setup.layers.values():
+                    if layer.get("state") == "FILLED":
+                        layer["state"] = "SL_HIT"
+                        layer["exit_price"] = setup.sl_price
+                events.append(RetracementEvent(
+                    setup_id=setup.setup_id,
+                    event_type=RetracementEventType.SL_HIT,
+                    state_before=RetracementState.TRADE_ACTIVE,
+                    state_after=RetracementState.COMPLETED,
+                    timestamp=ts,
+                    price=setup.sl_price,
+                    metadata={"live_tick": True},
+                ))
+                return events
+
+            # 2b. Per-layer Trailing SL (e.g. Smart Shield on L1)
+            for layer in setup.layers.values():
+                if layer.get("state") != "FILLED" or layer.get("sl") is None:
+                    continue
+                l_sl = layer["sl"]
+                l_sl_hit = (live_price <= l_sl) if setup.direction == "LONG" else (live_price >= l_sl)
+                if l_sl_hit:
+                    layer["state"] = "SL_HIT"
+                    layer["exit_price"] = l_sl
+                    events.append(RetracementEvent(
+                        setup_id=setup.setup_id,
+                        event_type=RetracementEventType.SL_HIT,
+                        state_before=RetracementState.TRADE_ACTIVE,
+                        state_after=RetracementState.TRADE_ACTIVE,
+                        timestamp=ts,
+                        price=l_sl,
+                        metadata={"layer": layer.get("layer"), "shield": True, "live_tick": True},
+                    ))
+
+            # 2c. Global Take Profit Check (locked_tp / 1.000)
+            tp_hit = False
+            if setup.locked_tp is not None:
+                tp_hit = (live_price >= setup.locked_tp) if setup.direction == "LONG" else (live_price <= setup.locked_tp)
+
+            if tp_hit:
+                setup.state = RetracementState.COMPLETED
+                setup.outcome = "TP_HIT"
+                setup.completion_reason = f"Take Profit hit at {setup.locked_tp:.2f} (live touch: {live_price:.2f})"
+                for layer in setup.layers.values():
+                    if layer.get("state") == "FILLED":
+                        layer["state"] = "TP_HIT"
+                        layer["exit_price"] = layer.get("tp") or setup.locked_tp
+                events.append(RetracementEvent(
+                    setup_id=setup.setup_id,
+                    event_type=RetracementEventType.TP_HIT,
+                    state_before=RetracementState.TRADE_ACTIVE,
+                    state_after=RetracementState.COMPLETED,
+                    timestamp=ts,
+                    price=setup.locked_tp,
+                    metadata={"live_tick": True},
+                ))
+                return events
+
+            # 2d. Per-layer TP checks (e.g. L2/L3 TP @ 0.618) + Smart Shield
+            for layer in setup.layers.values():
+                if layer.get("state") != "FILLED" or layer.get("tp") is None:
+                    continue
+                l_tp = layer["tp"]
+                l_tp_hit = (live_price >= l_tp) if setup.direction == "LONG" else (live_price <= l_tp)
+                if l_tp_hit:
+                    layer["state"] = "TP_HIT"
+                    layer["exit_price"] = l_tp
+                    # Smart Shield trigger: Move L1 SL to 0.618 (Entry Breakeven) or 0.500 buffer
+                    if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"].get("state") == "FILLED":
+                        shield_lvl = getattr(self, "smart_shield_level", "0.618")
+                        target_lvl = setup.fib_0_618 if shield_lvl == "0.618" else setup.fib_0_500
+                        if target_lvl is not None:
+                            curr_sl = setup.layers["L1"].get("sl")
+                            if setup.direction == "LONG" and (curr_sl is None or curr_sl < target_lvl):
+                                setup.layers["L1"]["sl"] = round(target_lvl, 2)
+                                setup.layers["L1"]["shield_stage"] = 1
+                            elif setup.direction == "SHORT" and (curr_sl is None or curr_sl > target_lvl):
+                                setup.layers["L1"]["sl"] = round(target_lvl, 2)
+                                setup.layers["L1"]["shield_stage"] = 1
+
+            # 2e. Check if all open layers have resolved
+            open_layers = [l for l in setup.layers.values() if l.get("state") == "FILLED"]
+            if not open_layers and setup.layers:
+                has_tp = any(l.get("state") == "TP_HIT" for l in setup.layers.values())
+                setup.state = RetracementState.COMPLETED
+                setup.outcome = "TP_HIT" if has_tp else "SL_HIT"
+                setup.completion_reason = "All layers reached their targets or resolved on live tick."
+                events.append(RetracementEvent(
+                    setup_id=setup.setup_id,
+                    event_type=RetracementEventType.TP_HIT if has_tp else RetracementEventType.SL_HIT,
+                    state_before=RetracementState.TRADE_ACTIVE,
+                    state_after=RetracementState.COMPLETED,
+                    timestamp=ts,
+                    price=setup.locked_tp or live_price,
+                    metadata={"live_tick": True},
+                ))
+
+        return events
+
     def archive_completed(self) -> RetracementSetup | None:
         if self.setup is not None and self.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
             completed = self.setup

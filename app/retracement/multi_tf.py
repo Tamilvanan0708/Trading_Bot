@@ -189,17 +189,23 @@ class RetracementMultiTFMonitor:
     # Public API
     # ------------------------------------------------------------------
 
-    async def advance(self, db) -> dict[str, RetracementSetup | None]:
+    async def advance(self, db, live_price: float | None = None) -> dict[str, RetracementSetup | None]:
         """Process newly-closed candles on all timeframes with Multi-Slot Parallel Execution:
         - Every timeframe (5m, 15m, 30m, 1h) maintains its own independent trading slot.
         - All timeframe engines co-exist and execute concurrently with zero cross-timeframe lockout.
+        - Real-time live price ticks evaluate instant touch for Entry, TP, and SL without waiting for candle close.
         """
         async with self._lock:
             snap = await self._snapshot()
+            if live_price is not None:
+                self.live_price = live_price
+            elif snap and snap.current_price:
+                self.live_price = snap.current_price
+
             snap_key = (
                 snap.timestamp if snap else None,
                 len(snap.m15) if (snap and hasattr(snap, "m15")) else 0,
-                snap.current_price if snap else None,
+                live_price if live_price is not None else (snap.current_price if snap else None),
             )
             if snap is not None and getattr(self, "_last_snap_key", None) == snap_key and getattr(self, "_last_advance_results", None) is not None:
                 return self._last_advance_results
@@ -228,7 +234,7 @@ class RetracementMultiTFMonitor:
 
                 if len(snap_candles) >= 50:
                     candles = snap_candles
-                    slot.live_price = snap.current_price
+                    slot.live_price = self.live_price
                     slot.data_status = "HEALTHY"
                     slot.has_live_data = True
                 elif hist_candles.get(tf):
@@ -237,19 +243,18 @@ class RetracementMultiTFMonitor:
                         last_hist_ts = candles[-1].timestamp if candles else None
                         new_live = [c for c in snap_candles if last_hist_ts is None or c.timestamp > last_hist_ts]
                         candles = candles + new_live
-                    if snap is not None and snap.current_price:
-                        slot.live_price = snap.current_price
+                    slot.live_price = self.live_price
                     slot.data_status = "HEALTHY"
                     slot.has_live_data = True
                 elif snap_candles:
                     candles = snap_candles
-                    slot.live_price = snap.current_price if snap else None
+                    slot.live_price = self.live_price
                     slot.data_status = "HEALTHY"
                     slot.has_live_data = bool(candles)
                 else:
                     slot.data_status = "NO_DATA"
                     slot.has_live_data = False
-                raw_results[tf] = self._advance_slot(slot, candles)
+                raw_results[tf] = self._advance_slot(slot, candles, live_price=live_price)
 
             # Option 1A: Multi-Slot Parallel Execution — each timeframe maintains its own active slot
             results = raw_results
@@ -259,26 +264,33 @@ class RetracementMultiTFMonitor:
             self._last_advance_results = results
             return results
 
-    def _advance_slot(self, slot: _TFSlot, candles: list) -> RetracementSetup | None:
-        """Advance ONE timeframe engine with its own newly-closed candles."""
+    def _advance_slot(self, slot: _TFSlot, candles: list, live_price: float | None = None) -> RetracementSetup | None:
+        """Advance ONE timeframe engine with its own newly-closed candles and live price tick."""
         from app.config.execution_settings import get_execution_settings
         slot.engine.engine_mode = getattr(get_execution_settings(), "fib_engine_mode", "classic")
-        if not candles:
-            return slot.engine.setup
-        new_candles = [
-            c for c in candles
-            if slot.last_processed_ts is None or c.timestamp > slot.last_processed_ts
-        ]
-        if not new_candles:
-            return slot.engine.setup
-        new_candles.sort(key=lambda c: c.timestamp)
         completed: list[RetracementSetup] = []
-        for candle in new_candles:
-            slot.engine.process_candle(candle)
+
+        if candles:
+            new_candles = [
+                c for c in candles
+                if slot.last_processed_ts is None or c.timestamp > slot.last_processed_ts
+            ]
+            if new_candles:
+                new_candles.sort(key=lambda c: c.timestamp)
+                for candle in new_candles:
+                    slot.engine.process_candle(candle)
+                    archived = slot.engine.archive_completed()
+                    if archived is not None:
+                        completed.append(archived)
+                slot.last_processed_ts = new_candles[-1].timestamp
+
+        # Instant Tick Touch Execution: Only evaluate real-time live price when an actual live tick is provided
+        if live_price is not None and live_price > 0:
+            slot.engine.evaluate_live_price(live_price)
             archived = slot.engine.archive_completed()
             if archived is not None:
                 completed.append(archived)
-        slot.last_processed_ts = new_candles[-1].timestamp
+
         if completed:
             slot.last_completed = completed[-1]
         return slot.engine.setup

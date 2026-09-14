@@ -548,3 +548,163 @@ def test_active_trade_timeout_expires_after_max_candles():
     assert any(e.event_type == RetracementEventType.COMPLETED and e.metadata.get("reason") == "TIMEOUT" for e in final_events)
     assert engine.setup.state == RetracementState.COMPLETED
     assert engine.setup.outcome == "TIMEOUT"
+
+
+def test_instant_live_price_sl_hit_without_waiting_candle_close():
+    """When live price touches or drops below SL, trade resolves instantly as SL_HIT."""
+    from app.api.routes.retracement import _serialize_setup
+    from app.retracement.fib_retracement_engine import DualRetracementEngine
+
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="30m")
+    ts = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
+    engine.setup = RetracementSetup(
+        symbol="XAUUSD",
+        timeframe="30m",
+        direction="LONG",
+        state=RetracementState.TRADE_ACTIVE,
+        bos_price=4331.00,
+        bos_timestamp=ts,
+        point_1_price=4359.72,
+        point_1_timestamp=ts,
+        point_2_price=4331.00,
+        point_2_timestamp=ts,
+        entry_price=4354.86,
+        sl_price=4350.00,
+        dynamic_tp=4359.72,
+        locked_tp=4359.72,
+        tp_locked=True,
+        entry_touched=True,
+        layers={
+            "L1": {
+                "layer": "L1",
+                "state": "FILLED",
+                "entry_price": 4354.86,
+                "tp": 4359.72,
+                "sl": 4350.00,
+            }
+        },
+    )
+
+    # Live tick drops to $4337.74 (matching user screenshot where live was 12.26 pts below SL)
+    events = engine.evaluate_live_price(4337.74, timestamp=ts + timedelta(minutes=15))
+
+    assert any(e.event_type == RetracementEventType.SL_HIT for e in events)
+    assert engine.setup.state == RetracementState.COMPLETED
+    assert engine.setup.outcome == "SL_HIT"
+    assert engine.setup.layers["L1"]["state"] == "SL_HIT"
+    assert engine.setup.layers["L1"]["exit_price"] == 4350.00
+
+    # Test serialization reflects completed outcome without negative movement
+    serialized = _serialize_setup(engine.setup, live_price=4337.74, timeframe="30m")
+    assert serialized["outcome"] == "SL_HIT"
+    assert serialized["state"] == "COMPLETED"
+    assert serialized["metrics"]["current_movement_pts"] == 0.0
+
+
+def test_instant_live_price_tp_hit_without_waiting_candle_close():
+    """When live price touches or rises above TP, trade resolves instantly as TP_HIT."""
+    from app.retracement.fib_retracement_engine import DualRetracementEngine
+
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="30m")
+    ts = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
+    engine.setup = RetracementSetup(
+        symbol="XAUUSD",
+        timeframe="30m",
+        direction="LONG",
+        state=RetracementState.TRADE_ACTIVE,
+        entry_price=4354.86,
+        sl_price=4350.00,
+        locked_tp=4359.72,
+        tp_locked=True,
+        entry_touched=True,
+        layers={
+            "L1": {
+                "layer": "L1",
+                "state": "FILLED",
+                "entry_price": 4354.86,
+                "tp": 4359.72,
+                "sl": 4350.00,
+            }
+        },
+    )
+
+    # Live tick reaches $4360.00
+    events = engine.evaluate_live_price(4360.00, timestamp=ts + timedelta(minutes=10))
+
+    assert any(e.event_type == RetracementEventType.TP_HIT for e in events)
+    assert engine.setup.state == RetracementState.COMPLETED
+    assert engine.setup.outcome == "TP_HIT"
+    assert engine.setup.layers["L1"]["state"] == "TP_HIT"
+
+
+def test_instant_live_price_entry_touch_without_waiting_candle_close():
+    """When live price touches entry level in TP_DYNAMIC, order fills and TP freezes instantly."""
+    from app.retracement.fib_retracement_engine import DualRetracementEngine
+
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="30m")
+    ts = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
+    engine.setup = RetracementSetup(
+        symbol="XAUUSD",
+        timeframe="30m",
+        direction="LONG",
+        state=RetracementState.TP_DYNAMIC,
+        point_2_price=4331.00,
+        current_high_price=4370.00,
+        fib_1_000=4370.00,
+        fib_0_618=4355.08,
+        fib_0_500=4350.50,
+        fib_0_382=4345.92,
+        fib_0_236=4340.21,
+        entry_price=4355.08,
+        sl_price=4340.21,
+        dynamic_tp=4370.00,
+        entry_touched=False,
+        tp_locked=False,
+    )
+
+    # Live tick pulls back and touches $4355.00
+    events = engine.evaluate_live_price(4355.00, timestamp=ts + timedelta(minutes=5))
+
+    assert any(e.event_type == RetracementEventType.ENTRY_TOUCHED for e in events)
+    assert engine.setup.state == RetracementState.TRADE_ACTIVE
+    assert engine.setup.entry_touched is True
+    assert engine.setup.tp_locked is True
+    assert engine.setup.locked_tp == 4370.00
+    assert "L1" in engine.setup.layers
+    assert engine.setup.layers["L1"]["state"] == "FILLED"
+
+
+def test_dashboard_build_with_live_sl_breach():
+    """Verify _build_strategy_dashboard marks trade inactive and resolved when live_price breaches SL."""
+    from app.api.routes.retracement import _build_strategy_dashboard
+    from app.retracement.models import RetracementSetup, RetracementState
+
+    setup = RetracementSetup(
+        symbol="XAUUSD",
+        timeframe="30m",
+        direction="LONG",
+        state=RetracementState.TRADE_ACTIVE,
+        point_2_price=4331.00,
+        entry_price=4354.86,
+        sl_price=4350.00,
+        dynamic_tp=4359.72,
+        locked_tp=4359.72,
+        tp_locked=True,
+        entry_touched=True,
+    )
+    # Price is 4337.74 (12.26 pts below SL)
+    dash = _build_strategy_dashboard(
+        symbol="XAUUSD",
+        live_price=4337.74,
+        data_status="HEALTHY",
+        states={"30m": setup},
+        slots={},
+        strategy_label="FIB_WITH_RETRACEMENT",
+    )
+    card_30m = dash["timeframes"]["30m"]
+    assert card_30m["is_trade_active"] is False
+    assert card_30m["state"] == "COMPLETED"
+    assert card_30m["outcome"] == "SL_HIT"
+    assert card_30m["metrics"]["current_movement_pts"] == 0.0
+
+
