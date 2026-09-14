@@ -31,10 +31,10 @@ class ExecutionSettings(BaseModel):
         description="percent of balance | fixed_amount"
     )
     risk_percent: float = Field(
-        default=1.0,
+        default=5.0,
         ge=0.1,
         le=10.0,
-        description="Risk percentage of account balance per trade (e.g. 1.0 = 1%)"
+        description="Risk percentage of account balance per trade (e.g. 5.0 = 5%)"
     )
     account_balance: float = Field(
         default=10000.0,
@@ -83,7 +83,7 @@ class ExecutionSettings(BaseModel):
         description="Enable Fib Go With Trend strategy execution"
     )
     mt5_bridge_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable live execution to MetaTrader 5 via MQL5 EA bridge"
     )
     mt5_symbol: str = Field(

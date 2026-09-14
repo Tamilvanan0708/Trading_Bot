@@ -108,6 +108,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
             live_price = None
 
         tg = TelegramService()
+        if not live_price:
+            try:
+                live_price = getattr(get_retracement_multi_tf_service("XAUUSD"), "live_price", None)
+            except Exception:
+                pass
         # Per-timeframe snapshot prices reported by the Fib monitors themselves
         # (authoritative context for resolving FIB_RETR trades in the sweep below).
         fib_tf_price: dict[str, float] = {}
@@ -122,7 +127,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         if exec_cfg.strategy_fib_retracement:
             try:
                 fib_svc = get_retracement_multi_tf_service("XAUUSD")
-                fib_states = await fib_svc.advance(db)
+                fib_states = await fib_svc.advance(db, live_price=live_price)
 
                 try:
                     _fib_slots = getattr(fib_svc, "slots", None)

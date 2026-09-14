@@ -153,8 +153,8 @@ class MT5BridgeManager:
         entry_px = float(order_data.get("entry_price") or order_data.get("target_entry") or 0.0)
         sl_px = float(order_data.get("stop_loss") or 0.0)
         tp_px = float(order_data.get("take_profit_1") or order_data.get("take_profit") or 0.0)
-        sl_pts = round(abs(entry_px - sl_px), 2) if (entry_px > 0 and sl_px > 0) else float(order_data.get("sl_points") or 0.0)
-        tp_pts = round(abs(tp_px - entry_px), 2) if (entry_px > 0 and tp_px > 0) else float(order_data.get("tp_points") or 0.0)
+        sl_pts = round(abs(entry_px - sl_px), 2) if (entry_px > 0 and sl_px > 0) else float(order_data.get("sl_points") or order_data.get("sl_pts") or 0.0)
+        tp_pts = round(abs(tp_px - entry_px), 2) if (entry_px > 0 and tp_px > 0) else float(order_data.get("tp_points") or order_data.get("tp_pts") or 0.0)
 
         order_payload = {
             "id": order_id,
