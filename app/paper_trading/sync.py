@@ -209,6 +209,30 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     )
                     try:
                         await db.commit()
+                        # Dispatch Telegram Alert for Orphan Closure
+                        try:
+                            is_tp = _exit_reason == "TP_HIT"
+                            is_be = _exit_reason == "BREAKEVEN_HIT"
+                            header = "🎯 *TAKE PROFIT HIT*" if is_tp else ("🛡 *BREAKEVEN HIT*" if is_be else "🛑 *STOP LOSS HIT*")
+                            pnl_str = f"+${_ot.realized_pnl:.2f}" if _ot.realized_pnl >= 0 else f"-${abs(_ot.realized_pnl):.2f}"
+                            pts_str = f"{_pts:+.2f}"
+                            layer_name = _parts[3] if len(_parts) > 3 else "L1"
+                            dir_badge = "BUY / LONG ▲" if _direction in ("LONG", "BUY") else "SELL / SHORT ▼"
+                            orphan_msg = (
+                                f"{header}\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"📊 *Strategy:* Fib Retracement ({layer_name})\n"
+                                f"🪙 *Symbol:* XAU/USD ({_ot_tf.upper()})\n"
+                                f"📈 *Direction:* {dir_badge}\n"
+                                f"💵 *Entry:* ${_entry_px:.2f}\n"
+                                f"🏁 *Exit:* ${_exit_px:.2f}\n"
+                                f"💰 *Realized PnL:* {pnl_str} ({pts_str} PTS)\n"
+                                f"━━━━━━━━━━━━━━━━━━━━"
+                            )
+                            asyncio.create_task(tg.send_raw_alert(orphan_msg))
+                        except Exception as tg_err:
+                            logger.warning("[PAPER-TG] Failed to send orphan close alert: %s", tg_err)
+
                         # Dispatch MT5 bridge close if live execution is enabled
                         if exec_cfg.mt5_bridge_enabled:
                             try:
@@ -735,6 +759,25 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     await db.commit()
                                     logger.info("[PAPER-AUTO] Engine TP_HIT closed Retracement %s (%s) @ %.2f (+$%.2f)", sig_id, l_key, tp_px, existing.realized_pnl)
 
+                                    # Telegram Alert: TP Hit
+                                    try:
+                                        pts_sign = "+" if pts >= 0 else ""
+                                        dir_badge = "BUY / LONG ▲" if f_state.direction in ("LONG", "BUY") else "SELL / SHORT ▼"
+                                        tp_msg = (
+                                            f"🎯 *TAKE PROFIT HIT ({pts_sign}{pts:.2f} PTS)*\n"
+                                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                                            f"📊 *Strategy:* Fib Retracement ({l_key})\n"
+                                            f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
+                                            f"📈 *Direction:* {dir_badge}\n"
+                                            f"💵 *Entry:* ${entry_px:.2f}\n"
+                                            f"🏁 *Exit:* ${tp_px:.2f}\n"
+                                            f"💰 *Profit:* +${existing.realized_pnl:.2f}\n"
+                                            f"━━━━━━━━━━━━━━━━━━━━"
+                                        )
+                                        asyncio.create_task(tg.send_raw_alert(tp_msg))
+                                    except Exception as tg_err:
+                                        logger.warning("[PAPER-TG] Failed to send TP hit alert: %s", tg_err)
+
                                     # MT5 Bridge Live Close Dispatch
                                     try:
                                         from app.services.mt5_bridge_manager import get_mt5_bridge_manager
@@ -762,6 +805,22 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 await db.commit()
                                                 logger.info("[PAPER-AUTO] Smart Shield (%s): L%s TP hit -> trailed L1 SL to %.2f", exec_cfg.smart_shield_level, l_key[-1], new_l1_sl)
 
+                                                # Telegram Alert: Smart Shield Trailing SL
+                                                try:
+                                                    shield_msg = (
+                                                        f"🛡 *SMART SHIELD ACTIVATED*\n"
+                                                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                                                        f"📊 *Strategy:* Fib Retracement (L1 Protected)\n"
+                                                        f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
+                                                        f"⚡ *Trigger:* L{l_key[-1]} TP Hit\n"
+                                                        f"🔒 *New L1 SL:* ${new_l1_sl:.2f} (Breakeven)\n"
+                                                        f"🛡 *Downside Risk:* 0.00 (Risk-Free Trade)\n"
+                                                        f"━━━━━━━━━━━━━━━━━━━━"
+                                                    )
+                                                    asyncio.create_task(tg.send_raw_alert(shield_msg))
+                                                except Exception as tg_err:
+                                                    logger.warning("[PAPER-TG] Failed to send shield alert: %s", tg_err)
+
                                                 # MT5 Bridge Live SL Modify Dispatch
                                                 try:
                                                     from app.services.mt5_bridge_manager import get_mt5_bridge_manager
@@ -785,6 +844,27 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     existing.realized_r = round(pts / max(0.1, abs(entry_px - (existing.stop_loss or 0.0))), 2)
                                     await db.commit()
                                     logger.info("[PAPER-AUTO] Engine SL_HIT closed Retracement %s (%s) @ %.2f ($%.2f)", sig_id, l_key, exit_px, existing.realized_pnl)
+
+                                    # Telegram Alert: SL Hit / Breakeven Hit
+                                    try:
+                                        is_be = existing.exit_reason == "BREAKEVEN_HIT"
+                                        header = "🛡 *BREAKEVEN HIT (0.00 PTS)*" if is_be else f"🛑 *STOP LOSS HIT ({pts:.2f} PTS)*"
+                                        pnl_str = f"+${existing.realized_pnl:.2f}" if existing.realized_pnl >= 0 else f"-${abs(existing.realized_pnl):.2f}"
+                                        dir_badge = "BUY / LONG ▲" if f_state.direction in ("LONG", "BUY") else "SELL / SHORT ▼"
+                                        sl_msg = (
+                                            f"{header}\n"
+                                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                                            f"📊 *Strategy:* Fib Retracement ({l_key})\n"
+                                            f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
+                                            f"📈 *Direction:* {dir_badge}\n"
+                                            f"💵 *Entry:* ${entry_px:.2f}\n"
+                                            f"🛑 *Exit:* ${exit_px:.2f}\n"
+                                            f"💰 *Realized PnL:* {pnl_str}\n"
+                                            f"━━━━━━━━━━━━━━━━━━━━"
+                                        )
+                                        asyncio.create_task(tg.send_raw_alert(sl_msg))
+                                    except Exception as tg_err:
+                                        logger.warning("[PAPER-TG] Failed to send SL hit alert: %s", tg_err)
 
                                     # MT5 Bridge Live Close Dispatch
                                     try:
