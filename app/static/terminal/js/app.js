@@ -4237,6 +4237,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
   function renderTfButtons(d, curSelTf) {
     return TFS.map(tf => {
       const isSel = tf === curSelTf;
+      const tfCard = d.timeframes?.[tf] || {};
       const hasPaperTrade = tfCard.paper_trade && tfCard.paper_trade.is_open;
       const isEntryTouched = !hasPaperTrade && tfCard.is_trade_active;
       const isEntryReady = tfCard.is_entry_ready;
