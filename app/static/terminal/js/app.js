@@ -274,7 +274,7 @@ async function renderWith(loader, renderer, mount) {
   }
   try {
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Connection timed out. Retrying…")), 15000)
+      setTimeout(() => reject(new Error("Connection timed out. Retrying…")), 30000)
     );
     const data = await Promise.race([loader(), timeoutPromise]);
     const html = await renderer(data);
@@ -4444,7 +4444,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
 
   renderWith(async () => {
     const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), 15000);
+    const tid = setTimeout(() => controller.abort(), 30000);
     try {
       const [r, execSet] = await Promise.allSettled([
         fetch(endpoint, { signal: controller.signal }),
