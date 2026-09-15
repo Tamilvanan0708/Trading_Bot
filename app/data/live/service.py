@@ -596,7 +596,11 @@ class LiveMarketDataService:
         )
         # Also refresh 5M candles for low-timeframe strategies & chart
         try:
-            fetched_5m = await provider.get_ohlcv(self._symbol, TimeFrame.M5, limit=200)
+            mt5_p = getattr(self, "_mt5_provider", None)
+            if self.settings.LIVE_FEED_PROVIDER == "mt5" and mt5_p is not None:
+                fetched_5m = await mt5_p.get_ohlcv(self._symbol, TimeFrame.M5, limit=200)
+            else:
+                fetched_5m = await provider.get_ohlcv(self._symbol, TimeFrame.M5, limit=200)
             if fetched_5m:
                 cutoff_5m = _bucket_start(now, 5)
                 async with self._lock:
@@ -855,13 +859,18 @@ class LiveMarketDataService:
         """Computes the current data-quality state of the live pipeline."""
         connected = False
         provider = "none"
-        try:
-            feeds = await self.health()
-            if feeds:
-                connected = bool(feeds[0].get("connected", False))
-                provider = feeds[0].get("provider", "none")
-        except Exception:
-            pass
+        if self.settings.LIVE_FEED_PROVIDER == "mt5":
+            mt5_p = getattr(self, "_mt5_provider", None)
+            connected = mt5_p is not None and mt5_p.is_connected
+            provider = "mt5"
+        else:
+            try:
+                feeds = await self.health()
+                if feeds:
+                    connected = bool(feeds[0].get("connected", False))
+                    provider = feeds[0].get("provider", "none")
+            except Exception:
+                pass
 
         latest_tick = await self.registry.latest_tick(self._symbol)
 
