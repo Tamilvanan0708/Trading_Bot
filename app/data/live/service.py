@@ -387,27 +387,27 @@ class LiveMarketDataService:
 
             try:
                 candles, report = await provider.load_base_15m(limit=800)
-            self._gap_count = report["gaps"]
-            self._dup_count = report["duplicates"]
-            self._ooo_count = report["out_of_order"]
-            if report["errors"]:
-                self._last_history_error = report["errors"][0]
+                self._gap_count = report["gaps"]
+                self._dup_count = report["duplicates"]
+                self._ooo_count = report["out_of_order"]
+                if report["errors"]:
+                    self._last_history_error = report["errors"][0]
+                    logger.error(
+                        "Historical data validation errors: %s", report["errors"][:3]
+                    )
+            except Exception as exc:  # noqa: BLE001 - non-fatal at startup, but degraded
+                self._last_history_error = str(exc)
+                self._closed_15m = []
+                self._refresh_status = "FAILED"
+                self._refresh_error = str(exc)
+                self._history_fallback = False
                 logger.error(
-                    "Historical data validation errors: %s", report["errors"][:3]
+                    "DEGRADED: Binance REST history unavailable (%s). No synthetic/stale "
+                    "fallback is used — strategy engines show NO_SETUP and the data-quality "
+                    "gate blocks trading until real data is fetched.",
+                    exc,
                 )
-        except Exception as exc:  # noqa: BLE001 - non-fatal at startup, but degraded
-            self._last_history_error = str(exc)
-            self._closed_15m = []
-            self._refresh_status = "FAILED"
-            self._refresh_error = str(exc)
-            self._history_fallback = False
-            logger.error(
-                "DEGRADED: Binance REST history unavailable (%s). No synthetic/stale "
-                "fallback is used — strategy engines show NO_SETUP and the data-quality "
-                "gate blocks trading until real data is fetched.",
-                exc,
-            )
-            return
+                return
 
         if not candles:
             self._last_history_error = self._last_history_error or "Binance REST returned no candles"
