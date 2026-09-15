@@ -229,7 +229,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 f"💰 *Realized PnL:* {pnl_str} ({pts_str} PTS)\n"
                                 f"━━━━━━━━━━━━━━━━━━━━"
                             )
-                            asyncio.create_task(tg.send_raw_alert(orphan_msg))
+                            await tg.send_raw_alert(orphan_msg)
                         except Exception as tg_err:
                             logger.warning("[PAPER-TG] Failed to send orphan close alert: %s", tg_err)
 
@@ -735,7 +735,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 f"⚡ *Multi-Slot:* {tf_key.upper()} Active (15M, 30M, 1H scanning in parallel)\n"
                                                 f"━━━━━━━━━━━━━━━━━━━━"
                                             )
-                                            asyncio.create_task(tg.send_raw_alert(msg))
+                                            await tg.send_raw_alert(msg)
                                         except Exception as tg_err:  # noqa: BLE001
                                             logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                                 finally:
@@ -774,7 +774,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             f"💰 *Profit:* +${existing.realized_pnl:.2f}\n"
                                             f"━━━━━━━━━━━━━━━━━━━━"
                                         )
-                                        asyncio.create_task(tg.send_raw_alert(tp_msg))
+                                        await tg.send_raw_alert(tp_msg)
                                     except Exception as tg_err:
                                         logger.warning("[PAPER-TG] Failed to send TP hit alert: %s", tg_err)
 
@@ -817,7 +817,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                         f"🛡 *Downside Risk:* 0.00 (Risk-Free Trade)\n"
                                                         f"━━━━━━━━━━━━━━━━━━━━"
                                                     )
-                                                    asyncio.create_task(tg.send_raw_alert(shield_msg))
+                                                    await tg.send_raw_alert(shield_msg)
                                                 except Exception as tg_err:
                                                     logger.warning("[PAPER-TG] Failed to send shield alert: %s", tg_err)
 
@@ -862,7 +862,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             f"💰 *Realized PnL:* {pnl_str}\n"
                                             f"━━━━━━━━━━━━━━━━━━━━"
                                         )
-                                        asyncio.create_task(tg.send_raw_alert(sl_msg))
+                                        await tg.send_raw_alert(sl_msg)
                                     except Exception as tg_err:
                                         logger.warning("[PAPER-TG] Failed to send SL hit alert: %s", tg_err)
 

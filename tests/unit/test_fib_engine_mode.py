@@ -21,7 +21,7 @@ import pytest
 from app.config.execution_settings import ExecutionSettings, save_execution_settings, get_execution_settings
 from app.data.models import Candle
 from app.retracement.fib_retracement_engine import DualRetracementEngine, FibRetracementEngine
-from app.retracement.models import RetracementState
+from app.retracement.models import RetracementState, RetracementSetup
 from app.retracement.smc_fib_engine import SMCFibEngine
 
 
@@ -211,4 +211,62 @@ def test_timeframe_adaptive_fractal_bars():
     eng_1h = DualRetracementEngine(symbol="XAUUSD", timeframe="1h")
     assert eng_1h.left_bars == 3
     assert eng_1h.right_bars == 3
+
+
+def test_same_candle_retrace_does_not_trigger_premature_tp():
+    """Verifies that when a live tick fills L1 on a pullback within a candle whose high
+
+    reached the setup peak, the closed candle does NOT prematurely mark TP_HIT.
+    """
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="5m")
+    candle_ts = datetime(2026, 9, 14, 15, 45, 0, tzinfo=timezone.utc)
+    c_forming = Candle(
+        timestamp=candle_ts,
+        open=4296.0,
+        high=4303.44,  # Reached peak
+        low=4293.40,   # Pulled back to entry
+        close=4294.50, # Closed below TP
+        volume=100.0,
+    )
+    engine._candles.append(c_forming)
+
+    setup = RetracementSetup(
+        setup_id="test_premature_tp_guard",
+        strategy="RETRACEMENT_BOS_V1",
+        symbol="XAUUSD",
+        direction="LONG",
+        state=RetracementState.TP_DYNAMIC,
+        point_1_price=4278.06,
+        point_2_price=4303.44,
+        current_high_price=4303.44,
+        current_high_timestamp=candle_ts,
+    )
+    engine._apply_bullish_fib(setup, 4278.06, 4303.44)
+    engine.setup = setup
+
+    # 1. Live tick touches entry at 4293.74
+    engine.evaluate_live_price(4293.74, timestamp=datetime(2026, 9, 14, 15, 49, 12, tzinfo=timezone.utc))
+    assert setup.state == RetracementState.TRADE_ACTIVE
+    assert "L1" in setup.layers
+    assert setup.layers["L1"]["state"] == "FILLED"
+
+    # 2. Candle completes and is delivered to _track_active_trade
+    engine._track_active_trade(c_forming)
+
+    # 3. L1 must remain FILLED, NOT prematurely TP_HIT!
+    assert setup.layers["L1"]["state"] == "FILLED"
+    assert setup.state == RetracementState.TRADE_ACTIVE
+
+    # 4. Only when a subsequent candle high reaches 4303.44 does it hit TP
+    next_ts = datetime(2026, 9, 14, 15, 50, 0, tzinfo=timezone.utc)
+    c_next = Candle(
+        timestamp=next_ts,
+        open=4294.50,
+        high=4303.50,
+        low=4294.00,
+        close=4302.00,
+        volume=100.0,
+    )
+    engine._track_active_trade(c_next)
+    assert setup.layers["L1"]["state"] == "TP_HIT"
 

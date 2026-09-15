@@ -923,6 +923,7 @@ class DualRetracementEngine:
                     "lots": 0.01,
                     "state": "FILLED",
                     "filled_at": candle.timestamp.isoformat(),
+                    "filled_candle_ts": candle.timestamp,
                 }
                 setup.layers[layer] = layer_info
                 fills.append(layer_info)
@@ -958,6 +959,7 @@ class DualRetracementEngine:
                     "lots": 0.01,
                     "state": "FILLED",
                     "filled_at": candle.timestamp.isoformat(),
+                    "filled_candle_ts": candle.timestamp,
                 }
                 setup.layers[layer] = layer_info
                 fills.append(layer_info)
@@ -1090,9 +1092,14 @@ class DualRetracementEngine:
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
-                # If layer was filled in this exact candle, candle high happened before fill unless close >= tp
-                if layer.get("filled_at") == candle.timestamp.isoformat() and candle.close < layer["tp"]:
+                # If layer was filled in this exact candle, candle.high happened before fill unless close >= tp
+                is_fill_candle = (
+                    (layer.get("filled_candle_ts") is not None and layer.get("filled_candle_ts") == candle.timestamp)
+                    or (layer.get("filled_at") == candle.timestamp.isoformat())
+                )
+                if is_fill_candle and candle.close < layer["tp"]:
                     continue
+
                 if candle.high >= layer["tp"]:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = layer["tp"]
@@ -1120,9 +1127,13 @@ class DualRetracementEngine:
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
-                # If layer was filled in this exact candle, candle low happened before fill unless close <= tp
-                if layer.get("filled_at") == candle.timestamp.isoformat() and candle.close > layer["tp"]:
+                is_fill_candle = (
+                    (layer.get("filled_candle_ts") is not None and layer.get("filled_candle_ts") == candle.timestamp)
+                    or (layer.get("filled_at") == candle.timestamp.isoformat())
+                )
+                if is_fill_candle and candle.close > layer["tp"]:
                     continue
+
                 if candle.low <= layer["tp"]:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = layer["tp"]
@@ -1183,6 +1194,7 @@ class DualRetracementEngine:
             return []
 
         ts = timestamp or (self._candles[-1].timestamp if self._candles else datetime.now(timezone.utc))
+        curr_candle_ts = self._candles[-1].timestamp if self._candles else (timestamp or ts)
         events: list[RetracementEvent] = []
 
         # ------------------------------------------------------------------
@@ -1224,6 +1236,7 @@ class DualRetracementEngine:
                             "lots": 0.01,
                             "state": "FILLED",
                             "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
                     setup.entry_touched = True
                     setup.entry_timestamp = ts
@@ -1254,6 +1267,7 @@ class DualRetracementEngine:
                             "lots": 0.01,
                             "state": "FILLED",
                             "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
                     if setup.fib_0_382 is not None and live_price <= setup.fib_0_382 and "L3" not in setup.layers:
                         setup.layers["L3"] = {
@@ -1266,6 +1280,7 @@ class DualRetracementEngine:
                             "lots": 0.01,
                             "state": "FILLED",
                             "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
 
                     # Same-tick SL check: if the move also breached SL (0.236)
@@ -1323,6 +1338,7 @@ class DualRetracementEngine:
                             "lots": 0.01,
                             "state": "FILLED",
                             "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
                     setup.entry_touched = True
                     setup.entry_timestamp = ts
@@ -1353,6 +1369,7 @@ class DualRetracementEngine:
                             "lots": 0.01,
                             "state": "FILLED",
                             "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
                     if setup.fib_0_382 is not None and live_price >= setup.fib_0_382 and "L3" not in setup.layers:
                         setup.layers["L3"] = {
@@ -1365,6 +1382,7 @@ class DualRetracementEngine:
                             "lots": 0.01,
                             "state": "FILLED",
                             "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
 
                     # Same-tick SL check: if the move also breached SL (0.236)
@@ -1400,6 +1418,7 @@ class DualRetracementEngine:
                             "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
                             "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None, "lots": 0.01,
                             "state": "FILLED", "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
                     if "L3" not in setup.layers and setup.fib_0_382 is not None and live_price <= setup.fib_0_382:
                         setup.layers["L3"] = {
@@ -1407,6 +1426,7 @@ class DualRetracementEngine:
                             "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
                             "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None, "lots": 0.01,
                             "state": "FILLED", "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
                 else:  # SHORT
                     if "L2" not in setup.layers and setup.fib_0_500 is not None and live_price >= setup.fib_0_500:
@@ -1415,6 +1435,7 @@ class DualRetracementEngine:
                             "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
                             "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None, "lots": 0.01,
                             "state": "FILLED", "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
                     if "L3" not in setup.layers and setup.fib_0_382 is not None and live_price >= setup.fib_0_382:
                         setup.layers["L3"] = {
@@ -1422,6 +1443,7 @@ class DualRetracementEngine:
                             "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
                             "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None, "lots": 0.01,
                             "state": "FILLED", "filled_at": ts.isoformat(),
+                            "filled_candle_ts": curr_candle_ts,
                         }
 
             # 2a. Global Stop Loss Check (0.236)
