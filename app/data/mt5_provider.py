@@ -30,9 +30,11 @@ from app.data.provider import BrokerAccountProvider, LiveMarketDataProvider
 
 # Timeframe enum -> MT5 constant name
 _MT5_TIMEFRAME_ATTR = {
+    TimeFrame.M5: "TIMEFRAME_M5",
     TimeFrame.M15: "TIMEFRAME_M15",
     TimeFrame.M30: "TIMEFRAME_M30",
     TimeFrame.H1: "TIMEFRAME_H1",
+    TimeFrame.H2: "TIMEFRAME_H2",
     TimeFrame.H4: "TIMEFRAME_H4",
     TimeFrame.D1: "TIMEFRAME_D1",
 }

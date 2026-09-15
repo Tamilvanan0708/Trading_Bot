@@ -242,6 +242,7 @@ class LiveMarketDataService:
                 timezone_offset_minutes=self.settings.MT5_TZ_OFFSET_MINUTES,
             )
             await provider.connect_async()
+            self._mt5_provider = provider
         except Exception as exc:  # noqa: BLE001
             logger.error("MT5 connection failed: %s", exc)
             return
@@ -354,19 +355,38 @@ class LiveMarketDataService:
         return []
 
     async def _load_historical_base(self) -> None:
-        """Load a REAL base 15M series (Binance REST) with validation.
-
-        LIVE MODE SAFETY: no synthetic or stale-file fallback.  If Binance
-        REST fails, the strategy base stays empty and the data-quality gate
-        blocks trading until real data is available.
-        """
-        provider = self._historical_provider
-        if provider is None:
-            provider = BinanceHistoryProvider(self.settings)
-
+        """Load a REAL base 15M series (MT5 or Binance REST) with validation."""
         candles: list[Candle] = []
-        try:
-            candles, report = await provider.load_base_15m(limit=800)
+        if self.settings.LIVE_FEED_PROVIDER == "mt5" and self.settings.MT5_ENABLED:
+            try:
+                from app.data.mt5_provider import MT5MarketDataProvider
+                mt5_p = getattr(self, "_mt5_provider", None)
+                if mt5_p is None:
+                    mt5_p = MT5MarketDataProvider(
+                        symbol=self._symbol,
+                        login=self.settings.MT5_LOGIN,
+                        server=self.settings.MT5_SERVER,
+                        password=self.settings.MT5_PASSWORD,
+                        magic=self.settings.MT5_MAGIC,
+                        timezone_offset_minutes=self.settings.MT5_TZ_OFFSET_MINUTES,
+                    )
+                    await mt5_p.connect_async()
+                    self._mt5_provider = mt5_p
+                candles = await mt5_p.get_ohlcv(self._symbol, TimeFrame.M15, limit=800)
+                self._gap_count = 0
+                self._dup_count = 0
+                self._ooo_count = 0
+                logger.info("[MT5-HISTORY] Successfully loaded %d 15M candles directly from MT5.", len(candles))
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[MT5-HISTORY] Failed to load from MT5: %s", exc)
+
+        if not candles:
+            provider = self._historical_provider
+            if provider is None:
+                provider = BinanceHistoryProvider(self.settings)
+
+            try:
+                candles, report = await provider.load_base_15m(limit=800)
             self._gap_count = report["gaps"]
             self._dup_count = report["duplicates"]
             self._ooo_count = report["out_of_order"]
@@ -423,20 +443,26 @@ class LiveMarketDataService:
         )
 
     async def _load_5m_base(self) -> None:
-        """Load a REAL 5M base series (Binance REST) for the 5m live chart.
+        """Load a REAL 5M base series (MT5 or Binance REST) for the 5m live chart."""
+        candles: list[Candle] = []
+        if self.settings.LIVE_FEED_PROVIDER == "mt5" and self.settings.MT5_ENABLED:
+            try:
+                mt5_p = getattr(self, "_mt5_provider", None)
+                if mt5_p is not None:
+                    candles = await mt5_p.get_ohlcv(self._symbol, TimeFrame.M5, limit=400)
+                    logger.info("[MT5-HISTORY] Successfully loaded %d 5M candles directly from MT5.", len(candles))
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[MT5-HISTORY] Failed to load 5M candles from MT5: %s", exc)
 
-        Best-effort: if REST is unavailable the 5m series stays empty and the
-        live Market chart falls back to the persisted research cache for 5m.
-        Never blocks application startup (runs inside the background task).
-        """
-        provider = self._historical_provider
-        if provider is None:
-            provider = BinanceHistoryProvider(self.settings)
-        try:
-            candles = await provider.get_ohlcv(self._symbol, TimeFrame.M5, limit=400)
-        except Exception as exc:  # noqa: BLE001 - non-fatal
-            logger.debug("5m base unavailable (non-fatal): %s — trying local JSON fallback.", exc)
-            candles = []
+        if not candles:
+            provider = self._historical_provider
+            if provider is None:
+                provider = BinanceHistoryProvider(self.settings)
+            try:
+                candles = await provider.get_ohlcv(self._symbol, TimeFrame.M5, limit=400)
+            except Exception as exc:  # noqa: BLE001 - non-fatal
+                logger.debug("5m base unavailable (non-fatal): %s — trying local JSON fallback.", exc)
+                candles = []
         if not candles:
             candles = await asyncio.to_thread(self._load_local_json_fallback_5m)
         if not candles:
@@ -498,15 +524,25 @@ class LiveMarketDataService:
         lookback = self.settings.LIVE_HISTORY_REFRESH_LOOKBACK_HOURS
         limit = min(max(int(lookback * 4), self.settings.LIVE_HISTORY_MIN_CANDLES), 800)
 
-        try:
-            fetched, report = await provider.load_base_15m(limit=limit)
-        except Exception as exc:
-            # Honest failure: never launder a failed refresh into SUCCESS.
-            # In-memory candles are KEPT (display/analysis continuity), but the
-            # status reports FAILED and history_fallback flags the staleness so
-            # the data-quality gate can block new trades.
-            self._refresh_status = "FAILED"
-            self._refresh_error = str(exc)
+        fetched: list[Candle] = []
+        if self.settings.LIVE_FEED_PROVIDER == "mt5" and self.settings.MT5_ENABLED:
+            try:
+                mt5_p = getattr(self, "_mt5_provider", None)
+                if mt5_p is not None:
+                    fetched = await mt5_p.get_ohlcv(self._symbol, TimeFrame.M15, limit=limit)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[MT5-HISTORY] Refresh error: %s", exc)
+
+        if not fetched:
+            try:
+                fetched, report = await provider.load_base_15m(limit=limit)
+            except Exception as exc:
+                # Honest failure: never launder a failed refresh into SUCCESS.
+                # In-memory candles are KEPT (display/analysis continuity), but the
+                # status reports FAILED and history_fallback flags the staleness so
+                # the data-quality gate can block new trades.
+                self._refresh_status = "FAILED"
+                self._refresh_error = str(exc)
             if self._closed_15m:
                 self._history_fallback = True
                 logger.warning(
