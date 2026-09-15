@@ -278,7 +278,12 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         continue
                     p2_ts = getattr(f_state, "point_2_timestamp", None)
                     anchor_ts = int(p2_ts.timestamp()) if (p2_ts and hasattr(p2_ts, "timestamp")) else int(f_state.point_2_price)
-                    current_anchor = f"{int(f_state.point_2_price)}_{anchor_ts}"
+                    # Option C fix: also include BOS (point_1) timestamp so that 15M and 30M
+                    # setups referencing the same swing low (identical point_2_price) but confirmed
+                    # on different BOS candles get genuinely distinct signal IDs.
+                    p1_ts = getattr(f_state, "point_1_timestamp", None)
+                    bos_ts_seg = f"_{int(p1_ts.timestamp())}" if (p1_ts and hasattr(p1_ts, "timestamp")) else ""
+                    current_anchor = f"{int(f_state.point_2_price)}_{anchor_ts}{bos_ts_seg}"
 
                     for l_key, layer in f_state.layers.items():
                         ratio_val = 0.618 if l_key == "L1" else (0.500 if l_key == "L2" else 0.382)
@@ -426,40 +431,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                     logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond SL)", sig_id, live_price)
                                                     continue
 
-                                # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
-                                # Only active if user explicitly enables cross_tf_dedup_enabled.
-                                # By default, 5M, 15M, 30M, 1H execute in independent timeframe slots!
-                                if getattr(exec_cfg, "cross_tf_dedup_enabled", False):
-                                    norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
-                                    dup_query = await db.execute(
-                                        select(PaperTradeModel).where(
-                                            PaperTradeModel.state == "OPEN",
-                                            PaperTradeModel.direction.in_(norm_dirs),
-                                            ~PaperTradeModel.signal_id.like(f"%_{tf_key.upper()}_%"),
-                                            or_(
-                                                and_(
-                                                    func.abs(PaperTradeModel.target_entry - entry_px) <= 5.0,
-                                                    func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
-                                                ),
-                                                and_(
-                                                    func.abs(PaperTradeModel.take_profit_1 - tp_px) <= 2.5,
-                                                    func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
-                                                ),
-                                            ),
-                                        )
+                                # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER (always-on) ---
+                                # Prevents opening a near-identical trade when another timeframe
+                                # slot already has an OPEN position at the same entry price,
+                                # same direction, and same SL (±0.50 pts tolerance).
+                                # This fires when 15M & 30M engines both detect the same swing
+                                # structure and would otherwise open two trades at $4302.05 LONG.
+                                norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
+                                dup_query = await db.execute(
+                                    select(PaperTradeModel).where(
+                                        PaperTradeModel.state == "OPEN",
+                                        PaperTradeModel.direction.in_(norm_dirs),
+                                        ~PaperTradeModel.signal_id.like(f"%_{tf_key.upper()}_%"),
+                                        func.abs(PaperTradeModel.target_entry - entry_px) <= 0.50,
+                                        func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
                                     )
-                                    existing_dup = dup_query.scalars().first()
-                                    if existing_dup:
-                                        logger.info(
-                                            "[PAPER-AUTO] De-duplication: Skipping duplicate trade on %s because active %s trade already exists at $%.2f (ID: %s, SL: $%.2f, TP: $%.2f)",
-                                            tf_key.upper(),
-                                            existing_dup.direction,
-                                            existing_dup.target_entry,
-                                            existing_dup.id[:8],
-                                            existing_dup.stop_loss,
-                                            existing_dup.take_profit_1,
-                                        )
-                                        continue
+                                )
+                                existing_dup = dup_query.scalars().first()
+                                if existing_dup:
+                                    logger.info(
+                                        "[PAPER-XDEDUP] Skipping %s %s: another TF already has OPEN %s @ $%.2f (entry diff ≤$0.50, SL diff ≤$2.50) — sig %s",
+                                        tf_key.upper(), l_key,
+                                        existing_dup.direction,
+                                        existing_dup.target_entry,
+                                        existing_dup.signal_id,
+                                    )
+                                    continue
 
                                 # --- MINIMUM IMPULSE RANGE FILTER (DISABLED PER USER REQUEST) ---
                                 # Rejects micro sideways consolidation noise when enabled

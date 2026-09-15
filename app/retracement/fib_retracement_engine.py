@@ -1256,7 +1256,9 @@ class DualRetracementEngine:
                     ))
 
                     # Check if the same tick also filled deeper layers L2 / L3
-                    if setup.fib_0_500 is not None and live_price <= setup.fib_0_500 and "L2" not in setup.layers:
+                    # +0.02 pt tolerance handles tick-feed float rounding (e.g. $4299.63 instead of exact $4299.62)
+                    _L2_TOL = 0.02  # tolerance in price points for L2/L3 near-touch detection
+                    if setup.fib_0_500 is not None and live_price <= setup.fib_0_500 + _L2_TOL and "L2" not in setup.layers:
                         setup.layers["L2"] = {
                             "layer": "L2",
                             "entry_ratio": 0.500,
@@ -1269,7 +1271,7 @@ class DualRetracementEngine:
                             "filled_at": ts.isoformat(),
                             "filled_candle_ts": curr_candle_ts,
                         }
-                    if setup.fib_0_382 is not None and live_price <= setup.fib_0_382 and "L3" not in setup.layers:
+                    if setup.fib_0_382 is not None and live_price <= setup.fib_0_382 + _L2_TOL and "L3" not in setup.layers:
                         setup.layers["L3"] = {
                             "layer": "L3",
                             "entry_ratio": 0.382,
@@ -1358,7 +1360,9 @@ class DualRetracementEngine:
                     ))
 
                     # Check deeper layers L2 / L3
-                    if setup.fib_0_500 is not None and live_price >= setup.fib_0_500 and "L2" not in setup.layers:
+                    # -0.02 pt tolerance: for SHORT, price rises to touch L2; a tick at $4299.61 vs exact $4299.62 still qualifies
+                    _L2_TOL = 0.02  # tolerance in price points for L2/L3 near-touch detection
+                    if setup.fib_0_500 is not None and live_price >= setup.fib_0_500 - _L2_TOL and "L2" not in setup.layers:
                         setup.layers["L2"] = {
                             "layer": "L2",
                             "entry_ratio": 0.500,
@@ -1371,7 +1375,7 @@ class DualRetracementEngine:
                             "filled_at": ts.isoformat(),
                             "filled_candle_ts": curr_candle_ts,
                         }
-                    if setup.fib_0_382 is not None and live_price >= setup.fib_0_382 and "L3" not in setup.layers:
+                    if setup.fib_0_382 is not None and live_price >= setup.fib_0_382 - _L2_TOL and "L3" not in setup.layers:
                         setup.layers["L3"] = {
                             "layer": "L3",
                             "entry_ratio": 0.382,
@@ -1410,9 +1414,11 @@ class DualRetracementEngine:
         # ------------------------------------------------------------------
         if setup.state == RetracementState.TRADE_ACTIVE:
             # Check and fill deeper layers (L2, L3) on live pullback
+            # ±0.02 pt tolerance on all layer checks to handle tick-feed float rounding
+            _L2_TOL = 0.02
             if len(setup.layers) < 3:
                 if setup.direction == "LONG":
-                    if "L2" not in setup.layers and setup.fib_0_500 is not None and live_price <= setup.fib_0_500:
+                    if "L2" not in setup.layers and setup.fib_0_500 is not None and live_price <= setup.fib_0_500 + _L2_TOL:
                         setup.layers["L2"] = {
                             "layer": "L2", "entry_ratio": 0.500, "entry_price": round(setup.fib_0_500, 2),
                             "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
@@ -1420,7 +1426,7 @@ class DualRetracementEngine:
                             "state": "FILLED", "filled_at": ts.isoformat(),
                             "filled_candle_ts": curr_candle_ts,
                         }
-                    if "L3" not in setup.layers and setup.fib_0_382 is not None and live_price <= setup.fib_0_382:
+                    if "L3" not in setup.layers and setup.fib_0_382 is not None and live_price <= setup.fib_0_382 + _L2_TOL:
                         setup.layers["L3"] = {
                             "layer": "L3", "entry_ratio": 0.382, "entry_price": round(setup.fib_0_382, 2),
                             "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
@@ -1429,7 +1435,7 @@ class DualRetracementEngine:
                             "filled_candle_ts": curr_candle_ts,
                         }
                 else:  # SHORT
-                    if "L2" not in setup.layers and setup.fib_0_500 is not None and live_price >= setup.fib_0_500:
+                    if "L2" not in setup.layers and setup.fib_0_500 is not None and live_price >= setup.fib_0_500 - _L2_TOL:
                         setup.layers["L2"] = {
                             "layer": "L2", "entry_ratio": 0.500, "entry_price": round(setup.fib_0_500, 2),
                             "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
@@ -1437,7 +1443,7 @@ class DualRetracementEngine:
                             "state": "FILLED", "filled_at": ts.isoformat(),
                             "filled_candle_ts": curr_candle_ts,
                         }
-                    if "L3" not in setup.layers and setup.fib_0_382 is not None and live_price >= setup.fib_0_382:
+                    if "L3" not in setup.layers and setup.fib_0_382 is not None and live_price >= setup.fib_0_382 - _L2_TOL:
                         setup.layers["L3"] = {
                             "layer": "L3", "entry_ratio": 0.382, "entry_price": round(setup.fib_0_382, 2),
                             "tp": round(setup.fib_0_618, 2), "sl": round(setup.sl_price, 2) if setup.sl_price else None,
