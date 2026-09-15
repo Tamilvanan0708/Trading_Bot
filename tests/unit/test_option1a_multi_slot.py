@@ -366,7 +366,7 @@ async def test_fast_tp_layer_captured_and_records_profit(in_memory_db: AsyncSess
     from app.retracement.models import RetracementSetup
 
     p2_time = datetime(2026, 9, 9, 21, 20, tzinfo=timezone.utc)
-    setup_with_tp = RetracementSetup(
+    setup = RetracementSetup(
         direction="SHORT",
         point_1_price=4414.0,
         point_2_price=4430.0,
@@ -378,14 +378,73 @@ async def test_fast_tp_layer_captured_and_records_profit(in_memory_db: AsyncSess
         fib_0_382=4412.0,
         fib_1_000=4385.0,
         layers={
-            "L2": {"state": "TP_HIT", "entry_price": 4407.0, "tp": 4402.0, "sl": 4420.0},
+            "L2": {"state": "FILLED", "entry_price": 4407.0, "tp": 4402.0, "sl": 4420.0},
         },
     )
 
     class FakeMonitor:
         timeframes = ["5m"]
+        def __init__(self, current_setup):
+            self._setup = current_setup
         async def advance(self, db):
-            return {"5m": setup_with_tp}
+            return {"5m": self._setup}
+
+    # Step 1: Layer fills in real time -> trade is opened as OPEN
+    fake_mon = FakeMonitor(setup)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: fake_mon)
+
+    await sync_strategy_paper_trades(in_memory_db, force=True)
+
+    l2_trades = (await in_memory_db.execute(
+        select(PaperTradeModel).where(
+            PaperTradeModel.signal_id.like("FIB_RETR_5M_L2_%"),
+        )
+    )).scalars().all()
+    assert len(l2_trades) == 1, "L2 trade must be opened in paper trades table!"
+    assert l2_trades[0].state == "OPEN", "New trade must start as OPEN!"
+
+    # Step 2: Live market moves and layer transitions to TP_HIT -> trade is closed with profit
+    setup.layers["L2"]["state"] = "TP_HIT"
+    await sync_strategy_paper_trades(in_memory_db, force=True)
+    monkeypatch.undo()
+
+    await in_memory_db.refresh(l2_trades[0])
+    t = l2_trades[0]
+    assert t.state == "CLOSED"
+    assert t.exit_reason == "TP_HIT"
+    assert t.exit_price == 4402.0
+    assert t.actual_entry == 4407.0
+    assert t.realized_pnl is not None and t.realized_pnl > 0.0, f"Expected positive realized PnL, got {t.realized_pnl}"
+
+
+@pytest.mark.asyncio
+async def test_historical_completed_tp_layer_is_not_inserted_as_ghost_trade(in_memory_db: AsyncSession):
+    """Verify that a layer that already completed (TP_HIT) in past history before being tracked is skipped."""
+    import app.paper_trading.sync as pt_sync
+    from app.retracement.models import RetracementSetup
+
+    p2_time = datetime(2026, 9, 9, 21, 20, tzinfo=timezone.utc)
+    historical_setup = RetracementSetup(
+        direction="SHORT",
+        point_1_price=4414.0,
+        point_2_price=4430.0,
+        point_2_timestamp=p2_time,
+        sl_price=4420.0,
+        fib_0_236=4420.0,
+        fib_0_618=4402.0,
+        fib_0_500=4407.0,
+        fib_0_382=4412.0,
+        fib_1_000=4385.0,
+        layers={
+            "L1": {"state": "TP_HIT", "entry_price": 4402.0, "tp": 4385.0, "sl": 4420.0},
+        },
+    )
+
+    class FakeMonitor:
+        timeframes = ["15m"]
+        async def advance(self, db):
+            return {"15m": historical_setup}
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(pt_sync, "get_retracement_multi_tf_service", lambda sym: FakeMonitor())
@@ -393,19 +452,13 @@ async def test_fast_tp_layer_captured_and_records_profit(in_memory_db: AsyncSess
     await sync_strategy_paper_trades(in_memory_db, force=True)
     monkeypatch.undo()
 
-    # L2 must be recorded in paper trades as CLOSED with exit_reason TP_HIT and positive realized_pnl!
-    l2_trades = (await in_memory_db.execute(
+    # Pre-completed L1 must NOT be inserted into paper trades!
+    trades = (await in_memory_db.execute(
         select(PaperTradeModel).where(
-            PaperTradeModel.signal_id.like("FIB_RETR_5M_L2_%"),
+            PaperTradeModel.signal_id.like("FIB_RETR_15M_L1_%"),
         )
     )).scalars().all()
-    assert len(l2_trades) == 1, "L2 fast TP trade must be created in paper trades table!"
-    t = l2_trades[0]
-    assert t.state == "CLOSED"
-    assert t.exit_reason == "TP_HIT"
-    assert t.exit_price == 4402.0
-    assert t.actual_entry == 4407.0
-    assert t.realized_pnl is not None and t.realized_pnl > 0.0, f"Expected positive realized PnL, got {t.realized_pnl}"
+    assert len(trades) == 0, "Historical already-completed TP layer must NEVER be inserted into paper trades table!"
 
 
 @pytest.mark.asyncio
