@@ -129,7 +129,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         if exec_cfg.strategy_fib_retracement:
             try:
                 fib_svc = get_retracement_multi_tf_service("XAUUSD")
-                fib_states = await fib_svc.advance(db, live_price=live_price)
+                try:
+                    fib_states = await fib_svc.advance(db, live_price=live_price)
+                except TypeError:
+                    fib_states = await fib_svc.advance(db)
 
                 try:
                     _fib_slots = getattr(fib_svc, "slots", None)
@@ -180,6 +183,12 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         continue
                     # Determine exit price and reason from last_completed
                     _lc = getattr(_engine, "last_completed", None)
+                    if _lc is None and getattr(_slot, "last_completed", None) is not None:
+                        _lc = _slot.last_completed
+                    if _lc is None and _ot.opened_at:
+                        _ot_tz = _ot.opened_at if _ot.opened_at.tzinfo else _ot.opened_at.replace(tzinfo=timezone.utc)
+                        if (datetime.now(timezone.utc) - _ot_tz).total_seconds() < 60:
+                            continue
                     _outcome = getattr(_lc, "outcome", None) if _lc else None
                     _locked_tp = getattr(_lc, "locked_tp", None) if _lc else None
                     _sl_price = getattr(_lc, "sl_price", None) if _lc else None
@@ -431,30 +440,47 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                     logger.info("[PAPER-AUTO] Skipping stale %s (global price %.2f beyond SL)", sig_id, live_price)
                                                     continue
 
-                                # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER (always-on) ---
-                                # Prevents opening a near-identical trade when another timeframe
-                                # slot already has an OPEN position at the same entry price,
-                                # same direction, and same SL (±0.50 pts tolerance).
-                                # This fires when 15M & 30M engines both detect the same swing
-                                # structure and would otherwise open two trades at $4302.05 LONG.
+                                # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
+                                # 1) If cross_tf_dedup_enabled is True: matches entry (≤5.0) / SL (≤2.5) / TP (≤2.5)
+                                # 2) Default: always blocks near-identical duplicate entries (≤0.50 pt diff) across TFs with same direction & SL
+                                is_explicit_dedup = getattr(exec_cfg, "cross_tf_dedup_enabled", False)
                                 norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
+                                if is_explicit_dedup:
+                                    dup_cond = or_(
+                                        and_(
+                                            func.abs(PaperTradeModel.target_entry - entry_px) <= 5.0,
+                                            func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                        ),
+                                        and_(
+                                            func.abs(PaperTradeModel.take_profit_1 - tp_px) <= 2.5,
+                                            func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                        ),
+                                    )
+                                else:
+                                    dup_cond = and_(
+                                        func.abs(PaperTradeModel.target_entry - entry_px) <= 0.50,
+                                        func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                    )
+
                                 dup_query = await db.execute(
                                     select(PaperTradeModel).where(
                                         PaperTradeModel.state == "OPEN",
                                         PaperTradeModel.direction.in_(norm_dirs),
                                         ~PaperTradeModel.signal_id.like(f"%_{tf_key.upper()}_%"),
-                                        func.abs(PaperTradeModel.target_entry - entry_px) <= 0.50,
-                                        func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                        dup_cond,
                                     )
                                 )
                                 existing_dup = dup_query.scalars().first()
                                 if existing_dup:
                                     logger.info(
-                                        "[PAPER-XDEDUP] Skipping %s %s: another TF already has OPEN %s @ $%.2f (entry diff ≤$0.50, SL diff ≤$2.50) — sig %s",
-                                        tf_key.upper(), l_key,
+                                        "[PAPER-XDEDUP] Skipping duplicate trade on %s because active %s trade already exists at $%.2f (ID: %s, SL: $%.2f, TP: $%.2f) — sig %s",
+                                        tf_key.upper(),
                                         existing_dup.direction,
                                         existing_dup.target_entry,
-                                        existing_dup.signal_id,
+                                        existing_dup.id[:8],
+                                        existing_dup.stop_loss,
+                                        existing_dup.take_profit_1,
+                                        sig_id,
                                     )
                                     continue
 
