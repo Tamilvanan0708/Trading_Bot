@@ -1175,7 +1175,7 @@ class DualRetracementEngine:
 
         return events
 
-    def evaluate_live_price(self, live_price: float, timestamp: datetime | None = None) -> list[RetracementEvent]:
+    def evaluate_live_price(self, live_price: float, timestamp: datetime | None = None, curr_candle_ts: datetime | None = None) -> list[RetracementEvent]:
         """Instant Real-Time Tick Touch Execution for Entry, TP, and SL.
         
         Evaluates the real-time live price / forming tick against the active setup without
@@ -1194,7 +1194,7 @@ class DualRetracementEngine:
             return []
 
         ts = timestamp or (self._candles[-1].timestamp if self._candles else datetime.now(timezone.utc))
-        curr_candle_ts = self._candles[-1].timestamp if self._candles else (timestamp or ts)
+        curr_candle_ts = curr_candle_ts or (self._candles[-1].timestamp if self._candles else (timestamp or ts))
         events: list[RetracementEvent] = []
 
         # ------------------------------------------------------------------

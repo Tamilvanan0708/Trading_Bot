@@ -478,9 +478,25 @@ class StrategyBacktester:
         trades: list[BacktestTradeRecord] = []
         tf_active_setup: dict[str, str | None] = {tf: None for tf in timeframes}
         resolved_layers: set[tuple[str, str]] = set()
-
         for ts, tf, candle in timeline:
             eng = engines[tf]
+
+            # 0. Live-Tick Intra-Candle Simulation:
+            # If the engine has an active setup waiting for entry (TP_DYNAMIC) or in trade (TRADE_ACTIVE),
+            # simulate intra-candle price ticks (Open -> Low/High -> High/Low -> Close)
+            # using evaluate_live_price, exactly mirroring how live market ticks arrive!
+            if eng.setup is not None and eng.setup.state in (RetracementState.TP_DYNAMIC, RetracementState.TRADE_ACTIVE):
+                is_bull = candle.close >= candle.open
+                intra_ticks = [
+                    (candle.open, candle.timestamp),
+                    (candle.low if is_bull else candle.high, candle.timestamp + timedelta(seconds=1)),
+                    (candle.high if is_bull else candle.low, candle.timestamp + timedelta(seconds=2)),
+                    (candle.close, candle.timestamp + timedelta(seconds=3)),
+                ]
+                for px, tick_ts in intra_ticks:
+                    if eng.setup is None:
+                        break
+                    eng.evaluate_live_price(px, tick_ts, curr_candle_ts=candle.timestamp)
 
             # 1. Advance engine with this candle
             eng.process_candle(candle)
