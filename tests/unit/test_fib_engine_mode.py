@@ -205,8 +205,8 @@ def test_timeframe_adaptive_fractal_bars():
     assert eng_3m.right_bars == 2
 
     eng_15m = DualRetracementEngine(symbol="XAUUSD", timeframe="15m")
-    assert eng_15m.left_bars == 3
-    assert eng_15m.right_bars == 3
+    assert eng_15m.left_bars == 2
+    assert eng_15m.right_bars == 2
 
     eng_1h = DualRetracementEngine(symbol="XAUUSD", timeframe="1h")
     assert eng_1h.left_bars == 3

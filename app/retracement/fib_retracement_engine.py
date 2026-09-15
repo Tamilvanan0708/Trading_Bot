@@ -65,11 +65,11 @@ class DualRetracementEngine:
         self.symbol = symbol
         self.timeframe = timeframe
         # Timeframe-adaptive fractal swings:
-        # Fast scalping timeframes (5m, 3m, 1m) use 2-bar fractals (5-bar window)
-        # to capture agile intraday swings matching TradingView scalping charts.
-        # Higher timeframes (15m, 30m, 1h, 4h) maintain 3-bar fractals (7-bar window) for structural stability.
+        # Fast & intermediate timeframes (1m, 3m, 5m, 15m) use 2-bar fractals (5-bar window)
+        # to capture agile intraday swings matching TradingView scalping & intraday charts.
+        # Higher timeframes (30m, 1h, 4h) maintain 3-bar fractals (7-bar window) for structural stability.
         tf = str(timeframe).lower()
-        default_bars = 2 if tf in ("1m", "3m", "5m") else 3
+        default_bars = 2 if tf in ("1m", "3m", "5m", "15m") else 3
         self.left_bars = left_bars if left_bars is not None else default_bars
         self.right_bars = right_bars if right_bars is not None else default_bars
         self.smart_shield_level = smart_shield_level
@@ -285,9 +285,9 @@ class DualRetracementEngine:
                             # Short TF: prefer the most recent HL immediately before BOS
                             # (staircase Higher Low anchoring), not the macro absolute bottom.
                             # Max span guard: if the most-recent HL still produces an
-                            # over-extended Fib (> 22 pts for Gold 5m), walk forward
+                            # over-extended Fib (> 35 pts for Gold 5m), walk forward
                             # to the next more recent HL.
-                            MAX_SPAN_5M = 22.0 if (self._candles and self._candles[-1].close > 1000.0) else 8.0
+                            MAX_SPAN_5M = 35.0 if (self._candles and self._candles[-1].close > 1000.0) else 12.0
                             sorted_by_time = sorted(lows_before_bos, key=lambda s: s.index, reverse=True)
                             anchor_low = sorted_by_time[0]  # most recent HL first
                             for candidate in sorted_by_time:
@@ -361,7 +361,7 @@ class DualRetracementEngine:
                         if tf_str in ("1m", "3m", "5m"):
                             # Short TF: prefer the most recent LH immediately before BOS
                             # (staircase Lower High anchoring), not the macro absolute top.
-                            MAX_SPAN_5M = 22.0 if (self._candles and self._candles[-1].close > 1000.0) else 8.0
+                            MAX_SPAN_5M = 35.0 if (self._candles and self._candles[-1].close > 1000.0) else 12.0
                             sorted_by_time = sorted(highs_before_bos, key=lambda s: s.index, reverse=True)
                             anchor_high = sorted_by_time[0]
                             for candidate in sorted_by_time:
