@@ -354,8 +354,15 @@ class DualRetracementEngine:
                     # the Fib anchor matches exactly what a trader sees on TradingView.
                     highs_before_bos = [
                         s for s in confirmed_highs
-                        if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
+                        if s.index < len(self._candles) - 1
+                        and (len(self._candles) - 1 - s.index) <= lookback_bars
+                        and s.price > last_sl.price
                     ]
+                    if not highs_before_bos:
+                        highs_before_bos = [
+                            s for s in confirmed_highs
+                            if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
+                        ]
                     if highs_before_bos:
                         tf_str = str(self.timeframe).lower()
                         if tf_str in ("1m", "3m", "5m"):

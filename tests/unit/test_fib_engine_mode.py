@@ -270,3 +270,46 @@ def test_same_candle_retrace_does_not_trigger_premature_tp():
     engine._track_active_trade(c_next)
     assert setup.layers["L1"]["state"] == "TP_HIT"
 
+
+def test_classic_mode_anchors_bearish_bos_to_breakout_structure_lower_high():
+    """In Classic Mode, if a lower high forms after the broken swing low,
+    the bearish anchor must pick this lower high of the breakout structure (TradingView match)."""
+    t0 = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+    dt = timedelta(minutes=5)
+    t = t0
+    candles = []
+
+    # Warmup bars
+    for _ in range(10):
+        candles.append(_c(t, 4290, 4292, 4288, 4290)); t += dt
+
+    # Macro swing high at 4297.20
+    candles.append(_c(t, 4290, 4294, 4289, 4293)); t += dt
+    candles.append(_c(t, 4293, 4297.20, 4292, 4296)); t += dt  # Swing High 4297.20
+    candles.append(_c(t, 4296, 4296, 4285, 4286)); t += dt
+    candles.append(_c(t, 4286, 4287, 4275, 4276)); t += dt
+
+    # Swing low at 4268.88
+    candles.append(_c(t, 4276, 4278, 4270, 4272)); t += dt
+    candles.append(_c(t, 4272, 4273, 4268.88, 4270)); t += dt  # Swing Low 4268.88
+    candles.append(_c(t, 4270, 4275, 4269.5, 4274)); t += dt
+    candles.append(_c(t, 4274, 4278, 4272.0, 4277)); t += dt
+
+    # Lower high at 4280.89 (formed AFTER the swing low at 4268.88)
+    candles.append(_c(t, 4277, 4280.89, 4276.0, 4279)); t += dt  # Lower High 4280.89
+    candles.append(_c(t, 4279, 4279.5, 4273.0, 4274)); t += dt
+    candles.append(_c(t, 4274, 4275.0, 4271.0, 4272)); t += dt
+
+    # Breakdown candle closes below 4268.88
+    candles.append(_c(t, 4272, 4272.5, 4266.0, 4266.5)); t += dt
+
+    engine = FibRetracementEngine(symbol="XAUUSD", timeframe="5m", engine_mode="classic")
+    for c in candles:
+        engine.process_candle(c)
+
+    assert engine.setup is not None
+    assert engine.setup.direction == "SHORT"
+    # Anchor must be the Lower High (4280.89), NOT the distant 4297.20!
+    assert engine.setup.point_2_price == 4280.89
+
+
