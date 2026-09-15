@@ -31,6 +31,17 @@ from app.signals.models import SignalPayload
 _sync_lock = asyncio.Lock()
 _in_flight_signals: set[str] = set()
 _last_paper_sync_ts: float = 0.0
+_bg_tg_tasks: set[asyncio.Task] = set()
+
+
+def _dispatch_tg_alert(coro) -> asyncio.Task:
+    """Dispatches a Telegram alert in a shielded background task with a strong reference
+    so it is NEVER cancelled by outer sync timeouts or garbage-collected.
+    """
+    task = asyncio.create_task(coro)
+    _bg_tg_tasks.add(task)
+    task.add_done_callback(_bg_tg_tasks.discard)
+    return task
 
 
 async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> None:
@@ -238,7 +249,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 f"💰 *Realized PnL:* {pnl_str} ({pts_str} PTS)\n"
                                 f"━━━━━━━━━━━━━━━━━━━━"
                             )
-                            await tg.send_raw_alert(orphan_msg)
+                            _dispatch_tg_alert(tg.send_raw_alert(orphan_msg))
                         except Exception as tg_err:
                             logger.warning("[PAPER-TG] Failed to send orphan close alert: %s", tg_err)
 
@@ -758,7 +769,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 f"⚡ *Multi-Slot:* {tf_key.upper()} Active (15M, 30M, 1H scanning in parallel)\n"
                                                 f"━━━━━━━━━━━━━━━━━━━━"
                                             )
-                                            await tg.send_raw_alert(msg)
+                                            _dispatch_tg_alert(tg.send_raw_alert(msg))
                                         except Exception as tg_err:  # noqa: BLE001
                                             logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                                 finally:
@@ -797,7 +808,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             f"💰 *Profit:* +${existing.realized_pnl:.2f}\n"
                                             f"━━━━━━━━━━━━━━━━━━━━"
                                         )
-                                        await tg.send_raw_alert(tp_msg)
+                                        _dispatch_tg_alert(tg.send_raw_alert(tp_msg))
                                     except Exception as tg_err:
                                         logger.warning("[PAPER-TG] Failed to send TP hit alert: %s", tg_err)
 
@@ -840,7 +851,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                         f"🛡 *Downside Risk:* 0.00 (Risk-Free Trade)\n"
                                                         f"━━━━━━━━━━━━━━━━━━━━"
                                                     )
-                                                    await tg.send_raw_alert(shield_msg)
+                                                    _dispatch_tg_alert(tg.send_raw_alert(shield_msg))
                                                 except Exception as tg_err:
                                                     logger.warning("[PAPER-TG] Failed to send shield alert: %s", tg_err)
 
@@ -885,7 +896,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             f"💰 *Realized PnL:* {pnl_str}\n"
                                             f"━━━━━━━━━━━━━━━━━━━━"
                                         )
-                                        await tg.send_raw_alert(sl_msg)
+                                        _dispatch_tg_alert(tg.send_raw_alert(sl_msg))
                                     except Exception as tg_err:
                                         logger.warning("[PAPER-TG] Failed to send SL hit alert: %s", tg_err)
 
@@ -1221,7 +1232,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         f"⚡ *Multi-Slot:* {tf_key.upper()} Active (Parallel execution)\n"
                                         f"━━━━━━━━━━━━━━━━━━━━"
                                     )
-                                    await tg.send_raw_alert(msg)
+                                    _dispatch_tg_alert(tg.send_raw_alert(msg))
                                 except Exception as tg_err:  # noqa: BLE001
                                     logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                             finally:
@@ -1367,7 +1378,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         f"⚡ *Multi-Slot:* {tf_key.upper()} Active (Parallel execution)\n"
                                         f"━━━━━━━━━━━━━━━━━━━━"
                                     )
-                                    await tg.send_raw_alert(msg)
+                                    _dispatch_tg_alert(tg.send_raw_alert(msg))
                                 except Exception as tg_err:  # noqa: BLE001
                                     logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                             finally:
@@ -1626,7 +1637,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 f"📉 *Result:* -{abs(pts):.2f} PTS (-{curr_sym}{abs(t.realized_pnl):.2f} {curr_name})\n"
                                 f"━━━━━━━━━━━━━━━━━━━━"
                             )
-                        await tg.send_raw_alert(msg)
+                        _dispatch_tg_alert(tg.send_raw_alert(msg))
                     except Exception as tg_err:  # noqa: BLE001
                         logger.warning("[PAPER-TG] Failed to send close alert: %s", tg_err)
 

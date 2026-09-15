@@ -84,6 +84,14 @@ class TelegramService:
                     if repo:
                         await self._log_notification(repo, "", "TELEGRAM", "SENT", "OK")
                     return True
+                # If Telegram rejects markdown entities (e.g. unescaped symbols), retry as plain text
+                if res.status_code == 400 and ("parse entities" in res.text or "can't parse" in res.text):
+                    fallback_res = await client.post(url, json={"chat_id": self.settings.TELEGRAM_CHAT_ID, "text": text})
+                    if fallback_res.status_code == 200:
+                        logger.info("Telegram raw alert sent successfully via plain-text fallback.")
+                        if repo:
+                            await self._log_notification(repo, "", "TELEGRAM", "SENT", "OK_FALLBACK")
+                        return True
                 logger.error("Telegram raw alert error %s: %s", res.status_code, res.text)
                 if repo:
                     await self._log_notification(repo, "", "TELEGRAM", "FAILED", res.text[:200])
