@@ -63,8 +63,8 @@ class ExecutionSettings(BaseModel):
         description="Auto-move L1 SL when L2/L3 TP hits"
     )
     smart_shield_level: Literal["0.618", "0.500"] = Field(
-        default="0.618",
-        description="Smart shield L1 SL target: 0.618 (Entry Breakeven) or 0.500 (Buffer)"
+        default="0.500",
+        description="Smart shield L1 SL target: 0.500 (Buffer with breathing room) or 0.618 (Entry Breakeven)"
     )
     account_leverage: int = Field(
         default=500,

@@ -1088,25 +1088,22 @@ class DualRetracementEngine:
                 if candle.high >= layer["tp"]:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = layer["tp"]
-                    # ── SMART SHIELD: 0.618 ENTRY BREAKEVEN / 0.500 BUFFER SHIELD ─────
+                    # ── SMART SHIELD: 0.500 BUFFER SHIELD / 0.618 BREAKEVEN ─────
                     # When L2 or L3 hit TP (bounced back to 0.618):
-                    #   → Move L1 Stop Loss to 0.618 (Entry Breakeven) or 0.500 (Buffer)
+                    #   → Move L1 Stop Loss to 0.500 (Buffer with breathing room) or 0.618 (Entry Breakeven)
                     #   NOTE: Do NOT overwrite setup.sl_price (0.236 invalidation level)!
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
-                        shield_lvl = self.smart_shield_level
-                        if not shield_lvl:
-                            try:
-                                shield_lvl = getattr(get_execution_settings(), "smart_shield_level", "0.618")
-                            except Exception:
-                                shield_lvl = "0.618"
-                        target_level = setup.fib_0_618 if shield_lvl == "0.618" else setup.fib_0_500
-                        if target_level is not None and (setup.layers["L1"].get("sl") is None or setup.layers["L1"]["sl"] < target_level):
-                            setup.layers["L1"]["sl"] = round(target_level, 2)
-                            setup.layers["L1"]["shield_stage"] = 1
-                            logger.info(
-                                "[SMART SHIELD] L%s TP hit → L1 SL raised to %s ($%.2f)",
-                                layer["layer"][-1], shield_lvl, target_level,
-                            )
+                        exec_cfg = get_execution_settings()
+                        if getattr(exec_cfg, "smart_shield_enabled", True):
+                            shield_lvl = self.smart_shield_level or getattr(exec_cfg, "smart_shield_level", "0.500")
+                            target_level = setup.fib_0_500 if shield_lvl == "0.500" else setup.fib_0_618
+                            if target_level is not None and (setup.layers["L1"].get("sl") is None or setup.layers["L1"]["sl"] < target_level):
+                                setup.layers["L1"]["sl"] = round(target_level, 2)
+                                setup.layers["L1"]["shield_stage"] = 1
+                                logger.info(
+                                    "[SMART SHIELD] L%s TP hit → L1 SL raised to %s ($%.2f)",
+                                    layer["layer"][-1], shield_lvl, target_level,
+                                )
 
         else:  # SHORT
             for layer in setup.layers.values():
@@ -1122,25 +1119,22 @@ class DualRetracementEngine:
                 if candle.low <= layer["tp"]:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = layer["tp"]
-                    # ── SMART SHIELD: 0.618 ENTRY BREAKEVEN / 0.500 BUFFER SHIELD ─────
+                    # ── SMART SHIELD: 0.500 BUFFER SHIELD / 0.618 BREAKEVEN ─────
                     # When L2 or L3 hit TP (bounced back to 0.618):
-                    #   → Move L1 Stop Loss to 0.618 (Entry Breakeven) or 0.500 (Buffer)
+                    #   → Move L1 Stop Loss to 0.500 (Buffer with breathing room) or 0.618 (Entry Breakeven)
                     #   NOTE: Do NOT overwrite setup.sl_price (0.236 invalidation level)!
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
-                        shield_lvl = self.smart_shield_level
-                        if not shield_lvl:
-                            try:
-                                shield_lvl = getattr(get_execution_settings(), "smart_shield_level", "0.618")
-                            except Exception:
-                                shield_lvl = "0.618"
-                        target_level = setup.fib_0_618 if shield_lvl == "0.618" else setup.fib_0_500
-                        if target_level is not None and (setup.layers["L1"].get("sl") is None or setup.layers["L1"]["sl"] > target_level):
-                            setup.layers["L1"]["sl"] = round(target_level, 2)
-                            setup.layers["L1"]["shield_stage"] = 1
-                            logger.info(
-                                "[SMART SHIELD] L%s TP hit → L1 SL lowered to %s ($%.2f)",
-                                layer["layer"][-1], shield_lvl, target_level,
-                            )
+                        exec_cfg = get_execution_settings()
+                        if getattr(exec_cfg, "smart_shield_enabled", True):
+                            shield_lvl = self.smart_shield_level or getattr(exec_cfg, "smart_shield_level", "0.500")
+                            target_level = setup.fib_0_500 if shield_lvl == "0.500" else setup.fib_0_618
+                            if target_level is not None and (setup.layers["L1"].get("sl") is None or setup.layers["L1"]["sl"] > target_level):
+                                setup.layers["L1"]["sl"] = round(target_level, 2)
+                                setup.layers["L1"]["shield_stage"] = 1
+                                logger.info(
+                                    "[SMART SHIELD] L%s TP hit → L1 SL lowered to %s ($%.2f)",
+                                    layer["layer"][-1], shield_lvl, target_level,
+                                )
 
         # Setup completes only when EVERY filled layer has resolved (TP/SL/escape).
         open_layers = [l for l in setup.layers.values() if l["state"] == "FILLED"]
@@ -1513,18 +1507,20 @@ class DualRetracementEngine:
                 if l_tp_hit:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = l_tp
-                    # Smart Shield trigger: Move L1 SL to 0.618 (Entry Breakeven) or 0.500 buffer
+                    # Smart Shield trigger: Move L1 SL to 0.500 buffer or 0.618 Entry Breakeven
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"].get("state") == "FILLED":
-                        shield_lvl = getattr(self, "smart_shield_level", "0.618")
-                        target_lvl = setup.fib_0_618 if shield_lvl == "0.618" else setup.fib_0_500
-                        if target_lvl is not None:
-                            curr_sl = setup.layers["L1"].get("sl")
-                            if setup.direction == "LONG" and (curr_sl is None or curr_sl < target_lvl):
-                                setup.layers["L1"]["sl"] = round(target_lvl, 2)
-                                setup.layers["L1"]["shield_stage"] = 1
-                            elif setup.direction == "SHORT" and (curr_sl is None or curr_sl > target_lvl):
-                                setup.layers["L1"]["sl"] = round(target_lvl, 2)
-                                setup.layers["L1"]["shield_stage"] = 1
+                        exec_cfg = get_execution_settings()
+                        if getattr(exec_cfg, "smart_shield_enabled", True):
+                            shield_lvl = self.smart_shield_level or getattr(exec_cfg, "smart_shield_level", "0.500")
+                            target_lvl = setup.fib_0_500 if shield_lvl == "0.500" else setup.fib_0_618
+                            if target_lvl is not None:
+                                curr_sl = setup.layers["L1"].get("sl")
+                                if setup.direction == "LONG" and (curr_sl is None or curr_sl < target_lvl):
+                                    setup.layers["L1"]["sl"] = round(target_lvl, 2)
+                                    setup.layers["L1"]["shield_stage"] = 1
+                                elif setup.direction == "SHORT" and (curr_sl is None or curr_sl > target_lvl):
+                                    setup.layers["L1"]["sl"] = round(target_lvl, 2)
+                                    setup.layers["L1"]["shield_stage"] = 1
 
             # 2e. Check if all open layers have resolved
             open_layers = [l for l in setup.layers.values() if l.get("state") == "FILLED"]

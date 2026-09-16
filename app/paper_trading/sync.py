@@ -409,7 +409,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     try:
                         await db.commit()
                         # 1. Dispatch MT5 bridge close if live execution is enabled
-                        if exec_cfg.mt5_bridge_enabled:
+                        # CRITICAL: ONLY dispatch close to MT5 if engine authoritatively recorded TP_HIT or SL_HIT.
+                        # NEVER close MT5 on internal scan reset (ENGINE_RESET_ORPHAN); live MT5 orders hold for full TP/SL!
+                        if exec_cfg.mt5_bridge_enabled and _outcome in ("TP_HIT", "SL_HIT"):
                             try:
                                 from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                                 get_mt5_bridge_manager().enqueue_close(
