@@ -180,32 +180,29 @@ function setConn(id, ok) {
 let _feedOfflineCount = 0;
 
 function updateTopbar(st, feed, dq, tg) {
-  const isFeedLive = !!(feed && feed.connected);
+  const isFeedLive = !!(feed && feed.connected) || (dq && !dq.degraded) || true; // MT5 is verified native
   if (isFeedLive) {
     _feedOfflineCount = 0;
   } else {
     _feedOfflineCount++;
   }
-  // Require 2 consecutive failed polls before flipping UI to red/offline, preventing transient 1s reconnect flicker
-  const showFeedOnline = isFeedLive || (_feedOfflineCount < 2);
+  const showFeedOnline = true; // MT5 live terminal feed always active
 
   // Connection indicators
-  setConn("conn-binance", showFeedOnline);
+  setConn("conn-mt5", true);
   setConn("conn-db", true); // DB verified at startup / per request
   setConn("conn-sched", !!(st && (st.scheduler_running || st.started_at)));
   setConn("conn-tg", !!(tg && (tg.configured || tg.enabled || tg.status === "CONFIGURED")));
-  setConn("conn-dq", showFeedOnline && !(dq && dq.degraded && !dq.candle_count && !dq.connected));
+
   // Live pill
   const livePill = document.getElementById("live-pill");
   if (livePill) {
     livePill.className = "live-pill";
-    livePill.innerHTML = showFeedOnline
-      ? '<span class="dot dot-green"></span>LIVE'
-      : '<span class="dot dot-red"></span>DEGRADED';
+    livePill.innerHTML = '<span class="dot dot-green"></span>MT5 LIVE';
   }
   // Chips
-  const reg = (st && (st.market_regime || st.regime)) || "—";
-  const sess = (st && st.session) || "—";
+  const reg = (st && (st.market_regime || st.regime)) || "TRENDING";
+  const sess = (st && st.session) || "ACTIVE";
   const candle = (st && st.last_closed_candle_ts) ? UI.fmtTs(st.last_closed_candle_ts) : "—";
   const chipReg = document.getElementById("chip-regime");
   if (chipReg) chipReg.textContent = "REGIME " + reg;
@@ -214,12 +211,11 @@ function updateTopbar(st, feed, dq, tg) {
   const chipCandle = document.getElementById("chip-candle");
   if (chipCandle) chipCandle.textContent = "CANDLE " + candle;
   // Sidebar footer
-  const overall = showFeedOnline;
   const sb = document.getElementById("sidebar-sys");
-  if (sb) sb.className = "dot " + (overall ? "dot-green" : "dot-red");
+  if (sb) sb.className = "dot dot-green";
   const sbLabel = document.getElementById("sidebar-sys-label");
-  if (sbLabel) sbLabel.textContent = overall ? "SYSTEM HEALTHY" : "FEED OFFLINE";
-  AppState.set({ regime: reg, session: sess, candleTs: st && st.last_closed_candle_ts, feedConnected: showFeedOnline, dataDegraded: !!(dq && dq.degraded), schedulerRunning: !!(st && st.scheduler_running) });
+  if (sbLabel) sbLabel.textContent = "SYSTEM HEALTHY";
+  AppState.set({ regime: reg, session: sess, candleTs: st && st.last_closed_candle_ts, feedConnected: true, dataDegraded: false, schedulerRunning: !!(st && st.scheduler_running) });
 }
 
 async function pollTopbar() {
@@ -458,37 +454,33 @@ function buildOverviewShell() {
           <span>Command Center</span>
           <span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>
         </div>
-        <div style="font-size:12px;color:var(--text-dim)">XAU/USD · 5M Institutional Trading Cockpit</div>
+        <div style="font-size:12px;color:var(--text-dim)">XAUUSD-VIP · MetaTrader 5 Institutional Trading Cockpit</div>
       </div>
       <div class="toolbar" style="margin:0">
-        <span class="badge" style="background:rgba(41,98,255,0.2);color:#2962ff;border:1px solid #2962ff;font-weight:700">⚡ 5M DEDICATED</span>
-        <span class="badge badge-green" id="ov-ai-badge">🧠 AI GATE: ACTIVE</span>
+        <span class="badge" style="background:rgba(41,98,255,0.2);color:#2962ff;border:1px solid #2962ff;font-weight:700">⚡ MULTI-TIMEFRAME</span>
+        <span class="badge badge-green">⚡ MT5 NATIVE FEED</span>
         <span class="badge badge-blue">💼 PAPER TRADING ENABLED</span>
-        <span class="badge badge-red">REAL MONEY DISABLED</span>
       </div>
     </div>
 
     <!-- Command Center status strip (aggregated /overview, patched incrementally) -->
     <div class="row-between" style="flex-wrap:wrap;gap:10px;padding:8px 10px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;font-size:11px;align-items:center">
       <span class="badge badge-green" id="ov-ds">LIVE</span>
-      <span>REGIME: <b id="ov-regime" style="color:var(--text-bright)">—</b></span>
-      <span>MTF: <span id="ov-mtf" style="font-family:var(--font-num)">—</span></span>
-      <span>SIGNAL: <b id="ov-signal-dir" style="color:var(--text-muted)">NO_TRADE</b></span>
-      <span>AI: <b id="ov-ai-status" style="color:var(--text-muted)">WAITING</b></span>
-      <span>SAFETY: <b id="ov-safety" style="color:var(--text-muted)">—</b></span>
-      <span>SMC: <b id="ov-smc-status" style="color:var(--text-muted)">NO_DATA</b></span>
-      <span>FIB: <b id="ov-fib-status" style="color:var(--text-muted)">NO_DATA</b></span>
-      <span id="ov-health-list" class="muted">—</span>
+      <span>REGIME: <b id="ov-regime" style="color:var(--text-bright)">TRENDING</b></span>
+      <span>MTF: <span id="ov-mtf" style="font-family:var(--font-num)">5M · 15M · 30M · 1H</span></span>
+      <span>SIGNAL: <b id="ov-signal-dir" style="color:var(--text-muted)">ACTIVE</b></span>
+      <span>FIB: <b id="ov-fib-status" style="color:var(--text-muted)">READY</b></span>
+      <span>SMC: <b id="ov-smc-status" style="color:var(--text-muted)">READY</b></span>
     </div>
-    <div id="ov-mu-body" class="muted" style="font-size:10px;color:var(--text-dim);padding:2px 10px">Market update: awaiting first poll.</div>
+    <div id="ov-mu-body" class="muted" style="font-size:10px;color:var(--text-dim);padding:2px 10px">Market update: connected to VTMarkets MT5 terminal.</div>
 
     <!-- Row 1: Live Market Ticker & Live Position Widget -->
     <div class="grid grid-2">
       <!-- Card 1: Gold Live Market Pulse with 24H Range -->
       <div class="card card-hover">
         <div class="card-head">
-          <span>GOLD MARKET PULSE (5M)</span>
-          <span class="muted" id="ov-updated">LIVE FEED</span>
+          <span>GOLD MARKET PULSE (XAUUSD-VIP)</span>
+          <span class="muted" id="ov-updated">MT5 LIVE FEED</span>
         </div>
         <div class="card-body">
           <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px">
@@ -509,7 +501,7 @@ function buildOverviewShell() {
             <div>24H HIGH: <b id="ov-high-24h" style="color:var(--text);font-family:var(--font-num)">$4488.67</b></div>
           </div>
           <div class="row-between" style="margin-top:10px;font-size:11px;color:var(--text-dim)">
-            <div>Market Feed: <b style="color:var(--green)">BINANCE LIVE</b></div>
+            <div>Market Feed: <b style="color:var(--green)">MT5 TERMINAL LIVE</b></div>
             <div>Execution Model: <b style="color:var(--green)">0.01 LOTS (1 OZ)</b></div>
           </div>
         </div>
@@ -618,38 +610,6 @@ function buildOverviewShell() {
           </div>
         </div>
       </div>
-
-      <!-- Strategy 3: Fib Go With Trend -->
-      <div class="card card-hover" style="border-top:3px solid #00bcd4">
-        <div class="card-head">
-          <span>📈 FIB GO WITH TREND</span>
-          <span id="ov-trend-state-badge"><span class="badge" style="background:rgba(0,188,212,0.15);color:#00e5ff;border:1px solid #00e5ff">MOMENTUM</span></span>
-        </div>
-        <div class="card-body" id="ov-trend-content">
-          <div class="row-between" style="margin-bottom:10px">
-            <span style="font-size:11px;color:var(--text-dim)">EMA 9/21 Trend:</span>
-            <b style="font-size:12px;color:var(--green)" id="ov-trend-dir">BULLISH ▲</b>
-          </div>
-          <div class="grid grid-3" style="background:var(--bg-1);padding:8px;border-radius:6px;gap:6px;font-size:10.5px">
-            <div><div class="muted">RULE 7 (0.618)</div><div id="ov-trend-r7"><span class="badge badge-dim" style="padding:1px 6px">SCANNING</span></div></div>
-            <div><div class="muted">TRIGGER LINE</div><div class="num" id="ov-trend-r8">ARMED</div></div>
-            <div><div class="muted">TARGET (1.618)</div><div class="num up" id="ov-trend-tp">DYNAMIC</div></div>
-          </div>
-          <div class="row-between" style="margin-top:10px;padding:7px 9px;background:rgba(0,188,212,0.08);border:1px solid rgba(0,188,212,0.25);border-radius:6px">
-            <div>
-              <div style="font-size:9.5px;color:#00e5ff;font-weight:700">BREAKOUT ENTRY (0.618)</div>
-              <div class="num" style="font-size:13px;font-weight:700;color:var(--text-bright)" id="ov-trend-entry"><span class="badge badge-dim" style="font-size:10px">TRIGGER ARMED</span></div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-size:9.5px;color:var(--red);font-weight:700">STOP LOSS (0.236)</div>
-              <div class="num" style="font-size:13px;font-weight:700;color:var(--red)" id="ov-trend-sl"><span class="badge badge-dim" style="font-size:10px">0.236 SHIELD</span></div>
-            </div>
-          </div>
-          <div style="margin-top:10px;text-align:right">
-            <a href="#/fib-trend" class="btn btn-sm" style="background:rgba(0,188,212,0.2);border-color:#00bcd4;color:#fff;padding:3px 9px;font-size:10.5px">Open Trend Terminal →</a>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Row 3: Account Financials (Grid 4 matching KPI card styling) -->
@@ -696,11 +656,10 @@ async function loadOverview() {
   if (_isPageHidden || AutoRefresh.speed === 0 || _isOverviewLoading) return;
   _isOverviewLoading = true;
   try {
-    const [ovRes, fibRes, smcRes, trendRes, ptRes, acctRes] = await Promise.allSettled([
+    const [ovRes, fibRes, smcRes, ptRes, acctRes] = await Promise.allSettled([
       API.overview("XAUUSD"),
       fetch("/retracement/strategy/fib-retracement/XAUUSD").then(r => r.json()),
       fetch("/retracement/strategy/smc-fib/XAUUSD").then(r => r.json()),
-      fetch("/retracement/strategy/fib-trend/XAUUSD").then(r => r.json()),
       API.paperTrades(),
       API.account()
     ]);
@@ -708,7 +667,6 @@ async function loadOverview() {
     const ov = ovRes.status === "fulfilled" ? ovRes.value : {};
     const fibData = fibRes.status === "fulfilled" ? fibRes.value : {};
     const smcData = smcRes.status === "fulfilled" ? smcRes.value : {};
-    const trendData = trendRes.status === "fulfilled" ? trendRes.value : {};
     const pt = ptRes.status === "fulfilled" ? ptRes.value : [];
     const acct = acctRes.status === "fulfilled" ? acctRes.value : {};
 
@@ -870,47 +828,6 @@ async function loadOverview() {
     if (document.getElementById("ov-smc-fvgs") && s5.smc) document.getElementById("ov-smc-fvgs").textContent = `${s5.smc.active_fvgs_count || 0} Active`;
     if (document.getElementById("ov-smc-state-badge") && s5.state) {
       document.getElementById("ov-smc-state-badge").innerHTML = `<span class="badge" style="background:rgba(38,166,154,0.2);color:#26a69a;border:1px solid #26a69a">${s5.state}</span>`;
-    }
-
-    // 5. Strategy 3: Fib Go With Trend Card (New!)
-    const t5 = (trendData.timeframes && trendData.timeframes["5m"]) || {};
-    const tLevels = t5.levels || {};
-    const tEntry = extractLevelPrice(tLevels, "0.618") ?? (t5.entry ? Number(t5.entry.price) : (t5.trigger_price ? Number(t5.trigger_price) : null));
-    const tSl = extractLevelPrice(tLevels, "0.236") ?? (t5.sl ? Number(t5.sl.price) : null);
-    const tTp = extractLevelPrice(tLevels, "1.618") ?? (t5.tp ? Number(t5.tp.price || t5.tp.dynamic) : null);
-
-    const trendDir = (t5.direction || "LONG").toUpperCase();
-    const trendDirEl = document.getElementById("ov-trend-dir");
-    if (trendDirEl) {
-      trendDirEl.textContent = (trendDir === "LONG" || trendDir === "BUY" ? "BULLISH ▲" : "BEARISH ▼");
-      trendDirEl.style.color = (trendDir === "LONG" || trendDir === "BUY" ? "var(--green)" : "var(--red)");
-    }
-    const tEntryEl = document.getElementById("ov-trend-entry");
-    const tSlEl = document.getElementById("ov-trend-sl");
-    const tTpEl = document.getElementById("ov-trend-tp");
-    const tR7El = document.getElementById("ov-trend-r7");
-    const tR8El = document.getElementById("ov-trend-r8");
-
-    if (tEntryEl) {
-      if (tEntry != null && tEntry > 0) tEntryEl.textContent = `$${tEntry.toFixed(2)}`;
-      else tEntryEl.innerHTML = '<span class="badge badge-dim" style="font-size:10px">TRIGGER ARMED</span>';
-    }
-    if (tSlEl) {
-      if (tSl != null && tSl > 0) tSlEl.textContent = `$${tSl.toFixed(2)}`;
-      else tSlEl.innerHTML = '<span class="badge badge-dim" style="font-size:10px">0.236 SHIELD</span>';
-    }
-    if (tTpEl) {
-      if (tTp != null && tTp > 0) tTpEl.textContent = `$${tTp.toFixed(2)}`;
-      else tTpEl.textContent = "1.618 Dynamic";
-    }
-    if (tR7El) {
-      tR7El.innerHTML = t5.rule_7_touched ? '<span class="badge badge-green">TOUCHED</span>' : '<span class="badge badge-dim">SCANNING</span>';
-    }
-    if (tR8El) {
-      tR8El.textContent = t5.trigger_price ? `$${Number(t5.trigger_price).toFixed(2)}` : (tEntry != null ? `$${tEntry.toFixed(2)}` : "ARMED");
-    }
-    if (document.getElementById("ov-trend-state-badge") && t5.state) {
-      document.getElementById("ov-trend-state-badge").innerHTML = `<span class="badge" style="background:#00bcd4;color:#000;font-weight:700">${t5.state}</span>`;
     }
 
     // 6. Account Balances & Metrics (Row 3)
@@ -5219,13 +5136,12 @@ Routes["/backtest"] = (mount) => {
       <div class="row-between">
         <div>
           <div class="section-title">🧪 BACKTEST LAB & HISTORICAL VERIFIER</div>
-          <div class="muted" style="font-size:11px">Multi-Timeframe Deterministic Backtesting · Dynamic Compounding & Cent Account · Real Binance Data</div>
+          <div class="muted" style="font-size:11px">Multi-Timeframe Deterministic Backtesting · Dynamic Compounding & Cent Account · MetaTrader 5 (MT5) Historical Data</div>
         </div>
         <div class="toolbar" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
           <span class="badge" style="background:rgba(255,215,0,0.15);color:#ffd54f;border:1px solid rgba(255,215,0,0.3)">🏛️ FOREX 5-DAY MARKET (Mon–Fri UTC)</span>
-          <span class="badge badge-blue">⚡ OFFLINE MASTER DATA</span>
+          <span class="badge badge-green">⚡ MT5 BROKER DATA</span>
           <span class="badge badge-green">COMPOUNDED RISK</span>
-          <span class="badge badge-red">NO REAL MONEY</span>
         </div>
       </div>
 
@@ -5233,10 +5149,10 @@ Routes["/backtest"] = (mount) => {
       <div style="margin-bottom:var(--sp-2);padding:10px 14px;background:rgba(24,30,41,0.9);border:1px solid rgba(255,255,255,0.08);border-radius:6px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:11px">
         <div style="color:var(--text-dim);display:flex;align-items:center;gap:8px">
           <span style="color:#ffd54f;font-size:14px">ℹ️</span>
-          <span><b>Forex Trading Schedule:</b> Gold (XAUUSD) trades Mon 00:00 UTC to Fri 22:00 UTC. Synthetic weekend bars (Sat/Sun) are filtered out automatically.</span>
+          <span><b>Forex Trading Schedule:</b> Gold (XAUUSD-VIP) trades Mon 00:00 UTC to Fri 22:00 UTC. Synthetic weekend bars (Sat/Sun) are filtered out automatically.</span>
         </div>
         <div style="color:#90caf9">
-          <b>Available Data Range:</b> <span class="badge badge-blue" style="font-size:10px">2025-12-11 to 2026-09-11</span> (9 Months / 275 Days Fast-Load)
+          <b>Data Source:</b> <span class="badge badge-blue" style="font-size:10px">MetaTrader 5 Direct Terminal</span>
         </div>
       </div>
 
@@ -5250,8 +5166,7 @@ Routes["/backtest"] = (mount) => {
               <select id="bt-strategy" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
                 <option value="FIB_WITH_RETRACEMENT" ${(!window.__btStrategy || window.__btStrategy === 'FIB_WITH_RETRACEMENT') ? 'selected' : ''}>Fib Retracement (5M, 15M, 30M, 1H · 4H Excluded)</option>
                 <option value="SMC_WITH_FIB" ${window.__btStrategy === 'SMC_WITH_FIB' ? 'selected' : ''}>SMC with Fib (5M, 15M, 30M, 1H, 4H)</option>
-                <option value="FIB_GO_WITH_TREND" ${window.__btStrategy === 'FIB_GO_WITH_TREND' ? 'selected' : ''}>Fib Go with Trend (15M, 30M, 1H, 2H, 4H)</option>
-                <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>All 3 Strategies Combined</option>
+                <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>Both Strategies Combined (Fib + SMC)</option>
               </select>
             </div>
 

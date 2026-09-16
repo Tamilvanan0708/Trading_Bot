@@ -206,11 +206,39 @@ async def fetch_historical_candles(
     binance_tf = TF_INTERVAL_MAP.get(tf_str, "15m")
     binance_symbol = "XAUUSDT" if symbol.upper() in ("XAUUSD", "XAUUSDT") else symbol.upper()
 
-    # Normalize datetimes to UTC
-    if start_dt.tzinfo is None:
-        start_dt = start_dt.replace(tzinfo=timezone.utc)
-    if end_dt.tzinfo is None:
-        end_dt = end_dt.replace(tzinfo=timezone.utc)
+    # 0. Primary: Fetch directly from MetaTrader 5 (MT5) if available on the system
+    try:
+        from app.config.settings import get_settings
+        settings = get_settings()
+        if settings.MT5_ENABLED or settings.LIVE_FEED_PROVIDER == "mt5":
+            from app.data.mt5_provider import MT5MarketDataProvider
+            from app.core.constants import TimeFrame
+            tf_enum = TF_ENUM_MAP.get(tf_str, TimeFrame.M15)
+            mt5_symbol = getattr(settings, "MT5_SYMBOL", "") or symbol
+            mt5_p = MT5MarketDataProvider(
+                symbol=mt5_symbol,
+                login=settings.MT5_LOGIN,
+                server=settings.MT5_SERVER,
+                password=settings.MT5_PASSWORD,
+                magic=settings.MT5_MAGIC,
+                timezone_offset_minutes=settings.MT5_TZ_OFFSET_MINUTES,
+            )
+            if not mt5_p.is_connected:
+                await mt5_p.connect_async()
+            mt5_candles = await mt5_p.get_ohlcv(
+                symbol=mt5_symbol,
+                timeframe=tf_enum,
+                start_time=start_dt,
+                end_time=end_dt,
+            )
+            if mt5_candles and len(mt5_candles) > 0:
+                logger.info(
+                    "[DATA-LOADER] Successfully loaded %d %s candles directly from MT5 (%s to %s)",
+                    len(mt5_candles), tf_str, start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+                )
+                return filter_forex_trading_days(mt5_candles) if filter_forex else mt5_candles
+    except Exception as mt5_err:  # noqa: BLE001
+        logger.debug("[DATA-LOADER] MT5 fetch unavailable or skipped: %s", mt5_err)
 
     start_str = start_dt.strftime("%Y%m%d_%H%M")
     end_str = end_dt.strftime("%Y%m%d_%H%M")

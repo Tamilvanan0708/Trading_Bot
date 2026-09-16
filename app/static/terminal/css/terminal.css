@@ -821,10 +821,10 @@ tr.trend-breakout-row {
   letter-spacing: 0.4px;
 }
 
-/* ---------- Command Center Triple Cockpit Layout ---------- */
+/* ---------- Command Center Dual Cockpit Layout ---------- */
 .overview-strat-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--sp-4);
 }
 /* ---------- Paper Trading SL / TP & Outcome Badges ---------- */
