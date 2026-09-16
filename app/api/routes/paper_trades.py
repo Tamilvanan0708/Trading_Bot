@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import get_settings
+from app.core.logging import logger
 from app.data.live.service import get_live_service
 from app.database.connection import get_db_session
 from app.database.repository import Repository
@@ -315,4 +316,139 @@ async def repair_paper_trades(db: AsyncSession = Depends(get_db_session)):
         "status": "SUCCESS",
         "repaired_trades": repaired_count,
         "message": f"Successfully repaired {repaired_count} trades with proper 0.500 Buffer Smart Shield trailing.",
+    }
+
+
+@router.post("/paper-trades/{trade_id}/close")
+async def manual_close_paper_trade(
+    trade_id: str,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Manually close an active OPEN paper trade at current market price."""
+    from datetime import datetime, timezone
+    from sqlalchemy import select
+    from app.database.models import PaperTradeModel
+    from app.config.execution_settings import get_execution_settings
+
+    stmt = select(PaperTradeModel).where(PaperTradeModel.id == trade_id)
+    trade = (await db.execute(stmt)).scalars().first()
+    if not trade:
+        raise HTTPException(status_code=404, detail="Paper trade not found.")
+
+    if trade.state == "CLOSED":
+        return {
+            "status": "ALREADY_CLOSED",
+            "message": f"Trade {trade_id} is already closed.",
+            "exit_price": trade.exit_price,
+            "realized_pnl": trade.realized_pnl,
+        }
+
+    # Obtain current market price
+    live_px = None
+    try:
+        live_svc = get_live_service()
+        live_px = live_svc.get_last_price("XAUUSD")
+    except Exception:
+        pass
+
+    entry = float(trade.actual_entry or trade.target_entry or 0.0)
+    if not live_px or live_px <= 1000.0:
+        live_px = entry
+
+    # Calculate points and PnL
+    is_long = trade.direction in ("LONG", "BUY")
+    pts = round((live_px - entry) if is_long else (entry - live_px), 2)
+    lots = float(trade.lot_size or 0.01)
+    realized_pnl = round(pts * lots * 100.0, 2)
+    sl_dist = max(0.1, abs(entry - float(trade.stop_loss or (entry - 2.0 if is_long else entry + 2.0))))
+    realized_r = round(pts / sl_dist, 2)
+
+    trade.state = "CLOSED"
+    trade.exit_price = round(live_px, 2)
+    trade.exit_reason = "MANUAL_CLOSE"
+    trade.closed_at = datetime.now(timezone.utc)
+    trade.realized_pnl = realized_pnl
+    trade.realized_r = realized_r
+
+    # Append state log
+    logs = list(trade.state_logs or [])
+    logs.append({
+        "event": "MANUAL_CLOSE",
+        "exit_price": trade.exit_price,
+        "pts": pts,
+        "pnl": realized_pnl,
+        "time": trade.closed_at.isoformat(),
+    })
+    trade.state_logs = logs
+
+    await db.commit()
+    logger.info("[PAPER-MANUAL] Trade %s manually closed @ %.2f (PnL: $%.2f)", trade.id, trade.exit_price, trade.realized_pnl)
+
+    # MT5 Live Position Close Synchronization
+    exec_cfg = get_execution_settings()
+    if exec_cfg.mt5_bridge_enabled:
+        try:
+            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+            get_mt5_bridge_manager().enqueue_close(
+                paper_trade_id=trade.id,
+                symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                reason="MANUAL_CLOSE",
+                direction=trade.direction,
+            )
+        except Exception as mt5_err:
+            logger.warning("[MT5-BRIDGE] Manual close dispatch failed: %s", mt5_err)
+
+    # Hybrid Telegram Alert Dispatch
+    try:
+        from app.paper_trading.sync import _build_hybrid_close_msg, _dispatch_tg_alert
+        from app.notifications.telegram_service import TelegramService
+
+        strat_name = "Manual Close"
+        sig = (trade.signal_id or "").upper()
+        if "FIB_RETR" in sig:
+            strat_name = "Fib Retracement"
+            for tag in ("L1", "L2", "L3"):
+                if f"_{tag}_" in sig or sig.endswith(f"_{tag}"):
+                    strat_name = f"Fib Retracement ({tag})"
+                    break
+        elif "SMC" in sig:
+            strat_name = "SMC With Fib (0.680)"
+        elif "TREND" in sig:
+            strat_name = "Fib Go With Trend"
+
+        tf_str = "5M"
+        if trade.signal_id:
+            for p in trade.signal_id.split("_"):
+                if p.upper() in ("5M", "15M", "30M", "1H", "2H", "4H"):
+                    tf_str = p.upper()
+                    break
+
+        tg_msg = _build_hybrid_close_msg(
+            strategy_name=f"{strat_name} (Manual Exit)",
+            symbol_tf=f"XAU/USD ({tf_str})",
+            direction=trade.direction,
+            entry_px=entry,
+            exit_px=trade.exit_price,
+            pts=pts,
+            realized_pnl=trade.realized_pnl,
+            exit_reason="MANUAL_CLOSE",
+            lot_size=lots,
+            opened_at=trade.opened_at or trade.created_at,
+            closed_at=trade.closed_at,
+            paper_trade_id=trade.id,
+        )
+        tg = TelegramService()
+        _dispatch_tg_alert(tg.send_raw_alert(tg_msg))
+    except Exception as tg_err:
+        logger.warning("[MANUAL-CLOSE] Failed to dispatch Telegram alert: %s", tg_err)
+
+    return {
+        "status": "SUCCESS",
+        "trade_id": trade.id,
+        "entry_price": entry,
+        "exit_price": trade.exit_price,
+        "pts": pts,
+        "realized_pnl": trade.realized_pnl,
+        "exit_reason": "MANUAL_CLOSE",
+        "message": f"Trade {trade.id[:8]} manually closed at ${trade.exit_price:.2f} ({pts:+.2f} pts, PnL: ${realized_pnl:+.2f})",
     }

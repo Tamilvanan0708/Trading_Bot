@@ -3316,8 +3316,9 @@ function renderPaperTradeRows(trades, currSym = "₹", leverage = 500) {
       <td style="padding:6px 10px;vertical-align:middle">${slTpContent}</td>
       <td style="vertical-align:middle">${statusBadge}</td>
       <td style="text-align:center">
-        <div class="row-actions-wrap" style="justify-content:center">
+        <div class="row-actions-wrap" style="justify-content:center;display:flex;align-items:center;gap:5px">
           <button class="btn-mini-action btn-pt-chart" data-route="${stratRoute}" title="Open Strategy Chart">📈</button>
+          ${!isClosed ? `<button class="btn-mini-action btn-pt-close" data-id="${t.id}" title="Manually Close Trade at Market Price" style="background:rgba(244,67,54,0.18);color:#ff5252;border:1px solid rgba(244,67,54,0.5);font-weight:700;font-size:10px;padding:2px 7px;border-radius:4px;cursor:pointer">✕ Close</button>` : ''}
         </div>
       </td>
     </tr>`;
@@ -3403,6 +3404,28 @@ Routes["/paper"] = (mount) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
           if (btn.dataset.route) location.hash = btn.dataset.route;
+        });
+      });
+      tbody.querySelectorAll(".btn-pt-close").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const tradeId = btn.dataset.id;
+          if (!tradeId) return;
+          if (!confirm("Are you sure you want to MANUALLY CLOSE this open trade at market price?")) return;
+          try {
+            btn.disabled = true;
+            btn.textContent = "...";
+            const res = await (API.closePaperTrade ? API.closePaperTrade(tradeId) : API.post(`/paper-trades/${tradeId}/close`));
+            UI.toast("Trade Closed", res.message || "Trade manually closed successfully.", "emerald");
+            // Refresh trades immediately
+            const refreshed = await API.paperTrades();
+            currentTrades = Array.isArray(refreshed) ? refreshed : ((refreshed && refreshed.database_trades) || []);
+            updateTableView();
+          } catch (err) {
+            UI.toast("Close Error", err.message || "Failed to close trade.", "rose");
+            btn.disabled = false;
+            btn.textContent = "✕ Close";
+          }
         });
       });
     }
