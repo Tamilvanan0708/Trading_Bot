@@ -144,27 +144,10 @@ def _build_hybrid_close_msg(
     exec_cfg = get_execution_settings()
     is_cent = (exec_cfg.account_currency == "cent")
 
-    is_tp = exit_reason == "TP_HIT"
-    is_be = exit_reason == "BREAKEVEN_HIT" or (abs(exit_px - entry_px) <= 0.5 and not is_tp)
+    is_be = exit_reason == "BREAKEVEN_HIT" or (abs(pts) <= 0.5 and exit_reason != "TP_HIT")
+    is_profit = pts > 0.5 or exit_reason in ("TP_HIT", "TRAILING_SL_HIT")
 
-    if is_tp:
-        realized_usd = round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
-        growth_line = f"📈 *Account Growth:* +₹{realized_pnl:,.2f} INR" if is_cent else f"📈 *Account Growth:* +${realized_pnl:,.2f} USD"
-        return (
-            f"🎯 *TAKE PROFIT HIT (+{abs(pts):.2f} PTS)*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 *Strategy:* {strategy_name}\n"
-            f"🪙 *Symbol:* {symbol_tf}\n"
-            f"📈 *Direction:* {dir_badge}\n"
-            f"🎫 *Closed Ticket:* {ticket_str}\n"
-            f"💵 *Entry:* ${entry_px:,.2f} ➔ *Exit:* ${exit_px:,.2f}\n"
-            f"⏱️ *Duration:* {duration_str}\n"
-            f"💰 *MT5 Live Profit:* +${realized_usd:,.2f} USD\n"
-            f"💼 *New MT5 Balance:* {balance_str}\n"
-            f"{growth_line}\n"
-            f"━━━━━━━━━━━━━━━━━━━━"
-        )
-    elif is_be:
+    if is_be:
         return (
             f"🛡 *BREAKEVEN EXIT (0.00 PTS)*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -176,6 +159,24 @@ def _build_hybrid_close_msg(
             f"⏱️ *Duration:* {duration_str}\n"
             f"⚖️ *Capital Protected (Risk-Free Exit)*\n"
             f"💼 *MT5 Balance:* {balance_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+    elif is_profit:
+        realized_usd = round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
+        growth_line = f"📈 *Account Growth:* +₹{abs(realized_pnl):,.2f} INR" if is_cent else f"📈 *Account Growth:* +${abs(realized_pnl):,.2f} USD"
+        title_badge = "🎯 *TAKE PROFIT HIT" if exit_reason == "TP_HIT" else "🎯 *TRAILING STOP HIT"
+        return (
+            f"{title_badge} (+{abs(pts):.2f} PTS)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Strategy:* {strategy_name}\n"
+            f"🪙 *Symbol:* {symbol_tf}\n"
+            f"📈 *Direction:* {dir_badge}\n"
+            f"🎫 *Closed Ticket:* {ticket_str}\n"
+            f"💵 *Entry:* ${entry_px:,.2f} ➔ *Exit:* ${exit_px:,.2f}\n"
+            f"⏱️ *Duration:* {duration_str}\n"
+            f"💰 *MT5 Live Profit:* +${realized_usd:,.2f} USD\n"
+            f"💼 *New MT5 Balance:* {balance_str}\n"
+            f"{growth_line}\n"
             f"━━━━━━━━━━━━━━━━━━━━"
         )
     else:
@@ -391,6 +392,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     _pts = round(
                         (_exit_px - _entry_px) if _direction == "LONG" else (_entry_px - _exit_px), 2
                     ) if _entry_px else 0.0
+                    if _pts > 0.5 and _exit_reason == "SL_HIT":
+                        _exit_reason = "TRAILING_SL_HIT"
+                    elif abs(_pts) <= 0.5 and _exit_reason == "SL_HIT":
+                        _exit_reason = "BREAKEVEN_HIT"
                     _ot.state = "CLOSED"
                     _ot.exit_price = round(_exit_px, 2)
                     _ot.exit_reason = _exit_reason
@@ -1009,11 +1014,16 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                                 elif layer.get("state") == "SL_HIT":
                                     exit_px = float(layer.get("exit_price") or existing.stop_loss or sl_px)
+                                    pts = round((exit_px - entry_px) if f_state.direction == "LONG" else (entry_px - exit_px), 2)
                                     existing.state = "CLOSED"
                                     existing.exit_price = exit_px
-                                    existing.exit_reason = "BREAKEVEN_HIT" if abs(exit_px - entry_px) <= 0.5 else "SL_HIT"
+                                    if pts > 0.5:
+                                        existing.exit_reason = "TRAILING_SL_HIT"
+                                    elif abs(pts) <= 0.5:
+                                        existing.exit_reason = "BREAKEVEN_HIT"
+                                    else:
+                                        existing.exit_reason = "SL_HIT"
                                     existing.closed_at = datetime.now(timezone.utc)
-                                    pts = round((exit_px - entry_px) if f_state.direction == "LONG" else (entry_px - exit_px), 2)
                                     existing.realized_pnl = round(pts * (existing.lot_size or 0.01) * 100.0, 2)
                                     existing.realized_r = round(pts / max(0.1, abs(entry_px - (existing.stop_loss or 0.0))), 2)
                                     await db.commit()
