@@ -939,8 +939,12 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             close_px = live_price if (live_price and live_price > 1000.0) else (ot.stop_loss or entry_chk)
                             dir_chk = ot.direction or "LONG"
                             sl_hit = (close_px <= ot.stop_loss) if (dir_chk == "LONG" and ot.stop_loss) else ((close_px >= ot.stop_loss) if (dir_chk == "SHORT" and ot.stop_loss) else False)
-                            tp_hit = (close_px >= ot.take_profit_1) if (dir_chk == "LONG" and ot.take_profit_1) else ((close_px <= ot.take_profit_1) if (dir_chk == "SHORT" and ot.take_profit_1) else False)
-                            age_hours = (datetime.now(timezone.utc) - (ot.opened_at or ot.created_at)).total_seconds() / 3600.0 if (ot.opened_at or ot.created_at) else 0.0
+                            _ot_raw = ot.opened_at or ot.created_at
+                            if _ot_raw:
+                                _ot_time_tz = _ot_raw if _ot_raw.tzinfo else _ot_raw.replace(tzinfo=timezone.utc)
+                                age_hours = (datetime.now(timezone.utc) - _ot_time_tz).total_seconds() / 3600.0
+                            else:
+                                age_hours = 0.0
 
                             if not sl_hit and not tp_hit and age_hours < 6.0:
                                 existing_open_smc_by_tf[ot_tf] = ot
