@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime, timezone
 from app.data.models import Candle
 from app.retracement.dual_engine import DualRetracementEngine
-from app.retracement.models import RetracementSetup, RetracementState
+from app.retracement.models import RetracementEventType, RetracementSetup, RetracementState
 
 def _candle(ts_sec: int, o: float, h: float, l: float, c: float) -> Candle:
     return Candle(
@@ -362,6 +362,52 @@ def test_bullish_bos_anchors_to_immediate_higher_low_not_older_low():
     # Anchor Low MUST be the immediate Higher Low (4374.24), NOT the older 4371.09
     assert engine.setup.point_2_price == 4374.24
     assert engine.setup.fib_0 == 4374.24
+
+
+def test_active_l1_trade_not_closed_by_minor_pullback_holds_for_full_target():
+    """Verify that an active L1 trade does NOT prematurely exit on a minor pullback
+    or opposite swing dip, but safely holds until the full 1.000 Target is reached.
+    """
+    engine = DualRetracementEngine(symbol="XAUUSD", timeframe="5m", left_bars=2, right_bars=2)
+    setup = RetracementSetup(
+        setup_id="test_l1_hold_tp",
+        strategy="RETRACEMENT_BOS_V1",
+        symbol="XAUUSD",
+        direction="LONG",
+        state=RetracementState.TRADE_ACTIVE,
+        point_1_price=2050.0,
+        point_2_price=2000.0,
+    )
+    engine._apply_bullish_fib(setup, low_anchor=2000.0, high_target=2100.0)
+    setup.layers["L1"] = {
+        "layer": "L1",
+        "entry_ratio": 0.618,
+        "entry_price": 2061.80,
+        "tp": 2100.00,
+        "sl": 2023.60,
+        "lots": 0.01,
+        "state": "FILLED",
+    }
+    setup.locked_tp = 2100.00
+    setup.tp_locked = True
+    engine.setup = setup
+
+    # 1. Minor pullback candle dips and closes lower (e.g. 2055.0 to 2058.0)
+    c_pullback = _candle(1500, 2065.0, 2066.0, 2055.0, 2058.0)
+    events = engine._track_active_trade(c_pullback)
+    # Trade MUST remain active! Must NOT be closed due to OPPOSITE_BOS or early exit
+    assert engine.setup.state == RetracementState.TRADE_ACTIVE
+    assert engine.setup.layers["L1"]["state"] == "FILLED"
+    assert not any(e.event_type == RetracementEventType.SL_HIT for e in events)
+
+    # 2. Next candle pushes up and hits the full 1.000 Target TP (2102.0 >= 2100.0)
+    c_tp = _candle(1800, 2060.0, 2105.0, 2059.0, 2102.0)
+    tp_events = engine._track_active_trade(c_tp)
+    assert engine.setup.layers["L1"]["state"] == "TP_HIT"
+    assert engine.setup.state == RetracementState.COMPLETED
+    assert engine.setup.outcome == "TP_HIT"
+    assert any(e.event_type == RetracementEventType.TP_HIT for e in tp_events)
+
 
 
 

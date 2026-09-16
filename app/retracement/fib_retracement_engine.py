@@ -1000,28 +1000,6 @@ class DualRetracementEngine:
             ))
             return events
 
-        # 0b. Opposite BOS check during active trade (structural reversal guard)
-        opp_events = self._detect_opposite_bos(candle, allow_active=True)
-        if opp_events:
-            setup.state = RetracementState.COMPLETED
-            setup.outcome = "OPPOSITE_BOS"
-            setup.completion_reason = "Trade closed due to opposite market structure BOS break."
-            for layer in setup.layers.values():
-                if layer.get("state") == "FILLED":
-                    layer["state"] = "OPPOSITE_BOS"
-                    layer["exit_price"] = candle.close
-            events.append(RetracementEvent(
-                setup_id=setup.setup_id,
-                event_type=RetracementEventType.SL_HIT,
-                state_before=RetracementState.TRADE_ACTIVE,
-                state_after=RetracementState.COMPLETED,
-                timestamp=candle.timestamp,
-                price=candle.close,
-                metadata={"reason": "OPPOSITE_BOS"},
-            ))
-            events.extend(opp_events)
-            return events
-
         # Freeze the L1 TP (1.000) on the first layer fill if not already locked.
         if setup.layers and "L1" in setup.layers:
             l1 = setup.layers["L1"]
