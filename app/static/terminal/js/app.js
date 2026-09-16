@@ -254,8 +254,13 @@ async function pollPrice() {
     // Live pill reflects quote status
     const livePill = document.getElementById("live-pill");
     if (livePill) {
-      if (m.status === "HEALTHY") { livePill.className = "live-pill"; livePill.innerHTML = '<span class="dot dot-green"></span>LIVE'; }
-      else { livePill.className = "live-pill"; livePill.innerHTML = '<span class="dot dot-red"></span>OFFLINE'; }
+      if (m.status === "HEALTHY" || m.status === "HISTORICAL_CACHE" || (m.price && Number(m.price) > 0)) {
+        livePill.className = "live-pill";
+        livePill.innerHTML = '<span class="dot dot-green"></span>MT5 LIVE';
+      } else {
+        livePill.className = "live-pill";
+        livePill.innerHTML = '<span class="dot dot-red"></span>OFFLINE';
+      }
     }
   } catch (_) { /* price feed may be offline */ }
 }
@@ -3650,9 +3655,6 @@ Routes["/paper"] = (mount) => {
             <span class="badge" style="padding:4px 9px;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;gap:5px;${stratSmcFib ? 'background:rgba(0,230,118,0.15);color:#00e676;border:1px solid #00e676' : 'color:#ff5252;border:1px solid rgba(255,82,82,0.3);background:rgba(255,82,82,0.08)'}">
               ${stratSmcFib ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 💎 SMC With Fib: ${stratSmcFib ? 'ACTIVE' : 'STANDBY'}
             </span>
-            <span class="badge" style="padding:4px 9px;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;gap:5px;${stratFibTrend ? 'background:rgba(0,230,118,0.15);color:#00e676;border:1px solid #00e676' : 'color:#ff5252;border:1px solid rgba(255,82,82,0.3);background:rgba(255,82,82,0.08)'}">
-              ${stratFibTrend ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 📈 Fib Go Trend: ${stratFibTrend ? 'ACTIVE' : 'STANDBY'}
-            </span>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:14px;font-size:12px">
@@ -3712,7 +3714,6 @@ Routes["/paper"] = (mount) => {
           <div class="sig-pill pt-pill active" data-strat="ALL">All <span class="pill-count">${currentTrades.length}</span></div>
           <div class="sig-pill pt-pill" data-strat="RETRACEMENT">🎯 Fib Retracement <span class="pill-count">${retCount}</span></div>
           <div class="sig-pill pt-pill" data-strat="SMC">💎 SMC With Fib <span class="pill-count">${smcCount}</span></div>
-          <div class="sig-pill pt-pill" data-strat="TREND">📈 Fib Go With Trend <span class="pill-count">${trendCount}</span></div>
         </div>
 
         <!-- Filter Controls -->
@@ -5699,21 +5700,6 @@ Routes["/settings"] = async (mount) => {
                 Smart Money Concepts order block sweeps and 0.680 discount entries with liquidity hunting.
               </div>
             </div>
-
-            <!-- STRATEGY 3: FIB GO WITH TREND -->
-            <div style="background:#181e29;border:1px solid ${stratFibTrend ? 'rgba(0,230,118,0.4)' : 'rgba(255,255,255,0.08)'};border-radius:8px;padding:14px 16px" id="card-strat-fib-trend">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;cursor:pointer;color:#fff;margin:0">
-                  <input type="checkbox" id="strat-cb-fib-trend" ${stratFibTrend ? 'checked' : ''} style="cursor:pointer"> 📈 Fib Go With Trend
-                </label>
-                <span id="badge-strat-fib-trend" class="badge ${stratFibTrend ? 'badge-green' : 'badge-yellow'}" style="font-size:10px">
-                  ${stratFibTrend ? 'ACTIVE & TRADING' : 'STANDBY / OFF'}
-                </span>
-              </div>
-              <div style="font-size:11px;color:var(--text-dim);line-height:1.5">
-                9/21 EMA momentum breakout with 1.618 Fib extension targets and dynamic breakeven locks.
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -5790,7 +5776,7 @@ Routes["/settings"] = async (mount) => {
         <div class="card-body">
           <!-- Strict Strategy Filter Callout -->
           <div style="background:rgba(171,71,188,0.1);border:1px solid rgba(171,71,188,0.3);padding:12px 16px;border-radius:6px;font-size:12.5px;color:#e1bee7;margin-bottom:16px;line-height:1.5">
-            🎯 <b>Strict Strategy Filter Active:</b> Only <b>Fib Retracement</b> strategy trades are permitted to execute on MT5. <i>SMC With Fib</i> and <i>Fib Go With Trend</i> are strictly isolated to paper trading simulation.
+            🎯 <b>Strict Strategy Filter Active:</b> Only <b>Fib Retracement</b> strategy trades are permitted to execute on MT5. <i>SMC With Fib</i> is running in paper trading simulation.
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px">

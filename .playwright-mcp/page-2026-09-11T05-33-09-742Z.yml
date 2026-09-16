@@ -1,0 +1,624 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4] [cursor=pointer]:
+      - generic [ref=e5]: XAU
+      - generic [ref=e6]:
+        - generic [ref=e7]: XAU AI
+        - generic [ref=e8]: SIGNAL INTELLIGENCE
+    - navigation [ref=e9]:
+      - generic [ref=e10]: MAIN
+      - link "◈ Command Center" [ref=e11] [cursor=pointer]:
+        - /url: "#/overview"
+        - generic [ref=e12]: ◈
+        - generic [ref=e13]: Command Center
+      - link "〽 Live Market" [ref=e14] [cursor=pointer]:
+        - /url: "#/live"
+        - generic [ref=e15]: 〽
+        - generic [ref=e16]: Live Market
+      - link "⚡ Signals Feed" [ref=e17] [cursor=pointer]:
+        - /url: "#/signals"
+        - generic [ref=e18]: ⚡
+        - generic [ref=e19]: Signals Feed
+      - link "💼 Paper Trading" [ref=e20] [cursor=pointer]:
+        - /url: "#/paper"
+        - generic [ref=e21]: 💼
+        - generic [ref=e22]: Paper Trading
+      - generic [ref=e23]: MY STRATEGIES
+      - link "💎 SMC with Fib" [ref=e24] [cursor=pointer]:
+        - /url: "#/smc-fib"
+        - generic [ref=e25]: 💎
+        - generic [ref=e26]: SMC with Fib
+      - link "🎯 Fib Retracement" [ref=e27] [cursor=pointer]:
+        - /url: "#/fib-retracement"
+        - generic [ref=e28]: 🎯
+        - generic [ref=e29]: Fib Retracement
+      - link "📈 Fib Go with Trend" [ref=e30] [cursor=pointer]:
+        - /url: "#/fib-trend"
+        - generic [ref=e31]: 📈
+        - generic [ref=e32]: Fib Go with Trend
+      - generic [ref=e33]: ANALYTICS & TESTING
+      - link "🧪 Backtest Lab" [ref=e34] [cursor=pointer]:
+        - /url: "#/backtest"
+        - generic [ref=e35]: 🧪
+        - generic [ref=e36]: Backtest Lab
+      - generic [ref=e37]: SYSTEM
+      - link "♥ System Health" [ref=e38] [cursor=pointer]:
+        - /url: "#/health"
+        - generic [ref=e39]: ♥
+        - generic [ref=e40]: System Health
+      - link "⚙ Settings" [ref=e41] [cursor=pointer]:
+        - /url: "#/settings"
+        - generic [ref=e42]: ⚙
+        - generic [ref=e43]: Settings
+    - generic [ref=e44]:
+      - generic [ref=e45]: SYSTEM HEALTHY
+      - generic [ref=e48]: v1.0.0
+  - generic [ref=e49]:
+    - banner [ref=e50]:
+      - generic [ref=e51]:
+        - button "Toggle sidebar" [ref=e52] [cursor=pointer]: ☰
+        - generic [ref=e53] [cursor=pointer]:
+          - generic [ref=e54]: XAU/USD
+          - generic [ref=e55]: LIVE
+        - generic [ref=e57] [cursor=pointer]:
+          - generic [ref=e58]: "4341.63"
+          - generic [ref=e59]: "-0.10"
+        - generic [ref=e60]: bid 4341.62 / ask 4341.63
+      - generic:
+        - generic [ref=e62] [cursor=pointer]: REGIME —
+        - generic [ref=e63] [cursor=pointer]: SESSION —
+        - generic [ref=e64] [cursor=pointer]: CANDLE Sep 11, 10:45 AM
+      - generic [ref=e65]:
+        - button "⚡ 2s AUTO" [ref=e66] [cursor=pointer]
+        - generic "Binance" [ref=e69] [cursor=pointer]: BINANCE
+        - generic "Database" [ref=e71] [cursor=pointer]: DB
+        - generic "Scheduler" [ref=e73] [cursor=pointer]: SCHED
+        - generic "Telegram" [ref=e75] [cursor=pointer]: TG
+        - generic "Data quality" [ref=e77] [cursor=pointer]: DQ
+        - button "Notifications" [ref=e79] [cursor=pointer]: 🔔
+        - button "Settings" [ref=e80] [cursor=pointer]: ⚙
+        - button "Toggle Light / Dark Theme" [ref=e81] [cursor=pointer]: 🌙
+        - generic [ref=e82]: Q
+    - main [ref=e83]:
+      - generic [ref=e9031]:
+        - generic [ref=e9032]:
+          - generic [ref=e9033]:
+            - generic [ref=e9034]: 💎 SMC With Fib
+            - generic [ref=e9035]: Smart Money Concepts Golden Pocket Strategy · Dual-Direction Multi-TF
+          - generic [ref=e9036]:
+            - generic [ref=e9037]: LIVE AUTO-REFRESH
+            - generic [ref=e9039]: "⚡ MULTI-SLOT: 5M · 15M · 30M · 1H CONCURRENT SCANNING"
+            - generic [ref=e9041]: 🔴 STANDBY
+            - generic [ref=e9042]: SIGNAL ONLY
+            - generic [ref=e9043]: REAL MONEY DISABLED
+        - generic [ref=e9044]:
+          - generic [ref=e9045]:
+            - generic [ref=e9046]: 🔴
+            - generic [ref=e9047]:
+              - generic [ref=e9048]: STRATEGY STANDBY / DISABLED IN SETTINGS
+              - generic [ref=e9049]: Execution is currently paused. No paper trades or MT5 orders will be placed for this strategy.
+          - link "⚙️ Enable in Settings" [ref=e9050] [cursor=pointer]:
+            - /url: "#settings"
+        - generic [ref=e9052]:
+          - generic [ref=e9053]:
+            - generic [ref=e9054]: "SELECT TIMEFRAME:"
+            - generic [ref=e9055]:
+              - button "5M" [ref=e9056] [cursor=pointer]
+              - button "15M" [ref=e9057] [cursor=pointer]
+              - button "30M" [ref=e9058] [cursor=pointer]
+              - button "1H" [ref=e9059] [cursor=pointer]
+          - generic [ref=e9060]: "Engine Scope: 5M · 15M · 30M · 1H (Multi-Slot Parallel Execution)"
+        - generic [ref=e9062]:
+          - generic [ref=e9063]: BOS
+          - generic [ref=e9064]: →
+          - generic [ref=e9065]: POINT 2
+          - generic [ref=e9066]: →
+          - generic [ref=e9067]: FIB ACTIVE
+          - generic [ref=e9068]: →
+          - generic [ref=e9069]: TRACKING HIGH
+          - generic [ref=e9070]: →
+          - generic [ref=e9071]: ENTRY TOUCHED
+          - generic [ref=e9072]: →
+          - generic [ref=e9073]: TP FROZEN
+          - generic [ref=e9074]: →
+          - generic [ref=e9075]: OUTCOME
+        - generic [ref=e9077]:
+          - generic [ref=e9078]:
+            - generic [ref=e9079]:
+              - generic [ref=e9080]: 🤖 AI SETUP GUARDIAN
+              - generic [ref=e9081]: 5M
+              - generic [ref=e9082]: ▼ SHORT
+            - generic [ref=e9083]:
+              - generic [ref=e9084]: 🟡 AI APPROVED · SCANNER IN ZONE (95%)
+              - generic [ref=e9085]: "Model: gpt-4o-mini"
+              - generic [ref=e9086]: 6:00:21 AM
+          - generic [ref=e9087]:
+            - generic [ref=e9088]: "Guardian Decision: AI APPROVED · SCANNER ONLY — Validated setup in zone. No open broker trade."
+            - generic [ref=e9089]: "💬 AI Reasoning: The signal meets the criteria for a valid SMC setup with a confirmed Golden Pocket entry at 0.680. The stop loss is appropriately placed below the swing low, and the market bias is bearish, aligning with the strategy. The detected structure confirms a full body close for the Break of Structure (BOS), indicating a valid entry point."
+        - generic [ref=e9091]:
+          - generic [ref=e9092]:
+            - generic [ref=e9093]:
+              - generic [ref=e9094]: XAUUSD · 5M
+              - generic [ref=e9095]: NO ACTIVE SETUP
+              - generic [ref=e9096]: SCANNING FOR NEW BOS BREAK
+            - generic [ref=e9097]: "LIVE: $4341.76"
+          - generic [ref=e9098]: 🔍 Currently scanning 5M closed candles for a new valid Break of Structure (BOS). No active retracement trade on this timeframe.
+        - generic [ref=e9100]:
+          - generic [ref=e9101]:
+            - generic [ref=e9102]: BOS BREAK / ANCHOR
+            - generic [ref=e9103]: $— / $—
+          - generic [ref=e9104]:
+            - generic [ref=e9105]: CURRENT EXPANSION (1.000)
+            - generic [ref=e9106]: —
+          - generic [ref=e9107]:
+            - generic [ref=e9108]: TOTAL RANGE
+            - generic [ref=e9109]: —
+          - generic [ref=e9110]:
+            - generic [ref=e9111]: ENTRY → TP
+            - generic [ref=e9112]: —
+          - generic [ref=e9113]:
+            - generic [ref=e9114]: ENTRY → SL
+            - generic [ref=e9115]: —
+          - generic [ref=e9116]:
+            - generic [ref=e9117]: 50% EQUILIBRIUM
+            - generic [ref=e9118]: —
+        - generic [ref=e9119]:
+          - generic [ref=e9121]:
+            - generic [ref=e9122]:
+              - generic [ref=e9123]: FIBONACCI STRUCTURE
+              - generic [ref=e9124]: Live Ratios
+            - table [ref=e9127]:
+              - rowgroup [ref=e9128]:
+                - row [ref=e9129]:
+                  - columnheader "LEVEL" [ref=e9130]
+                  - columnheader "MEANING" [ref=e9131]
+                  - columnheader "PRICE" [ref=e9132]
+              - rowgroup [ref=e9133]:
+                - row [ref=e9134]:
+                  - cell "—" [ref=e9135]
+          - generic [ref=e9136]:
+            - generic [ref=e9137]:
+              - generic [ref=e9138]: STRUCTURE & SMC STATUS
+              - generic [ref=e9139]: 5M
+            - generic [ref=e9141]:
+              - term [ref=e9142]: Direction
+              - definition [ref=e9143]: LONG
+              - term [ref=e9144]: Structure Break
+              - definition [ref=e9145]: NONE
+              - term [ref=e9146]: Break Level
+              - definition [ref=e9147]: —
+              - term [ref=e9148]: Order Blocks (OB)
+              - definition [ref=e9149]: —
+              - term [ref=e9150]: FVG Imbalances
+              - definition [ref=e9151]: —
+              - term [ref=e9152]: SMC Zone
+              - definition [ref=e9153]:
+                - generic [ref=e9154]: DISCOUNT ZONE
+              - term [ref=e9155]: 50% Equilibrium
+              - definition [ref=e9156]: —
+              - term [ref=e9157]: Execution Mode
+              - definition [ref=e9158]:
+                - generic [ref=e9159]: MULTI-SLOT SCANNING
+        - generic [ref=e9161]:
+          - generic [ref=e9162]:
+            - generic [ref=e9163]:
+              - generic [ref=e9164]: ⚡ 💎 SMC With Fib Signal History
+              - generic [ref=e9165]: Strategy Sub-Feed
+            - generic [ref=e9166]: Filtered exclusively to 💎 SMC With Fib setups & AI validations
+          - table [ref=e9169]:
+            - rowgroup [ref=e9170]:
+              - row [ref=e9171]:
+                - columnheader "Time" [ref=e9172]
+                - columnheader "TF" [ref=e9173]
+                - columnheader "Layer" [ref=e9174]
+                - columnheader "Dir" [ref=e9175]
+                - columnheader "Entry" [ref=e9176]
+                - columnheader "SL" [ref=e9177]
+                - columnheader "TP1" [ref=e9178]
+                - columnheader "R:R" [ref=e9179]
+                - columnheader "AI Verdict" [ref=e9180]
+                - columnheader "Outcome" [ref=e9181]
+                - columnheader "Action" [ref=e9182]
+            - rowgroup [ref=e9183]:
+              - row [ref=e9184] [cursor=pointer]:
+                - cell "8:50:19 AM" [ref=e9185]
+                - cell "5M" [ref=e9186]
+                - cell "SMC_WITH_FIB_V1" [ref=e9187]
+                - cell "▼ SELL" [ref=e9189]
+                - cell "$4336.39" [ref=e9190]
+                - cell "$4342.43" [ref=e9191]
+                - cell "$4319.26" [ref=e9192]
+                - cell "1:2.8" [ref=e9193]
+                - cell "N/A" [ref=e9194]
+                - cell "PENDING" [ref=e9196]
+                - cell [ref=e9198]:
+                  - button "👁️ View" [ref=e9199]
+              - row [ref=e9200] [cursor=pointer]:
+                - cell "8:47:34 AM" [ref=e9201]
+                - cell "15M" [ref=e9202]
+                - cell "SMC_WITH_FIB_V1" [ref=e9203]
+                - cell "▼ SELL" [ref=e9205]
+                - cell "$4370.87" [ref=e9206]
+                - cell "$4389.26" [ref=e9207]
+                - cell "$4318.76" [ref=e9208]
+                - cell "1:2.8" [ref=e9209]
+                - cell "N/A" [ref=e9210]
+                - cell "PENDING" [ref=e9212]
+                - cell [ref=e9214]:
+                  - button "👁️ View" [ref=e9215]
+              - row [ref=e9216] [cursor=pointer]:
+                - cell "8:09:05 AM" [ref=e9217]
+                - cell "5M" [ref=e9218]
+                - cell "SMC_WITH_FIB_V1" [ref=e9219]
+                - cell "▼ SELL" [ref=e9221]
+                - cell "$4366.29" [ref=e9222]
+                - cell "$4382.27" [ref=e9223]
+                - cell "$4320.99" [ref=e9224]
+                - cell "1:2.8" [ref=e9225]
+                - cell "N/A" [ref=e9226]
+                - cell "CANCELLED" [ref=e9228]
+                - cell [ref=e9230]:
+                  - button "👁️ View" [ref=e9231]
+              - row [ref=e9232] [cursor=pointer]:
+                - cell "6:15:23 AM" [ref=e9233]
+                - cell "5M" [ref=e9234]
+                - cell "SMC_WITH_FIB_V1" [ref=e9235]
+                - cell "▲ BUY" [ref=e9237]
+                - cell "$4320.98" [ref=e9238]
+                - cell "$4316.91" [ref=e9239]
+                - cell "$4332.49" [ref=e9240]
+                - cell "1:2.8" [ref=e9241]
+                - cell "N/A" [ref=e9242]
+                - cell "CANCELLED" [ref=e9244]
+                - cell [ref=e9246]:
+                  - button "👁️ View" [ref=e9247]
+              - row [ref=e9248] [cursor=pointer]:
+                - cell "5:45:30 AM" [ref=e9249]
+                - cell "1H" [ref=e9250]
+                - cell "SMC_WITH_FIB_V1" [ref=e9251]
+                - cell "▼ SELL" [ref=e9253]
+                - cell "$4399.35" [ref=e9254]
+                - cell "$4428.93" [ref=e9255]
+                - cell "$4315.56" [ref=e9256]
+                - cell "1:2.8" [ref=e9257]
+                - cell "N/A" [ref=e9258]
+                - cell "PENDING" [ref=e9260]
+                - cell [ref=e9262]:
+                  - button "👁️ View" [ref=e9263]
+              - row [ref=e9264] [cursor=pointer]:
+                - cell "5:10:09 AM" [ref=e9265]
+                - cell "5M" [ref=e9266]
+                - cell "SMC_WITH_FIB_V1" [ref=e9267]
+                - cell "▼ SELL" [ref=e9269]
+                - cell "$4330.53" [ref=e9270]
+                - cell "$4334.25" [ref=e9271]
+                - cell "$4320.02" [ref=e9272]
+                - cell "1:2.8" [ref=e9273]
+                - cell "🟢 APPROVED (95%)" [ref=e9274]:
+                  - generic "The signal meets the criteria for a valid SMC setup with a confirmed Golden Pocket entry at 0.680. The stop loss is appropriately placed below the swing low, and the market bias is bearish, aligning with the strategy. The detected structure confirms a full body close for the Break of Structure (BOS), indicating a valid entry point." [ref=e9275]: 🟢 APPROVED (95%)
+                - cell "SL HIT ✗" [ref=e9276]
+                - cell [ref=e9278]:
+                  - button "👁️ View" [ref=e9279]
+              - row [ref=e9280] [cursor=pointer]:
+                - cell "4:10:07 AM" [ref=e9281]
+                - cell "5M" [ref=e9282]
+                - cell "SMC_WITH_FIB_V1" [ref=e9283]
+                - cell "▼ SELL" [ref=e9285]
+                - cell "$4350.89" [ref=e9286]
+                - cell "$4361.53" [ref=e9287]
+                - cell "$4320.74" [ref=e9288]
+                - cell "1:2.8" [ref=e9289]
+                - cell "N/A" [ref=e9290]
+                - cell "CANCELLED" [ref=e9292]
+                - cell [ref=e9294]:
+                  - button "👁️ View" [ref=e9295]
+              - row [ref=e9296] [cursor=pointer]:
+                - cell "1:55:03 AM" [ref=e9297]
+                - cell "5M" [ref=e9298]
+                - cell "SMC_WITH_FIB_V1" [ref=e9299]
+                - cell "▼ SELL" [ref=e9301]
+                - cell "$4357.43" [ref=e9302]
+                - cell "$4369.83" [ref=e9303]
+                - cell "$4322.31" [ref=e9304]
+                - cell "1:2.8" [ref=e9305]
+                - cell "N/A" [ref=e9306]
+                - cell "CANCELLED" [ref=e9308]
+                - cell [ref=e9310]:
+                  - button "👁️ View" [ref=e9311]
+              - row [ref=e9312] [cursor=pointer]:
+                - cell "12:31:41 AM" [ref=e9313]
+                - cell "30M" [ref=e9314]
+                - cell "SMC_WITH_FIB_V1" [ref=e9315]
+                - cell "▼ SELL" [ref=e9317]
+                - cell "$4408.01" [ref=e9318]
+                - cell "$4431.10" [ref=e9319]
+                - cell "$4342.60" [ref=e9320]
+                - cell "1:2.8" [ref=e9321]
+                - cell "N/A" [ref=e9322]
+                - cell "PENDING" [ref=e9324]
+                - cell [ref=e9326]:
+                  - button "👁️ View" [ref=e9327]
+              - row [ref=e9328] [cursor=pointer]:
+                - cell "12:31:40 AM" [ref=e9329]
+                - cell "5M" [ref=e9330]
+                - cell "SMC_WITH_FIB_V1" [ref=e9331]
+                - cell "▼ SELL" [ref=e9333]
+                - cell "$4365.75" [ref=e9334]
+                - cell "$4376.53" [ref=e9335]
+                - cell "$4335.19" [ref=e9336]
+                - cell "1:2.8" [ref=e9337]
+                - cell "N/A" [ref=e9338]
+                - cell "CANCELLED" [ref=e9340]
+                - cell [ref=e9342]:
+                  - button "👁️ View" [ref=e9343]
+              - row [ref=e9344] [cursor=pointer]:
+                - cell "5:30:38 PM" [ref=e9345]
+                - cell "5M" [ref=e9346]
+                - cell "SMC_WITH_FIB_V1" [ref=e9347]
+                - cell "▼ SELL" [ref=e9349]
+                - cell "$4406.29" [ref=e9350]
+                - cell "$4416.11" [ref=e9351]
+                - cell "$4378.44" [ref=e9352]
+                - cell "1:2.8" [ref=e9353]
+                - cell "N/A" [ref=e9354]
+                - cell "CANCELLED" [ref=e9356]
+                - cell [ref=e9358]:
+                  - button "👁️ View" [ref=e9359]
+              - row [ref=e9360] [cursor=pointer]:
+                - cell "4:25:35 PM" [ref=e9361]
+                - cell "5M" [ref=e9362]
+                - cell "SMC_WITH_FIB_V1" [ref=e9363]
+                - cell "▼ SELL" [ref=e9365]
+                - cell "$4416.06" [ref=e9366]
+                - cell "$4428.51" [ref=e9367]
+                - cell "$4380.78" [ref=e9368]
+                - cell "1:2.8" [ref=e9369]
+                - cell "N/A" [ref=e9370]
+                - cell "CANCELLED" [ref=e9372]
+                - cell [ref=e9374]:
+                  - button "👁️ View" [ref=e9375]
+              - row [ref=e9376] [cursor=pointer]:
+                - cell "3:06:34 PM" [ref=e9377]
+                - cell "15M" [ref=e9378]
+                - cell "SMC_WITH_FIB_V1" [ref=e9379]
+                - cell "▼ SELL" [ref=e9381]
+                - cell "$4425.44" [ref=e9382]
+                - cell "$4435.45" [ref=e9383]
+                - cell "$4397.08" [ref=e9384]
+                - cell "1:2.8" [ref=e9385]
+                - cell "N/A" [ref=e9386]
+                - cell "CANCELLED" [ref=e9388]
+                - cell [ref=e9390]:
+                  - button "👁️ View" [ref=e9391]
+              - row [ref=e9392] [cursor=pointer]:
+                - cell "3:06:33 PM" [ref=e9393]
+                - cell "5M" [ref=e9394]
+                - cell "SMC_WITH_FIB_V1" [ref=e9395]
+                - cell "▼ SELL" [ref=e9397]
+                - cell "$4424.82" [ref=e9398]
+                - cell "$4435.30" [ref=e9399]
+                - cell "$4395.12" [ref=e9400]
+                - cell "1:2.8" [ref=e9401]
+                - cell "N/A" [ref=e9402]
+                - cell "CANCELLED" [ref=e9404]
+                - cell [ref=e9406]:
+                  - button "👁️ View" [ref=e9407]
+              - row [ref=e9408] [cursor=pointer]:
+                - cell "10:45:31 AM" [ref=e9409]
+                - cell "5M" [ref=e9410]
+                - cell "SMC_WITH_FIB_V1" [ref=e9411]
+                - cell "▲ BUY" [ref=e9413]
+                - cell "$4404.01" [ref=e9414]
+                - cell "$4397.43" [ref=e9415]
+                - cell "$4422.68" [ref=e9416]
+                - cell "1:2.8" [ref=e9417]
+                - cell "N/A" [ref=e9418]
+                - cell "CANCELLED" [ref=e9420]
+                - cell [ref=e9422]:
+                  - button "👁️ View" [ref=e9423]
+              - row [ref=e9424] [cursor=pointer]:
+                - cell "8:25:39 AM" [ref=e9425]
+                - cell "15M" [ref=e9426]
+                - cell "SMC_WITH_FIB_V1" [ref=e9427]
+                - cell "▲ BUY" [ref=e9429]
+                - cell "$4393.92" [ref=e9430]
+                - cell "$4383.08" [ref=e9431]
+                - cell "$4424.66" [ref=e9432]
+                - cell "1:2.8" [ref=e9433]
+                - cell "🟢 APPROVED (95%)" [ref=e9434]:
+                  - generic "The signal indicates a long position based on the Smart Money Concepts strategy. The entry at 4398.45 aligns with the 0.680 Golden Pocket retracement level, and the stop loss is appropriately placed below the swing low at 4384.21. The Break of Structure (BOS) is confirmed by a full candle body close, validating the setup. The risk-reward ratio of 2.83 is favorable, and the market bias is bullish, supporting the long position." [ref=e9435]: 🟢 APPROVED (95%)
+                - cell "SL HIT ✗" [ref=e9436]
+                - cell [ref=e9438]:
+                  - button "👁️ View" [ref=e9439]
+              - row [ref=e9440] [cursor=pointer]:
+                - cell "8:25:38 AM" [ref=e9441]
+                - cell "5M" [ref=e9442]
+                - cell "SMC_WITH_FIB_V1" [ref=e9443]
+                - cell "▲ BUY" [ref=e9445]
+                - cell "$4403.46" [ref=e9446]
+                - cell "$4395.97" [ref=e9447]
+                - cell "$4424.66" [ref=e9448]
+                - cell "1:2.8" [ref=e9449]
+                - cell "N/A" [ref=e9450]
+                - cell "CANCELLED" [ref=e9452]
+                - cell [ref=e9454]:
+                  - button "👁️ View" [ref=e9455]
+              - row [ref=e9456] [cursor=pointer]:
+                - cell "7:55:44 PM" [ref=e9457]
+                - cell "5M" [ref=e9458]
+                - cell "SMC_WITH_FIB_V1" [ref=e9459]
+                - cell "▼ SELL" [ref=e9461]
+                - cell "$4426.25" [ref=e9462]
+                - cell "$4430.57" [ref=e9463]
+                - cell "$4414.03" [ref=e9464]
+                - cell "1:2.8" [ref=e9465]
+                - cell "🟢 APPROVED (95%)" [ref=e9466]:
+                  - generic "The signal indicates a valid short entry based on the Smart Money Concepts strategy. The Break of Structure (BOS) is confirmed by a full candle body close above the anchor price of 4432.005, validating the bearish market bias. The entry at the 0.680 Golden Pocket level of 4426.25 is appropriate, with the stop loss set at 4430.57, which is above the swing high, ensuring protection against adverse movements. The risk-reward ratio of 2.83 is favorable, and the take profit levels are clearly defined." [ref=e9467]: 🟢 APPROVED (95%)
+                - cell "TP HIT ✓" [ref=e9468]
+                - cell [ref=e9470]:
+                  - button "👁️ View" [ref=e9471]
+              - row [ref=e9472] [cursor=pointer]:
+                - cell "6:55:02 PM" [ref=e9473]
+                - cell "5M" [ref=e9474]
+                - cell "SMC_WITH_FIB_V1" [ref=e9475]
+                - cell "▲ BUY" [ref=e9477]
+                - cell "$4406.69" [ref=e9478]
+                - cell "$4398.08" [ref=e9479]
+                - cell "$4431.07" [ref=e9480]
+                - cell "1:2.8" [ref=e9481]
+                - cell "N/A" [ref=e9482]
+                - cell "CANCELLED" [ref=e9484]
+                - cell [ref=e9486]:
+                  - button "👁️ View" [ref=e9487]
+              - row [ref=e9488] [cursor=pointer]:
+                - cell "6:05:24 PM" [ref=e9489]
+                - cell "5M" [ref=e9490]
+                - cell "SMC_WITH_FIB_V1" [ref=e9491]
+                - cell "▼ SELL" [ref=e9493]
+                - cell "$4411.96" [ref=e9494]
+                - cell "$4417.49" [ref=e9495]
+                - cell "$4396.28" [ref=e9496]
+                - cell "1:2.8" [ref=e9497]
+                - cell "🟢 APPROVED (95%)" [ref=e9498]:
+                  - generic "The signal indicates a valid short entry based on the Smart Money Concepts strategy. The Break of Structure (BOS) is confirmed by a full candle body close across the broken swing level at 4419.335. The entry at 4411.62 aligns with the 0.680 Golden Pocket retracement, and the stop loss is appropriately placed at 4417.41, which is above the swing high, ensuring protection against adverse movements. The risk-reward ratio of 2.83 is favorable, and the market bias is bearish, supporting the short position." [ref=e9499]: 🟢 APPROVED (95%)
+                - cell "SL HIT ✗" [ref=e9500]
+                - cell [ref=e9502]:
+                  - button "👁️ View" [ref=e9503]
+              - row [ref=e9504] [cursor=pointer]:
+                - cell "4:35:27 PM" [ref=e9505]
+                - cell "5M" [ref=e9506]
+                - cell "SMC_WITH_FIB_V1" [ref=e9507]
+                - cell "▲ BUY" [ref=e9509]
+                - cell "$4395.58" [ref=e9510]
+                - cell "$4391.50" [ref=e9511]
+                - cell "$4407.15" [ref=e9512]
+                - cell "1:2.8" [ref=e9513]
+                - cell "🟢 APPROVED (95%)" [ref=e9514]:
+                  - generic "The signal indicates a long position based on the Smart Money Concepts strategy. The entry at 4399.48 aligns with the 0.680 Golden Pocket retracement level, and the stop loss is appropriately placed at 4392.48, below the swing low. The Break of Structure (BOS) is confirmed by a full candle body close, indicating a valid setup. The risk-reward ratio of 2.84 is favorable, and the market bias is bullish, supporting the trade." [ref=e9515]: 🟢 APPROVED (95%)
+                - cell "SL HIT ✗" [ref=e9516]
+                - cell [ref=e9518]:
+                  - button "👁️ View" [ref=e9519]
+              - row [ref=e9520] [cursor=pointer]:
+                - cell "3:58:17 PM" [ref=e9521]
+                - cell "5M" [ref=e9522]
+                - cell "SMC_WITH_FIB_V1" [ref=e9523]
+                - cell "▼ SELL" [ref=e9525]
+                - cell "$4401.25" [ref=e9526]
+                - cell "$4405.17" [ref=e9527]
+                - cell "$4390.14" [ref=e9528]
+                - cell "1:2.8" [ref=e9529]
+                - cell "🟢 APPROVED (95%)" [ref=e9530]:
+                  - generic "The signal is validated as it meets the criteria for a SHORT entry based on the Smart Money Concepts strategy. The entry at 4401.25 aligns with the 0.680 Golden Pocket retracement level, and the stop loss is appropriately placed at 4405.17, which is above the swing high, ensuring protection against adverse movements. The Break of Structure (BOS) is confirmed by a full candle body close, indicating a valid setup. The risk-reward ratio of 2.83 is favorable, and the market bias is bearish, supporting the trade direction." [ref=e9531]: 🟢 APPROVED (95%)
+                - cell "SL HIT ✗" [ref=e9532]
+                - cell [ref=e9534]:
+                  - button "👁️ View" [ref=e9535]
+              - row [ref=e9536] [cursor=pointer]:
+                - cell "2:45:28 PM" [ref=e9537]
+                - cell "5M" [ref=e9538]
+                - cell "SMC_WITH_FIB_V1" [ref=e9539]
+                - cell "▼ SELL" [ref=e9541]
+                - cell "$4405.32" [ref=e9542]
+                - cell "$4406.67" [ref=e9543]
+                - cell "$4401.48" [ref=e9544]
+                - cell "1:2.9" [ref=e9545]
+                - cell "N/A" [ref=e9546]
+                - cell "CANCELLED" [ref=e9548]
+                - cell [ref=e9550]:
+                  - button "👁️ View" [ref=e9551]
+              - row [ref=e9552] [cursor=pointer]:
+                - cell "1:45:58 PM" [ref=e9553]
+                - cell "1H" [ref=e9554]
+                - cell "SMC_WITH_FIB_V1" [ref=e9555]
+                - cell "▲ BUY" [ref=e9557]
+                - cell "$4368.07" [ref=e9558]
+                - cell "$4351.26" [ref=e9559]
+                - cell "$4415.69" [ref=e9560]
+                - cell "1:2.8" [ref=e9561]
+                - cell "N/A" [ref=e9562]
+                - cell "CANCELLED" [ref=e9564]
+                - cell [ref=e9566]:
+                  - button "👁️ View" [ref=e9567]
+              - row [ref=e9568] [cursor=pointer]:
+                - cell "12:45:34 PM" [ref=e9569]
+                - cell "30M" [ref=e9570]
+                - cell "SMC_WITH_FIB_V1" [ref=e9571]
+                - cell "▲ BUY" [ref=e9573]
+                - cell "$4366.10" [ref=e9574]
+                - cell "$4350.77" [ref=e9575]
+                - cell "$4409.54" [ref=e9576]
+                - cell "1:2.8" [ref=e9577]
+                - cell "🟢 APPROVED (95%)" [ref=e9578]:
+                  - generic "The signal indicates a long position based on the Smart Money Concepts strategy, with a confirmed Break of Structure (BOS) as evidenced by a full candle body close above the anchor price of 4345.66. The entry at 4375.46 aligns with the 0.680 Golden Pocket retracement level, and the stop loss is appropriately placed below the swing low at 4353.11. The risk-reward ratio of 2.83 is favorable, and the market bias is bullish, supporting the trade setup." [ref=e9579]: 🟢 APPROVED (95%)
+                - cell "SL HIT ✗" [ref=e9580]
+                - cell [ref=e9582]:
+                  - button "👁️ View" [ref=e9583]
+              - row [ref=e9584] [cursor=pointer]:
+                - cell "12:45:34 PM" [ref=e9585]
+                - cell "15M" [ref=e9586]
+                - cell "SMC_WITH_FIB_V1" [ref=e9587]
+                - cell "▲ BUY" [ref=e9589]
+                - cell "$4383.87" [ref=e9590]
+                - cell "$4374.29" [ref=e9591]
+                - cell "$4411.03" [ref=e9592]
+                - cell "1:2.8" [ref=e9593]
+                - cell "N/A" [ref=e9594]
+                - cell "CANCELLED" [ref=e9596]
+                - cell [ref=e9598]:
+                  - button "👁️ View" [ref=e9599]
+              - row [ref=e9600] [cursor=pointer]:
+                - cell "12:45:33 PM" [ref=e9601]
+                - cell "5M" [ref=e9602]
+                - cell "SMC_WITH_FIB_V1" [ref=e9603]
+                - cell "▼ SELL" [ref=e9605]
+                - cell "$4431.62" [ref=e9606]
+                - cell "$4440.26" [ref=e9607]
+                - cell "$4407.13" [ref=e9608]
+                - cell "1:2.8" [ref=e9609]
+                - cell "🟢 APPROVED (95%)" [ref=e9610]:
+                  - generic "The signal indicates a valid short entry based on the Smart Money Concepts strategy. The entry at 4434.68 aligns with the 0.680 Golden Pocket retracement level, and the stop loss is appropriately placed at 4441.03, which is below the swing high. The Break of Structure (BOS) is confirmed by a full candle body close, indicating a strong bearish market bias. The risk-reward ratio of 2.83 is favorable, and the market conditions appear to support this trade." [ref=e9611]: 🟢 APPROVED (95%)
+                - cell "TP HIT ✓" [ref=e9612]
+                - cell [ref=e9614]:
+                  - button "👁️ View" [ref=e9615]
+              - row [ref=e9616] [cursor=pointer]:
+                - cell "11:45:11 AM" [ref=e9617]
+                - cell "1H" [ref=e9618]
+                - cell "SMC_WITH_FIB_V1" [ref=e9619]
+                - cell "▼ SELL" [ref=e9621]
+                - cell "$4394.35" [ref=e9622]
+                - cell "$4411.53" [ref=e9623]
+                - cell "$4345.66" [ref=e9624]
+                - cell "1:2.8" [ref=e9625]
+                - cell "N/A" [ref=e9626]
+                - cell "SL HIT ✗" [ref=e9628]
+                - cell [ref=e9630]:
+                  - button "👁️ View" [ref=e9631]
+              - row [ref=e9632] [cursor=pointer]:
+                - cell "11:30:22 AM" [ref=e9633]
+                - cell "30M" [ref=e9634]
+                - cell "SMC_WITH_FIB_V1" [ref=e9635]
+                - cell "▼ SELL" [ref=e9637]
+                - cell "$4391.58" [ref=e9638]
+                - cell "$4407.79" [ref=e9639]
+                - cell "$4345.66" [ref=e9640]
+                - cell "1:2.8" [ref=e9641]
+                - cell "N/A" [ref=e9642]
+                - cell "SL HIT ✗" [ref=e9644]
+                - cell [ref=e9646]:
+                  - button "👁️ View" [ref=e9647]
+              - row [ref=e9648] [cursor=pointer]:
+                - cell "8:20:26 AM" [ref=e9649]
+                - cell "5M" [ref=e9650]
+                - cell "SMC_WITH_FIB_V1" [ref=e9651]
+                - cell "▲ BUY" [ref=e9653]
+                - cell "$4357.19" [ref=e9654]
+                - cell "$4348.54" [ref=e9655]
+                - cell "$4381.69" [ref=e9656]
+                - cell "1:2.8" [ref=e9657]
+                - cell "N/A" [ref=e9658]
+                - cell "CANCELLED" [ref=e9660]
+                - cell [ref=e9662]:
+                  - button "👁️ View" [ref=e9663]
+    - complementary "Signal detail" [ref=e282]:
+      - generic [ref=e283]:
+        - generic [ref=e284]: SIGNAL DETAIL
+        - button "Close" [ref=e285] [cursor=pointer]: ✕

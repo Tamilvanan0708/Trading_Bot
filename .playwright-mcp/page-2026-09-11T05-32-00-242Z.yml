@@ -1,0 +1,103 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4] [cursor=pointer]:
+      - generic [ref=e5]: XAU
+      - generic [ref=e6]:
+        - generic [ref=e7]: XAU AI
+        - generic [ref=e8]: SIGNAL INTELLIGENCE
+    - navigation [ref=e9]:
+      - generic [ref=e10]: MAIN
+      - link "◈ Command Center" [ref=e11] [cursor=pointer]:
+        - /url: "#/overview"
+        - generic [ref=e12]: ◈
+        - generic [ref=e13]: Command Center
+      - link "〽 Live Market" [ref=e14] [cursor=pointer]:
+        - /url: "#/live"
+        - generic [ref=e15]: 〽
+        - generic [ref=e16]: Live Market
+      - link "⚡ Signals Feed" [ref=e17] [cursor=pointer]:
+        - /url: "#/signals"
+        - generic [ref=e18]: ⚡
+        - generic [ref=e19]: Signals Feed
+      - link "💼 Paper Trading" [ref=e20] [cursor=pointer]:
+        - /url: "#/paper"
+        - generic [ref=e21]: 💼
+        - generic [ref=e22]: Paper Trading
+      - generic [ref=e23]: MY STRATEGIES
+      - link "💎 SMC with Fib" [ref=e24] [cursor=pointer]:
+        - /url: "#/smc-fib"
+        - generic [ref=e25]: 💎
+        - generic [ref=e26]: SMC with Fib
+      - link "🎯 Fib Retracement" [ref=e27] [cursor=pointer]:
+        - /url: "#/fib-retracement"
+        - generic [ref=e28]: 🎯
+        - generic [ref=e29]: Fib Retracement
+      - link "📈 Fib Go with Trend" [ref=e30] [cursor=pointer]:
+        - /url: "#/fib-trend"
+        - generic [ref=e31]: 📈
+        - generic [ref=e32]: Fib Go with Trend
+      - generic [ref=e33]: ANALYTICS & TESTING
+      - link "🧪 Backtest Lab" [ref=e34] [cursor=pointer]:
+        - /url: "#/backtest"
+        - generic [ref=e35]: 🧪
+        - generic [ref=e36]: Backtest Lab
+      - generic [ref=e37]: SYSTEM
+      - link "♥ System Health" [ref=e38] [cursor=pointer]:
+        - /url: "#/health"
+        - generic [ref=e39]: ♥
+        - generic [ref=e40]: System Health
+      - link "⚙ Settings" [ref=e41] [cursor=pointer]:
+        - /url: "#/settings"
+        - generic [ref=e42]: ⚙
+        - generic [ref=e43]: Settings
+    - generic [ref=e44]:
+      - generic [ref=e45]: SYSTEM HEALTHY
+      - generic [ref=e48]: v1.0.0
+  - generic [ref=e49]:
+    - banner [ref=e50]:
+      - generic [ref=e51]:
+        - button "Toggle sidebar" [ref=e52] [cursor=pointer]: ☰
+        - generic [ref=e53] [cursor=pointer]:
+          - generic [ref=e54]: XAU/USD
+          - generic [ref=e55]: LIVE
+        - generic [ref=e57] [cursor=pointer]:
+          - generic [ref=e58]: "4342.41"
+          - generic [ref=e59]: "-0.19"
+        - generic [ref=e60]: bid 4342.41 / ask 4342.42
+      - generic:
+        - generic [ref=e62] [cursor=pointer]: REGIME —
+        - generic [ref=e63] [cursor=pointer]: SESSION —
+        - generic [ref=e64] [cursor=pointer]: CANDLE Sep 11, 10:45 AM
+      - generic [ref=e65]:
+        - button "⚡ 2s AUTO" [ref=e66] [cursor=pointer]
+        - generic "Binance" [ref=e69] [cursor=pointer]: BINANCE
+        - generic "Database" [ref=e71] [cursor=pointer]: DB
+        - generic "Scheduler" [ref=e73] [cursor=pointer]: SCHED
+        - generic "Telegram" [ref=e75] [cursor=pointer]: TG
+        - generic "Data quality" [ref=e77] [cursor=pointer]: DQ
+        - button "Notifications" [ref=e79] [cursor=pointer]: 🔔
+        - button "Settings" [ref=e80] [cursor=pointer]: ⚙
+        - button "Toggle Light / Dark Theme" [ref=e81] [cursor=pointer]: 🌙
+        - generic [ref=e82]: Q
+    - main [ref=e83]:
+      - generic [ref=e319]:
+        - generic [ref=e320]:
+          - generic [ref=e321]: Live Market — XAU/USD · 15M
+          - generic [ref=e322]:
+            - button "5M" [ref=e323] [cursor=pointer]
+            - button "15M" [ref=e324] [cursor=pointer]
+            - button "30M" [ref=e325] [cursor=pointer]
+            - button "1H" [ref=e326] [cursor=pointer]
+            - button "4H" [ref=e327] [cursor=pointer]
+        - generic [ref=e328]:
+          - generic [ref=e329]: NO DATA — feed and cache unavailable
+          - generic [ref=e330]: 2026-09-11 05:32:00Z
+        - generic [ref=e332]:
+          - generic [ref=e333]: Native incremental chart
+          - generic [ref=e334]:
+            - generic [ref=e335]: NO DATA
+            - generic [ref=e336]: SSE stream · polling fallback · cache seed
+    - complementary "Signal detail" [ref=e282]:
+      - generic [ref=e283]:
+        - generic [ref=e284]: SIGNAL DETAIL
+        - button "Close" [ref=e285] [cursor=pointer]: ✕

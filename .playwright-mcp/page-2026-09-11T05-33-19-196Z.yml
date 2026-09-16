@@ -1,0 +1,621 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4] [cursor=pointer]:
+      - generic [ref=e5]: XAU
+      - generic [ref=e6]:
+        - generic [ref=e7]: XAU AI
+        - generic [ref=e8]: SIGNAL INTELLIGENCE
+    - navigation [ref=e9]:
+      - generic [ref=e10]: MAIN
+      - link "◈ Command Center" [ref=e11] [cursor=pointer]:
+        - /url: "#/overview"
+        - generic [ref=e12]: ◈
+        - generic [ref=e13]: Command Center
+      - link "〽 Live Market" [ref=e14] [cursor=pointer]:
+        - /url: "#/live"
+        - generic [ref=e15]: 〽
+        - generic [ref=e16]: Live Market
+      - link "⚡ Signals Feed" [ref=e17] [cursor=pointer]:
+        - /url: "#/signals"
+        - generic [ref=e18]: ⚡
+        - generic [ref=e19]: Signals Feed
+      - link "💼 Paper Trading" [ref=e20] [cursor=pointer]:
+        - /url: "#/paper"
+        - generic [ref=e21]: 💼
+        - generic [ref=e22]: Paper Trading
+      - generic [ref=e23]: MY STRATEGIES
+      - link "💎 SMC with Fib" [ref=e24] [cursor=pointer]:
+        - /url: "#/smc-fib"
+        - generic [ref=e25]: 💎
+        - generic [ref=e26]: SMC with Fib
+      - link "🎯 Fib Retracement" [ref=e27] [cursor=pointer]:
+        - /url: "#/fib-retracement"
+        - generic [ref=e28]: 🎯
+        - generic [ref=e29]: Fib Retracement
+      - link "📈 Fib Go with Trend" [ref=e30] [cursor=pointer]:
+        - /url: "#/fib-trend"
+        - generic [ref=e31]: 📈
+        - generic [ref=e32]: Fib Go with Trend
+      - generic [ref=e33]: ANALYTICS & TESTING
+      - link "🧪 Backtest Lab" [ref=e34] [cursor=pointer]:
+        - /url: "#/backtest"
+        - generic [ref=e35]: 🧪
+        - generic [ref=e36]: Backtest Lab
+      - generic [ref=e37]: SYSTEM
+      - link "♥ System Health" [ref=e38] [cursor=pointer]:
+        - /url: "#/health"
+        - generic [ref=e39]: ♥
+        - generic [ref=e40]: System Health
+      - link "⚙ Settings" [ref=e41] [cursor=pointer]:
+        - /url: "#/settings"
+        - generic [ref=e42]: ⚙
+        - generic [ref=e43]: Settings
+    - generic [ref=e44]:
+      - generic [ref=e45]: SYSTEM HEALTHY
+      - generic [ref=e48]: v1.0.0
+  - generic [ref=e49]:
+    - banner [ref=e50]:
+      - generic [ref=e51]:
+        - button "Toggle sidebar" [ref=e52] [cursor=pointer]: ☰
+        - generic [ref=e53] [cursor=pointer]:
+          - generic [ref=e54]: XAU/USD
+          - generic [ref=e55]: LIVE
+        - generic [ref=e57] [cursor=pointer]:
+          - generic [ref=e58]: "4342.27"
+          - generic [ref=e59]: "-0.45"
+        - generic [ref=e60]: bid 4342.27 / ask 4342.28
+      - generic:
+        - generic [ref=e62] [cursor=pointer]: REGIME —
+        - generic [ref=e63] [cursor=pointer]: SESSION —
+        - generic [ref=e64] [cursor=pointer]: CANDLE Sep 11, 10:45 AM
+      - generic [ref=e65]:
+        - button "⚡ 2s AUTO" [ref=e66] [cursor=pointer]
+        - generic "Binance" [ref=e69] [cursor=pointer]: BINANCE
+        - generic "Database" [ref=e71] [cursor=pointer]: DB
+        - generic "Scheduler" [ref=e73] [cursor=pointer]: SCHED
+        - generic "Telegram" [ref=e75] [cursor=pointer]: TG
+        - generic "Data quality" [ref=e77] [cursor=pointer]: DQ
+        - button "Notifications" [ref=e79] [cursor=pointer]: 🔔
+        - button "Settings" [ref=e80] [cursor=pointer]: ⚙
+        - button "Toggle Light / Dark Theme" [ref=e81] [cursor=pointer]: 🌙
+        - generic [ref=e82]: Q
+    - main [ref=e83]:
+      - generic [ref=e9665]:
+        - generic [ref=e9666]:
+          - generic [ref=e9667]:
+            - generic [ref=e9668]: 🎯 Fib Retracement
+            - generic [ref=e9669]: Multi-Timeframe Cascading BOS Retracement Strategy · RETRACEMENT_BOS_V1
+          - generic [ref=e9670]:
+            - generic [ref=e9671]: LIVE AUTO-REFRESH
+            - generic [ref=e9673]: "⚡ MULTI-SLOT: 5M · 15M · 30M · 1H CONCURRENT SCANNING"
+            - generic [ref=e9675]: 🟢 ACTIVE
+            - generic [ref=e9676]: SIGNAL ONLY
+            - generic [ref=e9677]: REAL MONEY DISABLED
+        - generic [ref=e9678]:
+          - generic [ref=e9681]:
+            - generic [ref=e9682]: STRATEGY ACTIVE & RUNNING
+            - generic [ref=e9683]: Scanning 5M, 15M, 30M, 1H concurrently. Paper trading and live signals are armed.
+          - link "⚙️ Settings" [ref=e9684] [cursor=pointer]:
+            - /url: "#settings"
+        - generic [ref=e9686]:
+          - generic [ref=e9687]:
+            - generic [ref=e9688]: "SELECT TIMEFRAME:"
+            - generic [ref=e9689]:
+              - button "5M" [ref=e9690] [cursor=pointer]
+              - button "15M" [ref=e9691] [cursor=pointer]
+              - button "30M" [ref=e9692] [cursor=pointer]
+              - button "1H" [ref=e9693] [cursor=pointer]
+          - generic [ref=e9694]: "Engine Scope: 5M · 15M · 30M · 1H (Multi-Slot Parallel Execution)"
+        - generic [ref=e9696]:
+          - generic [ref=e9697]: BOS
+          - generic [ref=e9698]: →
+          - generic [ref=e9699]: POINT 2
+          - generic [ref=e9700]: →
+          - generic [ref=e9701]: FIB ACTIVE
+          - generic [ref=e9702]: →
+          - generic [ref=e9703]: TRACKING HIGH
+          - generic [ref=e9704]: →
+          - generic [ref=e9705]: ENTRY TOUCHED
+          - generic [ref=e9706]: →
+          - generic [ref=e9707]: TP FROZEN
+          - generic [ref=e9708]: →
+          - generic [ref=e9709]: OUTCOME
+        - generic [ref=e9711]:
+          - generic [ref=e9712]:
+            - generic [ref=e9713]:
+              - generic [ref=e9714]: 🤖 AI SETUP GUARDIAN
+              - generic [ref=e9715]: 5M
+              - generic [ref=e9716]: ▲ LONG
+            - generic [ref=e9717]:
+              - generic [ref=e9718]: 🟡 AI APPROVED · SCANNER IN ZONE (95%)
+              - generic [ref=e9719]: "Model: gpt-4o-mini"
+              - generic [ref=e9720]: 9:50:42 AM
+          - generic [ref=e9721]:
+            - generic [ref=e9722]: "Guardian Decision: AI APPROVED · SCANNER ONLY — Validated setup in zone. No open broker trade."
+            - generic [ref=e9723]: "💬 AI Reasoning: The signal demonstrates a clean Break of Structure (BOS) confirmed by a full candle body close above the broken swing level at $4324.97. The entry at $4325.50 aligns with the 0.500 Fibonacci retracement level, and the stop loss is appropriately placed below the 0.236 level at $4323.42. The risk-reward ratio is acceptable, and the market bias is bullish, supporting the long position."
+        - generic [ref=e9725]:
+          - generic [ref=e9726]:
+            - generic [ref=e9727]:
+              - generic [ref=e9728]: XAUUSD · 5M
+              - generic [ref=e9729]: NO ACTIVE SETUP
+              - generic [ref=e9730]: SCANNING FOR NEW BOS BREAK
+            - generic [ref=e9731]: "LIVE: $4341.63"
+          - generic [ref=e9732]: 🔍 Currently scanning 5M closed candles for a new valid Break of Structure (BOS). No active retracement trade on this timeframe.
+        - generic [ref=e9734]:
+          - generic [ref=e9735]:
+            - generic [ref=e9736]: BOS BREAK / ANCHOR
+            - generic [ref=e9737]: $— / $—
+          - generic [ref=e9738]:
+            - generic [ref=e9739]: CURRENT EXPANSION (1.000)
+            - generic [ref=e9740]: —
+          - generic [ref=e9741]:
+            - generic [ref=e9742]: TOTAL RANGE
+            - generic [ref=e9743]: —
+          - generic [ref=e9744]:
+            - generic [ref=e9745]: ENTRY → TP
+            - generic [ref=e9746]: —
+          - generic [ref=e9747]:
+            - generic [ref=e9748]: ENTRY → SL
+            - generic [ref=e9749]: —
+          - generic [ref=e9750]:
+            - generic [ref=e9751]: 50% EQUILIBRIUM
+            - generic [ref=e9752]: —
+        - generic [ref=e9753]:
+          - generic [ref=e9755]:
+            - generic [ref=e9756]:
+              - generic [ref=e9757]: FIBONACCI STRUCTURE
+              - generic [ref=e9758]: Live Ratios
+            - table [ref=e9761]:
+              - rowgroup [ref=e9762]:
+                - row [ref=e9763]:
+                  - columnheader "LEVEL" [ref=e9764]
+                  - columnheader "MEANING" [ref=e9765]
+                  - columnheader "PRICE" [ref=e9766]
+              - rowgroup [ref=e9767]:
+                - row [ref=e9768]:
+                  - cell "—" [ref=e9769]
+          - generic [ref=e9770]:
+            - generic [ref=e9771]:
+              - generic [ref=e9772]: STRUCTURE & SMC STATUS
+              - generic [ref=e9773]: 5M
+            - generic [ref=e9775]:
+              - term [ref=e9776]: Direction
+              - definition [ref=e9777]: —
+              - term [ref=e9778]: Structure Break
+              - definition [ref=e9779]: NONE
+              - term [ref=e9780]: Break Level
+              - definition [ref=e9781]: —
+              - term [ref=e9782]: Order Blocks (OB)
+              - definition [ref=e9783]: —
+              - term [ref=e9784]: FVG Imbalances
+              - definition [ref=e9785]: —
+              - term [ref=e9786]: SMC Zone
+              - definition [ref=e9787]: —
+              - term [ref=e9788]: 50% Equilibrium
+              - definition [ref=e9789]: —
+              - term [ref=e9790]: Execution Mode
+              - definition [ref=e9791]:
+                - generic [ref=e9792]: MULTI-SLOT SCANNING
+        - generic [ref=e9794]:
+          - generic [ref=e9795]:
+            - generic [ref=e9796]:
+              - generic [ref=e9797]: ⚡ 🎯 Fib Retracement Signal History
+              - generic [ref=e9798]: Strategy Sub-Feed
+            - generic [ref=e9799]: Filtered exclusively to 🎯 Fib Retracement setups & AI validations
+          - table [ref=e9802]:
+            - rowgroup [ref=e9803]:
+              - row [ref=e9804]:
+                - columnheader "Time" [ref=e9805]
+                - columnheader "TF" [ref=e9806]
+                - columnheader "Layer" [ref=e9807]
+                - columnheader "Dir" [ref=e9808]
+                - columnheader "Entry" [ref=e9809]
+                - columnheader "SL" [ref=e9810]
+                - columnheader "TP1" [ref=e9811]
+                - columnheader "R:R" [ref=e9812]
+                - columnheader "AI Verdict" [ref=e9813]
+                - columnheader "Outcome" [ref=e9814]
+                - columnheader "Action" [ref=e9815]
+            - rowgroup [ref=e9816]:
+              - row [ref=e9817] [cursor=pointer]:
+                - cell "9:50:38 AM" [ref=e9818]
+                - cell "5M" [ref=e9819]
+                - cell "FIB_RETR_V1:L2" [ref=e9820]
+                - cell "▲ BUY" [ref=e9822]
+                - cell "$4325.50" [ref=e9823]
+                - cell "$4323.42" [ref=e9824]
+                - cell "$4326.43" [ref=e9825]
+                - cell "1:0.5" [ref=e9826]
+                - cell "CAUTION" [ref=e9827]
+                - cell "FILLED ●" [ref=e9829]
+                - cell [ref=e9831]:
+                  - button "👁️ View" [ref=e9832]
+              - row [ref=e9833] [cursor=pointer]:
+                - cell "9:50:29 AM" [ref=e9834]
+                - cell "5M" [ref=e9835]
+                - cell "FIB_RETR_V1:L1" [ref=e9836]
+                - cell "▲ BUY" [ref=e9838]
+                - cell "$4326.43" [ref=e9839]
+                - cell "$4323.42" [ref=e9840]
+                - cell "$4329.43" [ref=e9841]
+                - cell "1:1.0" [ref=e9842]
+                - cell "CAUTION" [ref=e9843]
+                - cell "FILLED ●" [ref=e9845]
+                - cell [ref=e9847]:
+                  - button "👁️ View" [ref=e9848]
+              - row [ref=e9849] [cursor=pointer]:
+                - cell "8:40:40 AM" [ref=e9850]
+                - cell "5M" [ref=e9851]
+                - cell "FIB_RETR_V1:L3" [ref=e9852]
+                - cell "▼ SELL" [ref=e9854]
+                - cell "$4326.65" [ref=e9855]
+                - cell "$4328.21" [ref=e9856]
+                - cell "$4324.15" [ref=e9857]
+                - cell "1:1.6" [ref=e9858]
+                - cell "🔴 REJECTED (95%)" [ref=e9859]:
+                  - generic "The signal indicates a short entry based on a Fibonacci retracement strategy. However, the entry price of 4326.65 corresponds to the 0.382 Fibonacci level, which does not align with the required layered entry levels of 0.618, 0.500, or 0.382 for validation. Additionally, the stop loss is placed at 0.236, which is acceptable, but the entry does not meet the criteria for a valid setup. Furthermore, the impulse span from the entry to the stop loss is 1.56 points, which is within the acceptable range for 5M scalping. However, the entry level does not confirm the required Fibonacci retracement structure." [ref=e9860]: 🔴 REJECTED (95%)
+                - cell "AI REJECTED ✗" [ref=e9861]
+                - cell [ref=e9863]:
+                  - button "👁️ View" [ref=e9864]
+              - row [ref=e9865] [cursor=pointer]:
+                - cell "8:40:35 AM" [ref=e9866]
+                - cell "5M" [ref=e9867]
+                - cell "FIB_RETR_V1:L2" [ref=e9868]
+                - cell "▼ SELL" [ref=e9870]
+                - cell "$4325.40" [ref=e9871]
+                - cell "$4328.21" [ref=e9872]
+                - cell "$4324.15" [ref=e9873]
+                - cell "1:0.4" [ref=e9874]
+                - cell "🔴 REJECTED (85%)" [ref=e9875]:
+                  - generic "The signal indicates a short entry based on Fibonacci retracement levels. However, the stop-loss distance of 2.81 points exceeds the maximum allowable impulse span of 30 points for a 5M scalping setup. This indicates a wider risk exposure than preferred, which could lead to significant capital risk. Additionally, the risk-reward ratio of 0.44 is below the acceptable threshold for a favorable trade setup." [ref=e9876]: 🔴 REJECTED (85%)
+                - cell "TP HIT ✓" [ref=e9877]
+                - cell [ref=e9879]:
+                  - button "👁️ View" [ref=e9880]
+              - row [ref=e9881] [cursor=pointer]:
+                - cell "8:40:28 AM" [ref=e9882]
+                - cell "5M" [ref=e9883]
+                - cell "FIB_RETR_V1:L1" [ref=e9884]
+                - cell "▼ SELL" [ref=e9886]
+                - cell "$4324.15" [ref=e9887]
+                - cell "$4328.21" [ref=e9888]
+                - cell "$4320.09" [ref=e9889]
+                - cell "1:1.0" [ref=e9890]
+                - cell "CAUTION" [ref=e9891]
+                - cell "TP HIT ✓" [ref=e9893]
+                - cell [ref=e9895]:
+                  - button "👁️ View" [ref=e9896]
+              - row [ref=e9897] [cursor=pointer]:
+                - cell "7:30:38 AM" [ref=e9898]
+                - cell "30M" [ref=e9899]
+                - cell "FIB_RETR_V1:L3" [ref=e9900]
+                - cell "▲ BUY" [ref=e9902]
+                - cell "$4328.96" [ref=e9903]
+                - cell "$4325.31" [ref=e9904]
+                - cell "$4334.88" [ref=e9905]
+                - cell "1:1.6" [ref=e9906]
+                - cell "🟢 APPROVED (95%)" [ref=e9907]:
+                  - generic "The signal demonstrates a clean Break of Structure (BOS) confirmed by a full candle body close above the broken swing level at $4329.85. The entry at $4328.96 aligns with the 0.382 Fibonacci retracement level, and the stop loss is appropriately placed below the 0.236 level at $4325.31, adhering to the Fibonacci retracement strategy. The risk-reward ratio of 1.62 is favorable, and the market bias is bullish, supporting the long position." [ref=e9908]: 🟢 APPROVED (95%)
+                - cell "TP HIT ✓" [ref=e9909]
+                - cell [ref=e9911]:
+                  - button "👁️ View" [ref=e9912]
+              - row [ref=e9913] [cursor=pointer]:
+                - cell "7:30:37 AM" [ref=e9914]
+                - cell "30M" [ref=e9915]
+                - cell "FIB_RETR_V1:L2" [ref=e9916]
+                - cell "▲ BUY" [ref=e9918]
+                - cell "$4331.92" [ref=e9919]
+                - cell "$4325.31" [ref=e9920]
+                - cell "$4334.88" [ref=e9921]
+                - cell "1:0.5" [ref=e9922]
+                - cell "CAUTION" [ref=e9923]
+                - cell "TP HIT ✓" [ref=e9925]
+                - cell [ref=e9927]:
+                  - button "👁️ View" [ref=e9928]
+              - row [ref=e9929] [cursor=pointer]:
+                - cell "7:30:31 AM" [ref=e9930]
+                - cell "30M" [ref=e9931]
+                - cell "FIB_RETR_V1:L1" [ref=e9932]
+                - cell "▲ BUY" [ref=e9934]
+                - cell "$4334.88" [ref=e9935]
+                - cell "$4325.31" [ref=e9936]
+                - cell "$4344.44" [ref=e9937]
+                - cell "1:1.0" [ref=e9938]
+                - cell "CAUTION" [ref=e9939]
+                - cell "BREAKEVEN" [ref=e9941]
+                - cell [ref=e9943]:
+                  - button "👁️ View" [ref=e9944]
+              - row [ref=e9945] [cursor=pointer]:
+                - cell "7:00:22 AM" [ref=e9946]
+                - cell "15M" [ref=e9947]
+                - cell "FIB_RETR_V1:L3" [ref=e9948]
+                - cell "▲ BUY" [ref=e9950]
+                - cell "$4326.59" [ref=e9951]
+                - cell "$4322.37" [ref=e9952]
+                - cell "$4333.41" [ref=e9953]
+                - cell "1:1.6" [ref=e9954]
+                - cell "🟢 APPROVED (95%)" [ref=e9955]:
+                  - generic "The signal demonstrates a clean Break of Structure (BOS) confirmed by a full candle body close above the broken swing level at $4329.85. The entry at $4326.59 aligns with the 0.382 Fibonacci retracement level, and the stop loss is appropriately placed below the 0.236 level at $4322.37, adhering to the strategy's requirements. The risk-reward ratio of 1.62 is favorable, and the market bias is bullish, supporting the long position." [ref=e9956]: 🟢 APPROVED (95%)
+                - cell "TP HIT ✓" [ref=e9957]
+                - cell [ref=e9959]:
+                  - button "👁️ View" [ref=e9960]
+              - row [ref=e9961] [cursor=pointer]:
+                - cell "7:00:22 AM" [ref=e9962]
+                - cell "15M" [ref=e9963]
+                - cell "FIB_RETR_V1:L2" [ref=e9964]
+                - cell "▲ BUY" [ref=e9966]
+                - cell "$4330.00" [ref=e9967]
+                - cell "$4322.37" [ref=e9968]
+                - cell "$4333.41" [ref=e9969]
+                - cell "1:0.5" [ref=e9970]
+                - cell "CAUTION" [ref=e9971]
+                - cell "TP HIT ✓" [ref=e9973]
+                - cell [ref=e9975]:
+                  - button "👁️ View" [ref=e9976]
+              - row [ref=e9977] [cursor=pointer]:
+                - cell "6:55:30 AM" [ref=e9978]
+                - cell "5M" [ref=e9979]
+                - cell "FIB_RETR_V1:L3" [ref=e9980]
+                - cell "▲ BUY" [ref=e9982]
+                - cell "$4326.59" [ref=e9983]
+                - cell "$4322.37" [ref=e9984]
+                - cell "$4333.41" [ref=e9985]
+                - cell "1:1.6" [ref=e9986]
+                - cell "🟢 APPROVED (95%)" [ref=e9987]:
+                  - generic "The signal demonstrates a clean Break of Structure (BOS) confirmed by a full candle body close above the broken swing level at $4328.35. The entry at $4326.59 aligns with the 0.382 Fibonacci retracement level, and the stop loss is appropriately placed below the 0.236 level at $4322.37, adhering to the strategy's requirements. The risk-reward ratio of 1.62 is favorable, and the market bias is bullish, supporting the long position." [ref=e9988]: 🟢 APPROVED (95%)
+                - cell "TP HIT ✓" [ref=e9989]
+                - cell [ref=e9991]:
+                  - button "👁️ View" [ref=e9992]
+              - row [ref=e9993] [cursor=pointer]:
+                - cell "6:55:24 AM" [ref=e9994]
+                - cell "5M" [ref=e9995]
+                - cell "FIB_RETR_V1:L2" [ref=e9996]
+                - cell "▲ BUY" [ref=e9998]
+                - cell "$4330.00" [ref=e9999]
+                - cell "$4322.37" [ref=e10000]
+                - cell "$4333.41" [ref=e10001]
+                - cell "1:0.5" [ref=e10002]
+                - cell "CAUTION" [ref=e10003]
+                - cell "TP HIT ✓" [ref=e10005]
+                - cell [ref=e10007]:
+                  - button "👁️ View" [ref=e10008]
+              - row [ref=e10009] [cursor=pointer]:
+                - cell "6:45:32 AM" [ref=e10010]
+                - cell "15M" [ref=e10011]
+                - cell "FIB_RETR_V1:L1" [ref=e10012]
+                - cell "▲ BUY" [ref=e10014]
+                - cell "$4333.41" [ref=e10015]
+                - cell "$4322.37" [ref=e10016]
+                - cell "$4344.44" [ref=e10017]
+                - cell "1:1.0" [ref=e10018]
+                - cell "CAUTION" [ref=e10019]
+                - cell "BREAKEVEN" [ref=e10021]
+                - cell [ref=e10023]:
+                  - button "👁️ View" [ref=e10024]
+              - row [ref=e10025] [cursor=pointer]:
+                - cell "6:35:07 AM" [ref=e10026]
+                - cell "5M" [ref=e10027]
+                - cell "FIB_RETR_V1:L1" [ref=e10028]
+                - cell "▲ BUY" [ref=e10030]
+                - cell "$4333.41" [ref=e10031]
+                - cell "$4322.37" [ref=e10032]
+                - cell "$4344.44" [ref=e10033]
+                - cell "1:1.0" [ref=e10034]
+                - cell "CAUTION" [ref=e10035]
+                - cell "BREAKEVEN" [ref=e10037]
+                - cell [ref=e10039]:
+                  - button "👁️ View" [ref=e10040]
+              - row [ref=e10041] [cursor=pointer]:
+                - cell "5:15:11 AM" [ref=e10042]
+                - cell "5M" [ref=e10043]
+                - cell "FIB_RETR_V1:L2" [ref=e10044]
+                - cell "▼ SELL" [ref=e10046]
+                - cell "$4322.21" [ref=e10047]
+                - cell "$4323.37" [ref=e10048]
+                - cell "$4321.69" [ref=e10049]
+                - cell "1:0.5" [ref=e10050]
+                - cell "🔴 REJECTED (95%)" [ref=e10051]:
+                  - generic "The signal indicates a short entry based on Fibonacci retracement levels. However, the stop-loss distance of 1.16 points exceeds the maximum allowable impulse span of 30 points for a 5M scalping setup. This indicates a wide risk exposure, which is not aligned with high-probability scalping criteria. Additionally, the risk-reward ratio of 0.45 is below the acceptable threshold for a favorable trade setup." [ref=e10052]: 🔴 REJECTED (95%)
+                - cell "TP HIT ✓" [ref=e10053]
+                - cell [ref=e10055]:
+                  - button "👁️ View" [ref=e10056]
+              - row [ref=e10057] [cursor=pointer]:
+                - cell "5:15:04 AM" [ref=e10058]
+                - cell "5M" [ref=e10059]
+                - cell "FIB_RETR_V1:L1" [ref=e10060]
+                - cell "▼ SELL" [ref=e10062]
+                - cell "$4321.69" [ref=e10063]
+                - cell "$4323.37" [ref=e10064]
+                - cell "$4320.02" [ref=e10065]
+                - cell "1:1.0" [ref=e10066]
+                - cell "CAUTION" [ref=e10067]
+                - cell "TP HIT ✓" [ref=e10069]
+                - cell [ref=e10071]:
+                  - button "👁️ View" [ref=e10072]
+              - row [ref=e10073] [cursor=pointer]:
+                - cell "4:35:07 AM" [ref=e10074]
+                - cell "5M" [ref=e10075]
+                - cell "FIB_RETR_V1:L2" [ref=e10076]
+                - cell "▼ SELL" [ref=e10078]
+                - cell "$4324.08" [ref=e10079]
+                - cell "$4327.13" [ref=e10080]
+                - cell "$4322.72" [ref=e10081]
+                - cell "1:0.5" [ref=e10082]
+                - cell "🔴 REJECTED (95%)" [ref=e10083]:
+                  - generic "The signal indicates a short position based on a Fibonacci retracement strategy. However, the stop-loss distance of 3.05 points (from 4324.08 to 4327.13) is acceptable, but the overall risk-reward ratio of 0.45 is below the typical threshold for favorable trades. Additionally, the impulse span is not explicitly stated, but the entry and stop-loss levels suggest a potential for wider risk exposure. The market bias is bearish, but the risk flags indicate that the setup may not provide sufficient reward for the risk taken." [ref=e10084]: 🔴 REJECTED (95%)
+                - cell "TP HIT ✓" [ref=e10085]
+                - cell [ref=e10087]:
+                  - button "👁️ View" [ref=e10088]
+              - row [ref=e10089] [cursor=pointer]:
+                - cell "4:20:28 AM" [ref=e10090]
+                - cell "5M" [ref=e10091]
+                - cell "FIB_RETR_V1:L1" [ref=e10092]
+                - cell "▼ SELL" [ref=e10094]
+                - cell "$4322.72" [ref=e10095]
+                - cell "$4327.13" [ref=e10096]
+                - cell "$4318.31" [ref=e10097]
+                - cell "1:1.0" [ref=e10098]
+                - cell "CAUTION" [ref=e10099]
+                - cell "BREAKEVEN" [ref=e10101]
+                - cell [ref=e10103]:
+                  - button "👁️ View" [ref=e10104]
+              - row [ref=e10105] [cursor=pointer]:
+                - cell "3:35:27 AM" [ref=e10106]
+                - cell "5M" [ref=e10107]
+                - cell "FIB_RETR_V1:L2" [ref=e10108]
+                - cell "▼ SELL" [ref=e10110]
+                - cell "$4328.24" [ref=e10111]
+                - cell "$4332.07" [ref=e10112]
+                - cell "$4326.54" [ref=e10113]
+                - cell "1:0.4" [ref=e10114]
+                - cell "CAUTION" [ref=e10115]
+                - cell "TP HIT ✓" [ref=e10117]
+                - cell [ref=e10119]:
+                  - button "👁️ View" [ref=e10120]
+              - row [ref=e10121] [cursor=pointer]:
+                - cell "2:35:58 AM" [ref=e10122]
+                - cell "5M" [ref=e10123]
+                - cell "FIB_RETR_V1:L1" [ref=e10124]
+                - cell "▼ SELL" [ref=e10126]
+                - cell "$4326.54" [ref=e10127]
+                - cell "$4332.07" [ref=e10128]
+                - cell "$4321.01" [ref=e10129]
+                - cell "1:1.0" [ref=e10130]
+                - cell "CAUTION" [ref=e10131]
+                - cell "BREAKEVEN" [ref=e10133]
+                - cell [ref=e10135]:
+                  - button "👁️ View" [ref=e10136]
+              - row [ref=e10137] [cursor=pointer]:
+                - cell "11:35:12 PM" [ref=e10138]
+                - cell "5M" [ref=e10139]
+                - cell "FIB_RETR_V1:L1" [ref=e10140]
+                - cell "▼ SELL" [ref=e10142]
+                - cell "$4359.57" [ref=e10143]
+                - cell "$4366.00" [ref=e10144]
+                - cell "$4353.14" [ref=e10145]
+                - cell "1:1.0" [ref=e10146]
+                - cell "N/A" [ref=e10147]
+                - cell "FILLED ●" [ref=e10149]
+                - cell [ref=e10151]:
+                  - button "👁️ View" [ref=e10152]
+              - row [ref=e10153] [cursor=pointer]:
+                - cell "10:05:16 PM" [ref=e10154]
+                - cell "5M" [ref=e10155]
+                - cell "FIB_RETR_V1:L3" [ref=e10156]
+                - cell "▼ SELL" [ref=e10158]
+                - cell "$4369.32" [ref=e10159]
+                - cell "$4371.86" [ref=e10160]
+                - cell "$4365.19" [ref=e10161]
+                - cell "1:1.6" [ref=e10162]
+                - cell "🟢 APPROVED (95%)" [ref=e10163]:
+                  - generic "The signal demonstrates a clean Break of Structure (BOS) confirmed by a full candle body close below the swing level at $4365.49. The entry at $4369.32 aligns with the 0.382 Fibonacci retracement level, and the stop loss is appropriately placed above the 0.236 level at $4371.86, adhering to the Fibonacci retracement strategy. The risk-reward ratio of 1.63 is favorable, and the market bias is bearish, supporting the short position." [ref=e10164]: 🟢 APPROVED (95%)
+                - cell "TP HIT ✓" [ref=e10165]
+                - cell [ref=e10167]:
+                  - button "👁️ View" [ref=e10168]
+              - row [ref=e10169] [cursor=pointer]:
+                - cell "10:00:08 PM" [ref=e10170]
+                - cell "5M" [ref=e10171]
+                - cell "FIB_RETR_V1:L2" [ref=e10172]
+                - cell "▼ SELL" [ref=e10174]
+                - cell "$4367.25" [ref=e10175]
+                - cell "$4371.86" [ref=e10176]
+                - cell "$4365.19" [ref=e10177]
+                - cell "1:0.5" [ref=e10178]
+                - cell "CAUTION" [ref=e10179]
+                - cell "TP HIT ✓" [ref=e10181]
+                - cell [ref=e10183]:
+                  - button "👁️ View" [ref=e10184]
+              - row [ref=e10185] [cursor=pointer]:
+                - cell "9:50:14 PM" [ref=e10186]
+                - cell "5M" [ref=e10187]
+                - cell "FIB_RETR_V1:L1" [ref=e10188]
+                - cell "▼ SELL" [ref=e10190]
+                - cell "$4365.19" [ref=e10191]
+                - cell "$4371.86" [ref=e10192]
+                - cell "$4358.52" [ref=e10193]
+                - cell "1:1.0" [ref=e10194]
+                - cell "CAUTION" [ref=e10195]
+                - cell "TP HIT ✓" [ref=e10197]
+                - cell [ref=e10199]:
+                  - button "👁️ View" [ref=e10200]
+              - row [ref=e10201] [cursor=pointer]:
+                - cell "7:30:41 PM" [ref=e10202]
+                - cell "15M" [ref=e10203]
+                - cell "FIB_RETR_V1:L1" [ref=e10204]
+                - cell "▼ SELL" [ref=e10206]
+                - cell "$4378.28" [ref=e10207]
+                - cell "$4415.68" [ref=e10208]
+                - cell "$4340.87" [ref=e10209]
+                - cell "1:1.0" [ref=e10210]
+                - cell "CAUTION" [ref=e10211]
+                - cell "TP HIT ✓" [ref=e10213]
+                - cell [ref=e10215]:
+                  - button "👁️ View" [ref=e10216]
+              - row [ref=e10217] [cursor=pointer]:
+                - cell "6:51:47 PM" [ref=e10218]
+                - cell "30M" [ref=e10219]
+                - cell "FIB_RETR_V1:L1" [ref=e10220]
+                - cell "▼ SELL" [ref=e10222]
+                - cell "$4370.41" [ref=e10223]
+                - cell "$4411.90" [ref=e10224]
+                - cell "$4328.91" [ref=e10225]
+                - cell "1:1.0" [ref=e10226]
+                - cell "CAUTION" [ref=e10227]
+                - cell "FILLED ●" [ref=e10229]
+                - cell [ref=e10231]:
+                  - button "👁️ View" [ref=e10232]
+              - row [ref=e10233] [cursor=pointer]:
+                - cell "6:00:42 PM" [ref=e10234]
+                - cell "15M" [ref=e10235]
+                - cell "FIB_RETR_V1:L1" [ref=e10236]
+                - cell "▼ SELL" [ref=e10238]
+                - cell "$4381.40" [ref=e10239]
+                - cell "$4395.74" [ref=e10240]
+                - cell "$4367.06" [ref=e10241]
+                - cell "1:1.0" [ref=e10242]
+                - cell "N/A" [ref=e10243]
+                - cell "FILLED ●" [ref=e10245]
+                - cell [ref=e10247]:
+                  - button "👁️ View" [ref=e10248]
+              - row [ref=e10249] [cursor=pointer]:
+                - cell "5:46:12 PM" [ref=e10250]
+                - cell "5M" [ref=e10251]
+                - cell "FIB_RETR_V1:L1" [ref=e10252]
+                - cell "▼ SELL" [ref=e10254]
+                - cell "$4381.45" [ref=e10255]
+                - cell "$4388.33" [ref=e10256]
+                - cell "$4374.57" [ref=e10257]
+                - cell "1:1.0" [ref=e10258]
+                - cell "CAUTION" [ref=e10259]
+                - cell "TP HIT ✓" [ref=e10261]
+                - cell [ref=e10263]:
+                  - button "👁️ View" [ref=e10264]
+              - row [ref=e10265] [cursor=pointer]:
+                - cell "5:20:40 PM" [ref=e10266]
+                - cell "5M" [ref=e10267]
+                - cell "FIB_RETR_V1:L3" [ref=e10268]
+                - cell "▲ BUY" [ref=e10270]
+                - cell "$4386.36" [ref=e10271]
+                - cell "$4384.23" [ref=e10272]
+                - cell "$4389.81" [ref=e10273]
+                - cell "1:1.6" [ref=e10274]
+                - cell "N/A" [ref=e10275]
+                - cell "FILLED ●" [ref=e10277]
+                - cell [ref=e10279]:
+                  - button "👁️ View" [ref=e10280]
+              - row [ref=e10281] [cursor=pointer]:
+                - cell "5:20:38 PM" [ref=e10282]
+                - cell "5M" [ref=e10283]
+                - cell "FIB_RETR_V1:L2" [ref=e10284]
+                - cell "▲ BUY" [ref=e10286]
+                - cell "$4388.09" [ref=e10287]
+                - cell "$4384.23" [ref=e10288]
+                - cell "$4389.81" [ref=e10289]
+                - cell "1:0.5" [ref=e10290]
+                - cell "N/A" [ref=e10291]
+                - cell "FILLED ●" [ref=e10293]
+                - cell [ref=e10295]:
+                  - button "👁️ View" [ref=e10296]
+    - complementary "Signal detail" [ref=e282]:
+      - generic [ref=e283]:
+        - generic [ref=e284]: SIGNAL DETAIL
+        - button "Close" [ref=e285] [cursor=pointer]: ✕

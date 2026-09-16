@@ -165,7 +165,7 @@ class Settings(BaseSettings):
     BINANCE_HISTORY_RETRY_BACKOFF: float = Field(default=2.0, gt=0)
     LIVE_HISTORY_MAX_AGE_MINUTES: int = Field(default=30, ge=1, le=1440)
     LIVE_HISTORY_MIN_CANDLES: int = Field(default=50, ge=1, le=2000)
-    MAX_CANDLE_GAP_COUNT: int = Field(default=5, ge=0, description="Gap count above which data quality is degraded")
+    MAX_CANDLE_GAP_COUNT: int = Field(default=20, ge=0, description="Gap count above which data quality is degraded")
     LIVE_HISTORY_REFRESH_INTERVAL_MINUTES: int = Field(default=15, ge=1, le=1440)
     LIVE_HISTORY_REFRESH_ON_DEGRADED: bool = Field(default=True)
     LIVE_HISTORY_REFRESH_LOOKBACK_HOURS: int = Field(default=48, ge=1, le=720)

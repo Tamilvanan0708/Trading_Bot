@@ -38,7 +38,17 @@ def _dispatch_tg_alert(coro) -> asyncio.Task:
     """Dispatches a Telegram alert in a shielded background task with a strong reference
     so it is NEVER cancelled by outer sync timeouts or garbage-collected.
     """
-    task = asyncio.create_task(coro)
+    async def _runner():
+        try:
+            res = await coro
+            if not res:
+                logger.warning("[PAPER-TG] Telegram dispatch returned False (disabled or failed).")
+            else:
+                logger.info("[PAPER-TG] Telegram dispatch succeeded.")
+        except Exception as exc:
+            logger.error("[PAPER-TG] Telegram dispatch background error: %s", exc)
+
+    task = asyncio.create_task(_runner())
     _bg_tg_tasks.add(task)
     task.add_done_callback(_bg_tg_tasks.discard)
     return task
@@ -728,25 +738,25 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     except Exception as mt5_err:  # noqa: BLE001
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch order to MT5 queue: %s", mt5_err)
 
-                                        # Telegram: Dispatch Trade Opened Alert
-                                        try:
-                                            dir_badge = "BUY / LONG ▲" if f_state.direction == "LONG" else "SELL / SHORT ▼"
-                                            msg = (
-                                                f"🚀 *TRADE OPENED ({trade_lot:.2f} Lots)*\n"
-                                                f"━━━━━━━━━━━━━━━━━━━━\n"
-                                                f"📊 *Strategy:* Fib Retracement ({l_key})\n"
-                                                f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
-                                                f"📈 *Direction:* {dir_badge}\n"
-                                                f"💵 *Entry:* ${entry_px:.2f}\n"
-                                                f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
-                                                f"🎯 *Take Profit:* ${tp_px:.2f}\n"
-                                                f"🧠 *AI Verdict:* {ai_short}\n"
-                                                f"⚡ *Multi-Slot:* {tf_key.upper()} Active (15M, 30M, 1H scanning in parallel)\n"
-                                                f"━━━━━━━━━━━━━━━━━━━━"
-                                            )
-                                            _dispatch_tg_alert(tg.send_raw_alert(msg))
-                                        except Exception as tg_err:  # noqa: BLE001
-                                            logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
+                                    # Telegram: Dispatch Trade Opened Alert
+                                    try:
+                                        dir_badge = "BUY / LONG ▲" if f_state.direction == "LONG" else "SELL / SHORT ▼"
+                                        msg = (
+                                            f"🚀 *TRADE OPENED ({trade_lot:.2f} Lots)*\n"
+                                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                                            f"📊 *Strategy:* Fib Retracement ({l_key})\n"
+                                            f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
+                                            f"📈 *Direction:* {dir_badge}\n"
+                                            f"💵 *Entry:* ${entry_px:.2f}\n"
+                                            f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
+                                            f"🎯 *Take Profit:* ${tp_px:.2f}\n"
+                                            f"🧠 *AI Verdict:* {ai_short}\n"
+                                            f"⚡ *Multi-Slot:* {tf_key.upper()} Active (15M, 30M, 1H scanning in parallel)\n"
+                                            f"━━━━━━━━━━━━━━━━━━━━"
+                                        )
+                                        _dispatch_tg_alert(tg.send_raw_alert(msg))
+                                    except Exception as tg_err:  # noqa: BLE001
+                                        logger.warning("[PAPER-TG] Failed to send open alert: %s", tg_err)
                                 finally:
                                     _in_flight_signals.discard(sig_id)
                             elif existing and existing.state == "OPEN":
@@ -1049,6 +1059,28 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             tf_open_trade.realized_r = round(pts / max(0.1, abs(entry_chk - (tf_open_trade.stop_loss or 0.0))), 2)
                             await db.commit()
                             logger.info("[PAPER-AUTO] Engine %s closed SMC trade %s @ %.2f (+$%.2f)", smc_outcome, sig_id, exit_px, tf_open_trade.realized_pnl)
+
+                            # Telegram Alert: SMC TP / SL Hit
+                            try:
+                                is_tp = smc_outcome == "TP_HIT"
+                                header = f"🎯 *TAKE PROFIT HIT (+{pts:.2f} PTS)*" if is_tp else f"🛑 *STOP LOSS HIT (-{abs(pts):.2f} PTS)*"
+                                dir_badge = "BUY / LONG ▲" if dir_str == "LONG" else "SELL / SHORT ▼"
+                                pnl_sign = "+" if tf_open_trade.realized_pnl >= 0 else ""
+                                smc_close_msg = (
+                                    f"{header}\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"📊 *Strategy:* SMC With Fib (0.680)\n"
+                                    f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
+                                    f"📈 *Direction:* {dir_badge}\n"
+                                    f"💵 *Entry:* ${entry_chk:.2f}\n"
+                                    f"🏁 *Exit:* ${exit_px:.2f}\n"
+                                    f"💰 *Profit:* {pnl_sign}${tf_open_trade.realized_pnl:.2f}\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━"
+                                )
+                                _dispatch_tg_alert(tg.send_raw_alert(smc_close_msg))
+                            except Exception as tg_err:
+                                logger.warning("[PAPER-TG] Failed to send SMC close alert: %s", tg_err)
+
                             existing_open_smc_by_tf.pop(tf_key, None)  # Allow next setup to open on this TF
 
                     # Single Active Trade Rule: Only open trade if no open SMC trade exists on THIS timeframe!

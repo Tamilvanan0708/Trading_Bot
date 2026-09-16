@@ -44,10 +44,31 @@ def _round_timestamp(ts: datetime, tf: TimeFrame) -> datetime:
     return adjusted.replace(tzinfo=timezone.utc) if adjusted.tzinfo is None else adjusted.astimezone(timezone.utc)
 
 
+def is_forex_market_break(prev_ts: datetime, ts: datetime) -> bool:
+    """Check if the delta between prev_ts and ts corresponds to an expected Forex market break
+    (such as the weekend closure from Friday evening to Sunday evening, or daily rollover break).
+    """
+    p_aware = prev_ts if prev_ts.tzinfo else prev_ts.replace(tzinfo=timezone.utc)
+    t_aware = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    diff_sec = (t_aware - p_aware).total_seconds()
+    if diff_sec <= 0:
+        return False
+    # Weekend break: Friday close (weekday 4) to Sunday open (weekday 6) or Monday (weekday 0)
+    p_w = p_aware.weekday()
+    t_w = t_aware.weekday()
+    if (p_w == 4 and t_w in (6, 0)) or (p_w == 5 and t_w in (6, 0)):
+        return True
+    # Daily rollover break (typically 1 to 2 hours around 21:00-23:59 UTC on weekdays)
+    if diff_sec <= 7800 and (p_aware.hour in (20, 21, 22, 23) or t_aware.hour in (21, 22, 23, 0)):
+        return True
+    return False
+
+
 def validate_candles(
     candles: list[Candle],
     expected_tf: TimeFrame = TimeFrame.M15,
     strict_gaps: bool = False,
+    ignore_market_breaks: bool = True,
 ) -> ValidationResult:
     """Validate a list of candles for consistency, ordering and completeness.
 
@@ -55,6 +76,7 @@ def validate_candles(
         candles: Candle list to validate (must be sorted by timestamp).
         expected_tf: Expected timeframe interval between candles.
         strict_gaps: If True, missing candles are reported as errors.
+        ignore_market_breaks: If True, scheduled Forex weekend closures and rollover breaks are not counted as gaps.
 
     Returns:
         A ValidationResult with errors, warnings, and counts.
@@ -114,13 +136,17 @@ def validate_candles(
                 result.errors.append(f"Candle[{i}]: Out-of-order timestamp {ts} after {prev_ts}.")
                 result.valid = False
             elif diff > expected_delta.total_seconds() * 1.5:
-                result.gaps += 1
-                msg = f"Candle[{i}]: Gap of {diff / 60:.0f} min after {prev_ts}."
-                if strict_gaps:
-                    result.errors.append(msg)
-                    result.valid = False
+                if ignore_market_breaks and is_forex_market_break(prev_ts, ts):
+                    # Scheduled market closure — not a data degradation gap
+                    pass
                 else:
-                    result.warnings.append(msg)
+                    result.gaps += 1
+                    msg = f"Candle[{i}]: Gap of {diff / 60:.0f} min after {prev_ts}."
+                    if strict_gaps:
+                        result.errors.append(msg)
+                        result.valid = False
+                    else:
+                        result.warnings.append(msg)
 
         seen_timestamps.add(ts)
         prev_ts = ts

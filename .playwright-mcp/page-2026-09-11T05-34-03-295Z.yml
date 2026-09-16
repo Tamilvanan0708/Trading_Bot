@@ -1,0 +1,186 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - generic [ref=e4] [cursor=pointer]:
+      - generic [ref=e5]: XAU
+      - generic [ref=e6]:
+        - generic [ref=e7]: XAU AI
+        - generic [ref=e8]: SIGNAL INTELLIGENCE
+    - navigation [ref=e9]:
+      - generic [ref=e10]: MAIN
+      - link "◈ Command Center" [ref=e11] [cursor=pointer]:
+        - /url: "#/overview"
+        - generic [ref=e12]: ◈
+        - generic [ref=e13]: Command Center
+      - link "〽 Live Market" [ref=e14] [cursor=pointer]:
+        - /url: "#/live"
+        - generic [ref=e15]: 〽
+        - generic [ref=e16]: Live Market
+      - link "⚡ Signals Feed" [ref=e17] [cursor=pointer]:
+        - /url: "#/signals"
+        - generic [ref=e18]: ⚡
+        - generic [ref=e19]: Signals Feed
+      - link "💼 Paper Trading" [ref=e20] [cursor=pointer]:
+        - /url: "#/paper"
+        - generic [ref=e21]: 💼
+        - generic [ref=e22]: Paper Trading
+      - generic [ref=e23]: MY STRATEGIES
+      - link "💎 SMC with Fib" [ref=e24] [cursor=pointer]:
+        - /url: "#/smc-fib"
+        - generic [ref=e25]: 💎
+        - generic [ref=e26]: SMC with Fib
+      - link "🎯 Fib Retracement" [ref=e27] [cursor=pointer]:
+        - /url: "#/fib-retracement"
+        - generic [ref=e28]: 🎯
+        - generic [ref=e29]: Fib Retracement
+      - link "📈 Fib Go with Trend" [ref=e30] [cursor=pointer]:
+        - /url: "#/fib-trend"
+        - generic [ref=e31]: 📈
+        - generic [ref=e32]: Fib Go with Trend
+      - generic [ref=e33]: ANALYTICS & TESTING
+      - link "🧪 Backtest Lab" [ref=e34] [cursor=pointer]:
+        - /url: "#/backtest"
+        - generic [ref=e35]: 🧪
+        - generic [ref=e36]: Backtest Lab
+      - generic [ref=e37]: SYSTEM
+      - link "♥ System Health" [ref=e38] [cursor=pointer]:
+        - /url: "#/health"
+        - generic [ref=e39]: ♥
+        - generic [ref=e40]: System Health
+      - link "⚙ Settings" [ref=e41] [cursor=pointer]:
+        - /url: "#/settings"
+        - generic [ref=e42]: ⚙
+        - generic [ref=e43]: Settings
+    - generic [ref=e44]:
+      - generic [ref=e45]: SYSTEM HEALTHY
+      - generic [ref=e48]: v1.0.0
+  - generic [ref=e49]:
+    - banner [ref=e50]:
+      - generic [ref=e51]:
+        - button "Toggle sidebar" [ref=e52] [cursor=pointer]: ☰
+        - generic [ref=e53] [cursor=pointer]:
+          - generic [ref=e54]: XAU/USD
+          - generic [ref=e55]: LIVE
+        - generic [ref=e57] [cursor=pointer]:
+          - generic [ref=e58]: "4343.13"
+          - generic [ref=e59]: "+0.23"
+        - generic [ref=e60]: bid 4343.12 / ask 4343.13
+      - generic:
+        - generic [ref=e62] [cursor=pointer]: REGIME —
+        - generic [ref=e63] [cursor=pointer]: SESSION —
+        - generic [ref=e64] [cursor=pointer]: CANDLE Sep 11, 10:45 AM
+      - generic [ref=e65]:
+        - button "⚡ 2s AUTO" [ref=e66] [cursor=pointer]
+        - generic "Binance" [ref=e69] [cursor=pointer]: BINANCE
+        - generic "Database" [ref=e71] [cursor=pointer]: DB
+        - generic "Scheduler" [ref=e73] [cursor=pointer]: SCHED
+        - generic "Telegram" [ref=e75] [cursor=pointer]: TG
+        - generic "Data quality" [ref=e77] [cursor=pointer]: DQ
+        - button "Notifications" [ref=e79] [cursor=pointer]: 🔔
+        - button "Settings" [ref=e80] [cursor=pointer]: ⚙
+        - button "Toggle Light / Dark Theme" [ref=e81] [cursor=pointer]: 🌙
+        - generic [ref=e82]: Q
+    - main [ref=e83]:
+      - generic [ref=e10298]:
+        - generic [ref=e10299]:
+          - generic [ref=e10300]:
+            - generic [ref=e10301]: 🧪 BACKTEST LAB & HISTORICAL VERIFIER
+            - generic [ref=e10302]: Multi-Timeframe Deterministic Backtesting · Dynamic Compounding & Cent Account · Real Binance Data
+          - generic [ref=e10303]:
+            - generic [ref=e10304]: 🏛️ FOREX 5-DAY MARKET (Mon–Fri UTC)
+            - generic [ref=e10305]: ⚡ OFFLINE MASTER DATA
+            - generic [ref=e10306]: COMPOUNDED RISK
+            - generic [ref=e10307]: NO REAL MONEY
+        - generic [ref=e10308]:
+          - generic [ref=e10309]:
+            - generic [ref=e10310]: ℹ️
+            - generic [ref=e10311]: "Forex Trading Schedule: Gold (XAUUSD) trades Mon 00:00 UTC to Fri 22:00 UTC. Synthetic weekend bars (Sat/Sun) are filtered out automatically."
+          - generic [ref=e10312]:
+            - text: "Available Data Range:"
+            - generic [ref=e10313]: 2025-12-11 to 2026-09-11
+            - text: (9 Months / 275 Days Fast-Load)
+        - generic [ref=e10314]:
+          - generic [ref=e10315]: BACKTEST PARAMETERS
+          - generic [ref=e10318]:
+            - generic [ref=e10319]:
+              - generic [ref=e10320]: STRATEGY
+              - combobox [ref=e10321]:
+                - option "Fib Retracement (5M, 15M, 30M, 1H · 4H Excluded)" [selected]
+                - option "SMC with Fib (5M, 15M, 30M, 1H, 4H)"
+                - option "Fib Go with Trend (15M, 30M, 1H, 2H, 4H)"
+                - option "All 3 Strategies Combined"
+            - generic [ref=e10322]:
+              - generic [ref=e10323]: TIMEFRAME
+              - combobox [ref=e10324]:
+                - option "ALL ACTIVE TIMEFRAMES" [selected]
+                - option "5m (5 Minutes)"
+                - option "15m (15 Minutes)"
+                - option "30m (30 Minutes)"
+                - option "1h (1 Hour)"
+            - generic [ref=e10325]:
+              - generic [ref=e10326]: CURRENCY
+              - combobox [ref=e10327]:
+                - option "Cent / ₹ INR" [selected]
+                - option "Standard $ USD"
+            - generic [ref=e10328]:
+              - generic [ref=e10329]: SIZING MODE
+              - combobox [ref=e10330]:
+                - option "Dynamic % Risk" [selected]
+                - option "Fixed Lot (0.01)"
+            - generic [ref=e10331]:
+              - generic [ref=e10332]: LEVERAGE
+              - combobox [ref=e10333]:
+                - option "1:100"
+                - option "1:200"
+                - option "1:500 (Std)" [selected]
+                - option "1:1000"
+                - option "1:2000"
+            - generic [ref=e10334]:
+              - generic [ref=e10335]: RISK % (COMPOUND)
+              - spinbutton [ref=e10336]: "1"
+            - generic [ref=e10337]:
+              - generic [ref=e10338]: CAPITAL (₹)
+              - spinbutton [ref=e10339]: "10000"
+            - generic [ref=e10340]:
+              - generic [ref=e10341]: FROM DATE
+              - textbox [ref=e10342]: 2026-01-01
+            - generic [ref=e10343]:
+              - generic [ref=e10344]: TO DATE
+              - textbox [ref=e10345]: 2026-08-31
+            - button "🚀 RUN BACKTEST" [ref=e10347] [cursor=pointer]
+        - generic [ref=e10348]:
+          - generic [ref=e10349]:
+            - generic [ref=e10350]:
+              - generic [ref=e10351]: DETAILED TRADE LOGS
+              - generic [ref=e10352]: 0 Trades Shown
+            - generic [ref=e10353]:
+              - searchbox "Search trades..." [ref=e10354]
+              - generic [ref=e10355]:
+                - button "ALL" [ref=e10356] [cursor=pointer]
+                - button "WINS" [ref=e10357] [cursor=pointer]
+                - button "LOSSES" [ref=e10358] [cursor=pointer]
+              - button "📥 EXPORT TO CSV" [disabled] [ref=e10359] [cursor=pointer]
+          - table [ref=e10362]:
+            - rowgroup [ref=e10363]:
+              - row [ref=e10364]:
+                - columnheader "#" [ref=e10365]
+                - columnheader "ENTRY TIME (IST)" [ref=e10366]
+                - columnheader "STRATEGY" [ref=e10367]
+                - columnheader "TF" [ref=e10368]
+                - columnheader "DIR" [ref=e10369]
+                - columnheader "LOT" [ref=e10370]
+                - columnheader "ZERO (P0)" [ref=e10371]
+                - columnheader "ENTRY" [ref=e10372]
+                - columnheader "SL" [ref=e10373]
+                - columnheader "TP" [ref=e10374]
+                - columnheader "EXIT" [ref=e10375]
+                - columnheader "REASON" [ref=e10376]
+                - columnheader "PTS" [ref=e10377]
+                - columnheader "PNL (₹)" [ref=e10378]
+                - columnheader "STATUS" [ref=e10379]
+            - rowgroup [ref=e10380]:
+              - row [ref=e10381]:
+                - cell "No backtest run yet. Select parameters and click RUN BACKTEST." [ref=e10382]
+    - complementary "Signal detail" [ref=e282]:
+      - generic [ref=e283]:
+        - generic [ref=e284]: SIGNAL DETAIL
+        - button "Close" [ref=e285] [cursor=pointer]: ✕

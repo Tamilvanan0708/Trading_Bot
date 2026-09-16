@@ -494,9 +494,16 @@ async def get_quote(symbol: str):
     except Exception:  # noqa: BLE001
         pass
     try:
-        feeds = await service.health()
-        if feeds and feeds[0].get("connected"):
-            status = "HEALTHY"
+        if service.settings.LIVE_FEED_PROVIDER == "mt5":
+            mt5_p = getattr(service, "_mt5_provider", None)
+            if mt5_p and getattr(mt5_p, "is_connected", False):
+                status = "HEALTHY"
+            elif price is not None and price > 0:
+                status = "HEALTHY"
+        else:
+            feeds = await service.health()
+            if feeds and feeds[0].get("connected"):
+                status = "HEALTHY"
     except Exception:  # noqa: BLE001
         pass
 

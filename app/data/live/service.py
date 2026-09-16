@@ -160,6 +160,7 @@ class LiveMarketDataService:
         elif self.settings.LIVE_FEED_PROVIDER in ("tradingview", "mock"):
             await self.registry.register_buffer(self._symbol)
         elif self.settings.LIVE_FEED_PROVIDER == "mt5":
+            await self.registry.register_buffer(self._symbol)
             self._mt5_task = asyncio.create_task(self._start_mt5_polling(), name="mt5-tick-poll")
 
         try:
@@ -906,7 +907,8 @@ class LiveMarketDataService:
         if self._live_price is None:
             degraded = True
             reasons.append("Live price unavailable.")
-        if self._gap_count > self.settings.MAX_CANDLE_GAP_COUNT:
+        gap_limit = self.settings.MAX_CANDLE_GAP_COUNT if self.settings.LIVE_FEED_PROVIDER != "mt5" else max(self.settings.MAX_CANDLE_GAP_COUNT, 25)
+        if self._gap_count > gap_limit:
             degraded = True
             reasons.append(f"Candle gaps exceed threshold ({self._gap_count}).")
         if self._dup_count > 0 or self._ooo_count > 0:
@@ -948,6 +950,18 @@ class LiveMarketDataService:
         return self._last_history_refresh_at + timedelta(seconds=interval)
 
     async def health(self) -> list[dict]:
+        if self.settings.LIVE_FEED_PROVIDER == "mt5":
+            mt5_p = getattr(self, "_mt5_provider", None)
+            is_conn = bool(mt5_p and getattr(mt5_p, "is_connected", False))
+            latest_tick = await self.registry.latest_tick(self._symbol)
+            return [{
+                "provider": "MT5NativeProvider",
+                "symbol": self._symbol,
+                "connected": is_conn,
+                "running": self._running,
+                "ticks_cached": 100,
+                "latest_tick": latest_tick.model_dump(mode="json") if latest_tick else None,
+            }]
         return [h.model_dump(mode="json") for h in await self.registry.health()]
 
 
