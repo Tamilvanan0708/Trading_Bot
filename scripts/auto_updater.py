@@ -140,33 +140,56 @@ def kill_existing_server() -> None:
             logger.warning("[AUTO-UPDATER] Error terminating Unix server: %s", exc)
 
 
-def start_server() -> bool:
-    """Launches the server via scripts/start_local.ps1 (Windows) or start_linux.sh."""
-    logger.info("[AUTO-UPDATER] Starting new server process...")
+def get_python_executable() -> str:
+    """Finds the best Python executable (checks venv first, then sys.executable)."""
     if os.name == "nt":
-        ps_script = REPO_ROOT / "scripts" / "start_local.ps1"
-        try:
+        venv_py = REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+        if venv_py.exists():
+            return str(venv_py)
+    else:
+        venv_py_nix = REPO_ROOT / ".venv" / "bin" / "python"
+        if venv_py_nix.exists():
+            return str(venv_py_nix)
+    return sys.executable or "python"
+
+
+def start_server() -> bool:
+    """Launches the uvicorn server directly using the active Python executable."""
+    logger.info("[AUTO-UPDATER] Starting new server process...")
+    py_exe = get_python_executable()
+    cmd = [
+        py_exe,
+        "-m", "uvicorn",
+        "app.api.app:app",
+        "--host", "0.0.0.0",
+        "--port", "8000",
+        "--workers", "1",
+    ]
+    try:
+        log_dir = REPO_ROOT / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_dir / "uvicorn.log", "a", encoding="utf-8")
+
+        if os.name == "nt":
             subprocess.Popen(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
+                cmd,
                 cwd=str(REPO_ROOT),
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
             )
-            return True
-        except Exception as exc:
-            logger.error("[AUTO-UPDATER] Failed to launch PowerShell start script: %s", exc)
-            return False
-    else:
-        # Fallback for non-Windows testing
-        try:
-            py_exe = sys.executable
+        else:
             subprocess.Popen(
-                [py_exe, "-m", "uvicorn", "app.api.app:app", "--host", "127.0.0.1", "--port", "8000", "--workers", "1"],
+                cmd,
                 cwd=str(REPO_ROOT),
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
             )
-            return True
-        except Exception as exc:
-            logger.error("[AUTO-UPDATER] Failed to launch uvicorn: %s", exc)
-            return False
+        logger.info("[AUTO-UPDATER] Spawned uvicorn with %s on 0.0.0.0:8000", py_exe)
+        return True
+    except Exception as exc:
+        logger.error("[AUTO-UPDATER] Failed to launch uvicorn: %s", exc)
+        return False
 
 
 def wait_for_health(timeout_sec: int = 45) -> bool:

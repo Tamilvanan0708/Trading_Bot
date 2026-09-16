@@ -10,7 +10,13 @@ $HealthUrl = "http://localhost:8000/health"
 $PythonExe = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 
 if (-not (Test-Path $PythonExe)) {
-    Write-Error "Virtualenv python not found: $PythonExe. Create it first: python -m venv .venv && .venv\Scripts\pip install -r requirements.txt"
+    $sysPy = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+    if ($sysPy) {
+        $PythonExe = $sysPy
+    } else {
+        Write-Error "Python not found in .venv or system PATH."
+        exit 1
+    }
 }
 
 # 1. Detect an existing healthy server.
@@ -28,7 +34,7 @@ Set-Location $RepoRoot
 
 # 2. Launch uvicorn with EXACTLY one worker.
 $proc = Start-Process -FilePath $PythonExe `
-    -ArgumentList "-m", "uvicorn", "app.api.app:app", "--host", "127.0.0.1", "--port", "8000", "--workers", "1" `
+    -ArgumentList "-m", "uvicorn", "app.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1" `
     -WorkingDirectory $RepoRoot -PassThru -WindowStyle Minimized
 
 # 3. Wait for /health (up to 60s).
