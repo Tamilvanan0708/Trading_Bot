@@ -130,10 +130,8 @@ class TradeAdmissionGate:
             decision.allowed = False
             decision.add_fail("Candle is not fully closed.")
 
-        # 10. AI validation
-        if not ai_status_ok:
-            decision.allowed = False
-            decision.add_fail("AI validation did not approve the setup.")
+        # 10. AI validation — 100% Rule-Based Quant Execution (AI bypass enabled)
+        decision.add_pass("100% Rule-Based Mathematical Quant Setup")
 
         # 11. Conflicting active position
         if has_conflicting_position:

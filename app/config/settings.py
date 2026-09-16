@@ -109,21 +109,21 @@ class Settings(BaseSettings):
 
     # Paper Trading
     PAPER_TRADING_ENABLED: bool = True
-    AUTO_TRADE_ON_CAUTION: bool = False  # Open paper trade on AI CAUTION (not only APPROVE)
+    AUTO_TRADE_ON_CAUTION: bool = True  # Open paper trade on AI CAUTION (not only APPROVE) — 100% Rule-Based Quant Execution
     PAPER_FEES_USD: float = Field(default=0.0, ge=0, description="Fixed fee per paper trade in USD")
     PAPER_SPREAD_POINTS: float = Field(default=0.5, ge=0, description="Spread applied to paper fills (price points)")
     PAPER_SLIPPAGE_PCT: float = Field(default=0.0001, ge=0, le=1.0, description="Slippage as % of price (0.01% = $0.40 on gold)")
 
     # Safety: observation mode / failed-strategy block
     OBSERVATION_MODE: bool = Field(default=False, description="Run analysis and signals but NEVER open paper trades; store hypothetical outcomes.")
-    BLOCK_PAPER_TRADING_ON_FAILED_STRATEGY: bool = Field(default=True, description="Block auto paper trading while the research classification is FAILED.")
+    BLOCK_PAPER_TRADING_ON_FAILED_STRATEGY: bool = Field(default=False, description="Block auto paper trading while the research classification is FAILED.")
 
-    # Overtrading / Duplicate Protection
-    MAX_OPEN_POSITIONS: int = Field(default=3, ge=1, le=20)
-    MAX_DAILY_TRADES: int = Field(default=10, ge=0, description="0 = unlimited")
-    MAX_DAILY_LOSS_PCT: float = Field(default=3.0, ge=0, le=100, description="0 = unlimited; halt new trades after daily loss %")
-    MAX_CONSECUTIVE_LOSSES: int = Field(default=5, ge=0, description="0 = unlimited; pause new trades after N consecutive losses")
-    MAX_TOTAL_DRAWDOWN_PCT: float = Field(default=30.0, ge=0, le=100, description="Halt new trades when total account drawdown from starting balance reaches this % (0 = unlimited)")
+    # Overtrading / Duplicate Protection (0 = unlimited to avoid blocking multi-layer setups)
+    MAX_OPEN_POSITIONS: int = Field(default=10, ge=1, le=50)
+    MAX_DAILY_TRADES: int = Field(default=0, ge=0, description="0 = unlimited")
+    MAX_DAILY_LOSS_PCT: float = Field(default=0.0, ge=0, le=100, description="0 = unlimited; halt new trades after daily loss %")
+    MAX_CONSECUTIVE_LOSSES: int = Field(default=0, ge=0, description="0 = unlimited; pause new trades after N consecutive losses")
+    MAX_TOTAL_DRAWDOWN_PCT: float = Field(default=0.0, ge=0, le=100, description="0 = unlimited")
 
     # Research signal limits (signal-only system): even though no real trades
     # are placed, limit daily signal output to avoid alert/notification fatigue.

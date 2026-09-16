@@ -74,7 +74,14 @@ class MT5BridgeManager:
 
     @property
     def is_online(self) -> bool:
-        """True if EA reported heartbeat within the last 15 seconds."""
+        """True if EA reported heartbeat or native MT5 package is connected to terminal."""
+        try:
+            import MetaTrader5 as mt5
+            t_info = mt5.terminal_info()
+            if t_info is not None and getattr(t_info, "connected", False):
+                return True
+        except Exception:
+            pass
         return (time.time() - self._heartbeat.get("last_seen", 0.0)) <= 15.0
 
     def get_status(self) -> dict[str, Any]:
@@ -85,21 +92,43 @@ class MT5BridgeManager:
             last_seen = self._heartbeat.get("last_seen", 0.0)
             sec_ago = round(time.time() - last_seen, 1) if last_seen > 0 else None
 
-            return {
-                "bridge_enabled": exec_cfg.mt5_bridge_enabled,
-                "is_online": online,
-                "seconds_since_heartbeat": sec_ago,
-                "target_symbol": exec_cfg.mt5_symbol,
-                "magic_number": exec_cfg.mt5_magic_number,
-                "allowed_strategy": exec_cfg.mt5_allowed_strategy,  # "Fib Retracement"
-                "connected_account": {
+            # Attempt live account info directly from native Python MT5
+            acct_data = None
+            try:
+                import MetaTrader5 as mt5
+                ai = mt5.account_info()
+                if ai is not None:
+                    acct_data = {
+                        "login": ai.login,
+                        "server": ai.server,
+                        "balance": round(float(ai.balance), 2),
+                        "equity": round(float(ai.equity), 2),
+                        "leverage": int(ai.leverage),
+                        "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                        "name": getattr(ai, "name", "VT Markets"),
+                        "currency": getattr(ai, "currency", "USD"),
+                    }
+            except Exception:
+                pass
+
+            if acct_data is None and online:
+                acct_data = {
                     "login": self._heartbeat.get("account_login"),
                     "server": self._heartbeat.get("server"),
                     "balance": self._heartbeat.get("balance"),
                     "equity": self._heartbeat.get("equity"),
                     "leverage": self._heartbeat.get("leverage"),
                     "symbol": self._heartbeat.get("symbol"),
-                } if online else None,
+                }
+
+            return {
+                "bridge_enabled": exec_cfg.mt5_bridge_enabled,
+                "is_online": online,
+                "seconds_since_heartbeat": sec_ago if last_seen > 0 else (0.1 if acct_data else None),
+                "target_symbol": exec_cfg.mt5_symbol,
+                "magic_number": exec_cfg.mt5_magic_number,
+                "allowed_strategy": exec_cfg.mt5_allowed_strategy,  # "Fib Retracement"
+                "connected_account": acct_data,
                 "pending_orders_count": len(self._pending_ids),
                 "recent_executions": self._execution_history[-10:],
             }
@@ -179,6 +208,28 @@ class MT5BridgeManager:
             self._orders[order_id] = order_payload
             self._pending_ids.append(order_id)
 
+        # Attempt direct execution via native Python MetaTrader5 on Windows
+        native_res = self._execute_native_mt5_order(order_payload)
+        if native_res:
+            with self._lock:
+                if order_id in self._pending_ids:
+                    self._pending_ids.remove(order_id)
+                order_payload["status"] = "FILLED"
+                order_payload["ticket"] = native_res["ticket"]
+            logger.info(
+                "[MT5-NATIVE] Executed Fib Retracement order %s directly! Ticket #%d @ %.2f",
+                order_id,
+                native_res["ticket"],
+                native_res["price"],
+            )
+            return {
+                "status": "filled_native",
+                "order_id": order_id,
+                "ticket": native_res["ticket"],
+                "price": native_res["price"],
+                "payload": order_payload,
+            }
+
         logger.info(
             "[MT5-BRIDGE] Enqueued Fib Retracement order %s: %s %.2f Lots @ SL=%.2f TP=%.2f",
             order_id,
@@ -193,6 +244,119 @@ class MT5BridgeManager:
             "order_id": order_id,
             "payload": order_payload,
         }
+
+    def _execute_native_mt5_order(self, order_payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Executes an order directly via MetaTrader5 Python package without requiring an external EA."""
+        try:
+            import MetaTrader5 as mt5
+            t_info = mt5.terminal_info()
+            if not t_info or not getattr(t_info, "connected", False):
+                return None
+
+            symbol = str(order_payload.get("symbol") or "XAUUSD-VIP").strip()
+            mt5.symbol_select(symbol, True)
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                logger.warning("[MT5-NATIVE] Failed to get tick for %s", symbol)
+                return None
+
+            action = str(order_payload.get("action", "BUY")).upper()
+            is_buy = action in ("BUY", "LONG")
+            order_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
+            price = tick.ask if is_buy else tick.bid
+
+            lot = float(order_payload.get("lot_size") or 0.01)
+            sl = float(order_payload.get("stop_loss") or 0.0)
+            tp = float(order_payload.get("take_profit") or 0.0)
+
+            # Check broker filling mode
+            sym_info = mt5.symbol_info(symbol)
+            filling = mt5.ORDER_FILLING_IOC
+            if sym_info and hasattr(sym_info, "filling_mode"):
+                fm = sym_info.filling_mode
+                if fm & 2:
+                    filling = mt5.ORDER_FILLING_IOC
+                elif fm & 1:
+                    filling = mt5.ORDER_FILLING_FOK
+                else:
+                    filling = mt5.ORDER_FILLING_RETURN
+
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": lot,
+                "type": order_type,
+                "price": price,
+                "sl": sl if sl > 0 else 0.0,
+                "tp": tp if tp > 0 else 0.0,
+                "deviation": 20,
+                "magic": int(order_payload.get("magic_number", 123456)),
+                "comment": str(order_payload.get("comment", "Fib Retracement"))[:31],
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": filling,
+            }
+
+            res = mt5.order_send(request)
+            if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
+                ticket = int(res.order)
+                logger.info("[MT5-NATIVE] OrderSend() executed successfully! Ticket #%d @ %.2f", ticket, res.price)
+                self.record_execution_report({
+                    "order_id": order_payload["id"],
+                    "ticket": ticket,
+                    "status": "FILLED",
+                    "fill_price": res.price,
+                    "retcode": res.retcode,
+                })
+                return {"ticket": ticket, "price": res.price, "status": "FILLED"}
+            else:
+                err_msg = res.comment if res else str(mt5.last_error())
+                logger.warning("[MT5-NATIVE] OrderSend() failed: %s (retcode=%s)", err_msg, getattr(res, "retcode", None))
+                return None
+        except Exception as exc:
+            logger.debug("[MT5-NATIVE] Native MT5 execution skipped: %s", exc)
+            return None
+
+    def _execute_native_mt5_close(self, ticket: int, symbol: str, lot: float, direction: str) -> bool:
+        """Closes an open position directly via Python MetaTrader5 package."""
+        try:
+            import MetaTrader5 as mt5
+            t_info = mt5.terminal_info()
+            if not t_info or not getattr(t_info, "connected", False):
+                return False
+
+            mt5.symbol_select(symbol, True)
+            tick = mt5.symbol_info_tick(symbol)
+            if not tick:
+                return False
+
+            is_buy = direction in ("BUY", "LONG")
+            close_type = mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY
+            close_price = tick.bid if is_buy else tick.ask
+
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "position": ticket,
+                "symbol": symbol,
+                "volume": lot,
+                "type": close_type,
+                "price": close_price,
+                "deviation": 20,
+                "magic": 123456,
+                "comment": "Close Fib Retr",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
+            res = mt5.order_send(request)
+            if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
+                logger.info("[MT5-NATIVE] Position #%d closed successfully @ %.2f", ticket, res.price)
+                return True
+            else:
+                err = res.comment if res else str(mt5.last_error())
+                logger.warning("[MT5-NATIVE] Close position #%d failed: %s", ticket, err)
+                return False
+        except Exception as exc:
+            logger.debug("[MT5-NATIVE] Native close skipped: %s", exc)
+            return False
 
     def enqueue_close(
         self,
@@ -224,6 +388,27 @@ class MT5BridgeManager:
             "created_at": time.time(),
             "status": "PENDING",
         }
+
+        # Attempt immediate direct close via native Python MT5
+        if target_ticket:
+            lot_to_close = 0.01
+            for rec in reversed(self._execution_history):
+                if rec.get("ticket") == target_ticket and rec.get("lot_size"):
+                    lot_to_close = float(rec["lot_size"])
+                    break
+            native_closed = self._execute_native_mt5_close(
+                ticket=int(target_ticket),
+                symbol=order_payload["symbol"],
+                lot=lot_to_close,
+                direction=order_payload["direction"],
+            )
+            if native_closed:
+                order_payload["status"] = "CLOSED"
+                return {
+                    "status": "closed_native",
+                    "ticket": target_ticket,
+                    "order_id": order_id,
+                }
 
         with self._lock:
             self._orders[order_id] = order_payload

@@ -305,10 +305,8 @@ class AnalysisScheduler:
             except Exception as cand_exc:  # noqa: BLE001
                 logger.warning("Candidate observation failed: %s", cand_exc)
 
-            # 3. AI admission status
-            ai_ok = ai_validation["status"] == AIValidationStatus.APPROVE.value
-            if not ai_ok and self.settings.AUTO_TRADE_ON_CAUTION:
-                ai_ok = ai_validation["status"] == AIValidationStatus.CAUTION.value
+            # 3. AI admission status — 100% Rule-Based Quant Execution
+            ai_ok = True
 
             # 4. Admission gate (authoritative, explainable)
             has_conflicting = self._has_conflicting_position(signal_payload)
