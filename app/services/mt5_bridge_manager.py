@@ -145,6 +145,25 @@ class MT5BridgeManager:
                 return True
         return False
 
+    def get_ticket_for_paper_trade(self, paper_trade_id: str | None) -> int | None:
+        """Lookup native or EA execution ticket for a given paper trade ID."""
+        if not paper_trade_id:
+            return None
+        with self._lock:
+            return self._paper_trade_to_ticket.get(str(paper_trade_id))
+
+    def get_account_balance(self) -> float | None:
+        """Returns live account balance in USD from MT5 if connected."""
+        try:
+            import MetaTrader5 as mt5
+            ai = mt5.account_info()
+            if ai is not None and getattr(ai, "balance", None) is not None:
+                return round(float(ai.balance), 2)
+        except Exception:
+            pass
+        with self._lock:
+            return self._heartbeat.get("balance")
+
     def enqueue_order(self, order_data: dict[str, Any]) -> dict[str, Any]:
         """
         Enqueues an order for MT5 execution.
@@ -216,6 +235,9 @@ class MT5BridgeManager:
                     self._pending_ids.remove(order_id)
                 order_payload["status"] = "FILLED"
                 order_payload["ticket"] = native_res["ticket"]
+                pt_id = order_payload.get("paper_trade_id")
+                if pt_id:
+                    self._paper_trade_to_ticket[str(pt_id)] = native_res["ticket"]
             logger.info(
                 "[MT5-NATIVE] Executed Fib Retracement order %s directly! Ticket #%d @ %.2f",
                 order_id,
@@ -459,6 +481,30 @@ class MT5BridgeManager:
         with self._lock:
             self._orders[order_id] = order_payload
             self._pending_ids.append(order_id)
+
+        # Attempt immediate direct modify via native Python MT5 on Windows
+        if target_ticket:
+            try:
+                import MetaTrader5 as mt5
+                t_info = mt5.terminal_info()
+                if t_info and getattr(t_info, "connected", False):
+                    request = {
+                        "action": mt5.TRADE_ACTION_SLTP,
+                        "position": int(target_ticket),
+                        "symbol": order_payload["symbol"],
+                        "sl": float(new_sl or 0.0),
+                        "tp": float(new_tp or 0.0),
+                    }
+                    res = mt5.order_send(request)
+                    if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
+                        logger.info("[MT5-NATIVE] Modified SL/TP for position #%d successfully (SL=%.2f, TP=%.2f)", target_ticket, new_sl or 0.0, new_tp or 0.0)
+                        with self._lock:
+                            if order_id in self._pending_ids:
+                                self._pending_ids.remove(order_id)
+                            order_payload["status"] = "MODIFIED"
+                        return {"status": "modified_native", "order_id": order_id, "payload": order_payload}
+            except Exception as exc:
+                logger.debug("[MT5-NATIVE] Native modify skipped: %s", exc)
 
         logger.info(
             "[MT5-BRIDGE] Enqueued MODIFY request %s for Ticket #%s (SL=%.2f, TP=%.2f)",

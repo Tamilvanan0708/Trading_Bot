@@ -54,6 +54,170 @@ def _dispatch_tg_alert(coro) -> asyncio.Task:
     return task
 
 
+def _format_trade_duration(opened_at: datetime | None, closed_at: datetime | None = None) -> str:
+    if not opened_at:
+        return "< 1 min"
+    try:
+        c_at = closed_at or datetime.now(timezone.utc)
+        o_utc = opened_at if opened_at.tzinfo else opened_at.replace(tzinfo=timezone.utc)
+        c_utc = c_at if c_at.tzinfo else c_at.replace(tzinfo=timezone.utc)
+        diff_sec = max(0, int((c_utc - o_utc).total_seconds()))
+        mins = diff_sec // 60
+        hrs = mins // 60
+        rem_mins = mins % 60
+        if hrs > 0:
+            return f"{hrs}h {rem_mins}m"
+        return f"{max(1, mins)} mins"
+    except Exception:
+        return "< 1 min"
+
+
+def _get_hybrid_broker_info(paper_trade_id: str | None = None) -> tuple[str, str, str]:
+    """Returns (broker_display, ticket_display, balance_display) for Hybrid alerts."""
+    try:
+        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+        mgr = get_mt5_bridge_manager()
+        tkt = mgr.get_ticket_for_paper_trade(paper_trade_id) if paper_trade_id else None
+        bal = mgr.get_account_balance()
+        bal_str = f"${bal:,.2f} USD" if bal is not None else "$10,000.00 USD"
+        if tkt:
+            return "VT Markets MT5", f"#{tkt}", bal_str
+        exec_cfg = get_execution_settings()
+        if exec_cfg.mt5_bridge_enabled:
+            return "VT Markets MT5", "#Pending", bal_str
+        return "Paper Simulation", f"#PT-{paper_trade_id[:6]}" if paper_trade_id else "#Simulated", bal_str
+    except Exception:
+        return "VT Markets MT5", "#Pending", "$10,000.00 USD"
+
+
+def _build_hybrid_open_msg(
+    strategy_name: str,
+    symbol_tf: str,
+    direction: str,
+    lot_size: float,
+    entry_px: float,
+    sl_px: float,
+    tp_px: float,
+    paper_trade_id: str | None = None,
+) -> str:
+    broker_name, ticket_str, balance_str = _get_hybrid_broker_info(paper_trade_id)
+    dir_badge = "BUY / LONG ▲" if direction in ("LONG", "BUY") else "SELL / SHORT ▼"
+    sl_dist = abs(entry_px - sl_px)
+    tp_dist = abs(tp_px - entry_px)
+    rr_ratio = round(tp_dist / max(0.1, sl_dist), 1)
+
+    return (
+        f"🚀 *LIVE ORDER EXECUTED ({lot_size:.2f} Lots)*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *Strategy:* {strategy_name}\n"
+        f"🪙 *Symbol:* {symbol_tf}\n"
+        f"📈 *Direction:* {dir_badge}\n"
+        f"🏛️ *Broker:* {broker_name}\n"
+        f"🎫 *Ticket:* {ticket_str}\n"
+        f"💵 *Fill Price:* ${entry_px:,.2f}\n"
+        f"🛑 *Stop Loss:* ${sl_px:,.2f} (-{sl_dist:.1f} PTS)\n"
+        f"🎯 *Take Profit:* ${tp_px:,.2f} (+{tp_dist:.1f} PTS)\n"
+        f"⚖️ *Risk:Reward:* 1:{rr_ratio:.1f}\n"
+        f"💼 *MT5 Balance:* {balance_str}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+
+
+def _build_hybrid_close_msg(
+    strategy_name: str,
+    symbol_tf: str,
+    direction: str,
+    entry_px: float,
+    exit_px: float,
+    pts: float,
+    realized_pnl: float,
+    exit_reason: str,
+    lot_size: float = 0.01,
+    opened_at: datetime | None = None,
+    closed_at: datetime | None = None,
+    paper_trade_id: str | None = None,
+) -> str:
+    _, ticket_str, balance_str = _get_hybrid_broker_info(paper_trade_id)
+    dir_badge = "BUY / LONG ▲" if direction in ("LONG", "BUY") else "SELL / SHORT ▼"
+    duration_str = _format_trade_duration(opened_at, closed_at)
+
+    exec_cfg = get_execution_settings()
+    is_cent = (exec_cfg.account_currency == "cent")
+
+    is_tp = exit_reason == "TP_HIT"
+    is_be = exit_reason == "BREAKEVEN_HIT" or (abs(exit_px - entry_px) <= 0.5 and not is_tp)
+
+    if is_tp:
+        realized_usd = round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
+        growth_line = f"📈 *Account Growth:* +₹{realized_pnl:,.2f} INR" if is_cent else f"📈 *Account Growth:* +${realized_pnl:,.2f} USD"
+        return (
+            f"🎯 *TAKE PROFIT HIT (+{abs(pts):.2f} PTS)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Strategy:* {strategy_name}\n"
+            f"🪙 *Symbol:* {symbol_tf}\n"
+            f"📈 *Direction:* {dir_badge}\n"
+            f"🎫 *Closed Ticket:* {ticket_str}\n"
+            f"💵 *Entry:* ${entry_px:,.2f} ➔ *Exit:* ${exit_px:,.2f}\n"
+            f"⏱️ *Duration:* {duration_str}\n"
+            f"💰 *MT5 Live Profit:* +${realized_usd:,.2f} USD\n"
+            f"💼 *New MT5 Balance:* {balance_str}\n"
+            f"{growth_line}\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+    elif is_be:
+        return (
+            f"🛡 *BREAKEVEN EXIT (0.00 PTS)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Strategy:* {strategy_name}\n"
+            f"🪙 *Symbol:* {symbol_tf}\n"
+            f"📈 *Direction:* {dir_badge}\n"
+            f"🎫 *Closed Ticket:* {ticket_str}\n"
+            f"💵 *Entry:* ${entry_px:,.2f} ➔ *Exit:* ${exit_px:,.2f}\n"
+            f"⏱️ *Duration:* {duration_str}\n"
+            f"⚖️ *Capital Protected (Risk-Free Exit)*\n"
+            f"💼 *MT5 Balance:* {balance_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+    else:
+        loss_usd = round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
+        dd_line = f"📉 *Account Drawdown:* -₹{abs(realized_pnl):,.2f} INR" if is_cent else f"📉 *Account Drawdown:* -${abs(realized_pnl):,.2f} USD"
+        return (
+            f"🛑 *STOP LOSS HIT (-{abs(pts):.2f} PTS)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Strategy:* {strategy_name}\n"
+            f"🪙 *Symbol:* {symbol_tf}\n"
+            f"📈 *Direction:* {dir_badge}\n"
+            f"🎫 *Closed Ticket:* {ticket_str}\n"
+            f"💵 *Entry:* ${entry_px:,.2f} ➔ *Exit:* ${exit_px:,.2f}\n"
+            f"⏱️ *Duration:* {duration_str}\n"
+            f"📉 *MT5 Live Loss:* -${loss_usd:,.2f} USD\n"
+            f"💼 *New MT5 Balance:* {balance_str}\n"
+            f"{dd_line}\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+
+
+def _build_hybrid_shield_msg(
+    strategy_name: str,
+    symbol_tf: str,
+    trigger_layer: str,
+    new_sl: float,
+    paper_trade_id: str | None = None,
+) -> str:
+    _, ticket_str, _ = _get_hybrid_broker_info(paper_trade_id)
+    return (
+        f"🛡 *SMART SHIELD ACTIVATED*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *Strategy:* {strategy_name}\n"
+        f"🪙 *Symbol:* {symbol_tf}\n"
+        f"⚡ *Trigger:* L{trigger_layer} TP Hit\n"
+        f"🎫 *Ticket:* {ticket_str}\n"
+        f"🔒 *New L1 SL:* ${new_sl:,.2f} (Breakeven)\n"
+        f"🛡 *Downside Risk:* 0.00 (Risk-Free Trade)\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+
+
 async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> None:
     """Scan in-memory 5M strategy engine states, run AI validation, and open/update paper trades.
     Thread-safe and guarded by _sync_lock with 10s debounce.
@@ -239,31 +403,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     )
                     try:
                         await db.commit()
-                        # Dispatch Telegram Alert for Orphan Closure
-                        try:
-                            is_tp = _exit_reason == "TP_HIT"
-                            is_be = _exit_reason == "BREAKEVEN_HIT"
-                            header = "🎯 *TAKE PROFIT HIT*" if is_tp else ("🛡 *BREAKEVEN HIT*" if is_be else "🛑 *STOP LOSS HIT*")
-                            pnl_str = f"+${_ot.realized_pnl:.2f}" if _ot.realized_pnl >= 0 else f"-${abs(_ot.realized_pnl):.2f}"
-                            pts_str = f"{_pts:+.2f}"
-                            layer_name = _parts[3] if len(_parts) > 3 else "L1"
-                            dir_badge = "BUY / LONG ▲" if _direction in ("LONG", "BUY") else "SELL / SHORT ▼"
-                            orphan_msg = (
-                                f"{header}\n"
-                                f"━━━━━━━━━━━━━━━━━━━━\n"
-                                f"📊 *Strategy:* Fib Retracement ({layer_name})\n"
-                                f"🪙 *Symbol:* XAU/USD ({_ot_tf.upper()})\n"
-                                f"📈 *Direction:* {dir_badge}\n"
-                                f"💵 *Entry:* ${_entry_px:.2f}\n"
-                                f"🏁 *Exit:* ${_exit_px:.2f}\n"
-                                f"💰 *Realized PnL:* {pnl_str} ({pts_str} PTS)\n"
-                                f"━━━━━━━━━━━━━━━━━━━━"
-                            )
-                            _dispatch_tg_alert(tg.send_raw_alert(orphan_msg))
-                        except Exception as tg_err:
-                            logger.warning("[PAPER-TG] Failed to send orphan close alert: %s", tg_err)
-
-                        # Dispatch MT5 bridge close if live execution is enabled
+                        # 1. Dispatch MT5 bridge close if live execution is enabled
                         if exec_cfg.mt5_bridge_enabled:
                             try:
                                 from app.services.mt5_bridge_manager import get_mt5_bridge_manager
@@ -275,6 +415,27 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 )
                             except Exception as _mt5_err:
                                 logger.warning("[MT5-BRIDGE] Orphan close dispatch failed: %s", _mt5_err)
+
+                        # 2. Dispatch Hybrid Telegram Alert for Orphan Closure
+                        try:
+                            layer_name = _parts[3] if len(_parts) > 3 else "L1"
+                            orphan_msg = _build_hybrid_close_msg(
+                                strategy_name=f"Fib Retracement ({layer_name})",
+                                symbol_tf=f"XAU/USD ({_ot_tf.upper()})",
+                                direction=_direction or "LONG",
+                                entry_px=_entry_px,
+                                exit_px=_exit_px,
+                                pts=_pts,
+                                realized_pnl=_ot.realized_pnl,
+                                exit_reason=_exit_reason,
+                                lot_size=_ot.lot_size or 0.01,
+                                opened_at=_ot.opened_at,
+                                closed_at=_ot.closed_at,
+                                paper_trade_id=_ot.id,
+                            )
+                            _dispatch_tg_alert(tg.send_raw_alert(orphan_msg))
+                        except Exception as tg_err:
+                            logger.warning("[PAPER-TG] Failed to send orphan close alert: %s", tg_err)
                     except Exception as _commit_err:
                         logger.warning("[PAPER-ORPHAN] DB commit failed for orphan close %s: %s", _ot.signal_id, _commit_err)
                         await db.rollback()
@@ -738,21 +899,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     except Exception as mt5_err:  # noqa: BLE001
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch order to MT5 queue: %s", mt5_err)
 
-                                    # Telegram: Dispatch Trade Opened Alert
+                                    # Telegram: Dispatch Hybrid Trade Opened Alert
                                     try:
-                                        dir_badge = "BUY / LONG ▲" if f_state.direction == "LONG" else "SELL / SHORT ▼"
-                                        msg = (
-                                            f"🚀 *TRADE OPENED ({trade_lot:.2f} Lots)*\n"
-                                            f"━━━━━━━━━━━━━━━━━━━━\n"
-                                            f"📊 *Strategy:* Fib Retracement ({l_key})\n"
-                                            f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
-                                            f"📈 *Direction:* {dir_badge}\n"
-                                            f"💵 *Entry:* ${entry_px:.2f}\n"
-                                            f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
-                                            f"🎯 *Take Profit:* ${tp_px:.2f}\n"
-                                            f"🧠 *AI Verdict:* {ai_short}\n"
-                                            f"⚡ *Multi-Slot:* {tf_key.upper()} Active (15M, 30M, 1H scanning in parallel)\n"
-                                            f"━━━━━━━━━━━━━━━━━━━━"
+                                        msg = _build_hybrid_open_msg(
+                                            strategy_name=f"Fib Retracement ({l_key})",
+                                            symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                            direction=f_state.direction,
+                                            lot_size=trade_lot,
+                                            entry_px=entry_px,
+                                            sl_px=sl_px,
+                                            tp_px=tp_px,
+                                            paper_trade_id=new_trade.id,
                                         )
                                         _dispatch_tg_alert(tg.send_raw_alert(msg))
                                     except Exception as tg_err:  # noqa: BLE001
@@ -778,26 +935,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     await db.commit()
                                     logger.info("[PAPER-AUTO] Engine TP_HIT closed Retracement %s (%s) @ %.2f (+$%.2f)", sig_id, l_key, tp_px, existing.realized_pnl)
 
-                                    # Telegram Alert: TP Hit
-                                    try:
-                                        pts_sign = "+" if pts >= 0 else ""
-                                        dir_badge = "BUY / LONG ▲" if f_state.direction in ("LONG", "BUY") else "SELL / SHORT ▼"
-                                        tp_msg = (
-                                            f"🎯 *TAKE PROFIT HIT ({pts_sign}{pts:.2f} PTS)*\n"
-                                            f"━━━━━━━━━━━━━━━━━━━━\n"
-                                            f"📊 *Strategy:* Fib Retracement ({l_key})\n"
-                                            f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
-                                            f"📈 *Direction:* {dir_badge}\n"
-                                            f"💵 *Entry:* ${entry_px:.2f}\n"
-                                            f"🏁 *Exit:* ${tp_px:.2f}\n"
-                                            f"💰 *Profit:* +${existing.realized_pnl:.2f}\n"
-                                            f"━━━━━━━━━━━━━━━━━━━━"
-                                        )
-                                        _dispatch_tg_alert(tg.send_raw_alert(tp_msg))
-                                    except Exception as tg_err:
-                                        logger.warning("[PAPER-TG] Failed to send TP hit alert: %s", tg_err)
-
-                                    # MT5 Bridge Live Close Dispatch
+                                    # 1. MT5 Bridge Live Close Dispatch
                                     try:
                                         from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                                         get_mt5_bridge_manager().enqueue_close(
@@ -808,6 +946,26 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         )
                                     except Exception as mt5_err:
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch close to MT5: %s", mt5_err)
+
+                                    # 2. Telegram Alert: Hybrid TP Hit
+                                    try:
+                                        tp_msg = _build_hybrid_close_msg(
+                                            strategy_name=f"Fib Retracement ({l_key})",
+                                            symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                            direction=f_state.direction,
+                                            entry_px=entry_px,
+                                            exit_px=tp_px,
+                                            pts=pts,
+                                            realized_pnl=existing.realized_pnl,
+                                            exit_reason="TP_HIT",
+                                            lot_size=existing.lot_size or 0.01,
+                                            opened_at=existing.opened_at,
+                                            closed_at=existing.closed_at,
+                                            paper_trade_id=existing.id,
+                                        )
+                                        _dispatch_tg_alert(tg.send_raw_alert(tp_msg))
+                                    except Exception as tg_err:
+                                        logger.warning("[PAPER-TG] Failed to send TP hit alert: %s", tg_err)
 
                                     # 3. Smart Shield Immediate Trigger: When L2 or L3 hits TP, trail L1 SL
                                     if exec_cfg.smart_shield_enabled and l_key in ("L2", "L3"):
@@ -824,23 +982,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 await db.commit()
                                                 logger.info("[PAPER-AUTO] Smart Shield (%s): L%s TP hit -> trailed L1 SL to %.2f", exec_cfg.smart_shield_level, l_key[-1], new_l1_sl)
 
-                                                # Telegram Alert: Smart Shield Trailing SL
-                                                try:
-                                                    shield_msg = (
-                                                        f"🛡 *SMART SHIELD ACTIVATED*\n"
-                                                        f"━━━━━━━━━━━━━━━━━━━━\n"
-                                                        f"📊 *Strategy:* Fib Retracement (L1 Protected)\n"
-                                                        f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
-                                                        f"⚡ *Trigger:* L{l_key[-1]} TP Hit\n"
-                                                        f"🔒 *New L1 SL:* ${new_l1_sl:.2f} (Breakeven)\n"
-                                                        f"🛡 *Downside Risk:* 0.00 (Risk-Free Trade)\n"
-                                                        f"━━━━━━━━━━━━━━━━━━━━"
-                                                    )
-                                                    _dispatch_tg_alert(tg.send_raw_alert(shield_msg))
-                                                except Exception as tg_err:
-                                                    logger.warning("[PAPER-TG] Failed to send shield alert: %s", tg_err)
-
-                                                # MT5 Bridge Live SL Modify Dispatch
+                                                # 1. MT5 Bridge Live SL Modify Dispatch
                                                 try:
                                                     from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                                                     get_mt5_bridge_manager().enqueue_modify(
@@ -851,6 +993,19 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                     )
                                                 except Exception as mt5_err:
                                                     logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5: %s", mt5_err)
+
+                                                # 2. Telegram Alert: Smart Shield Trailing SL
+                                                try:
+                                                    shield_msg = _build_hybrid_shield_msg(
+                                                        strategy_name="Fib Retracement (L1 Protected)",
+                                                        symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                                        trigger_layer=l_key[-1],
+                                                        new_sl=new_l1_sl,
+                                                        paper_trade_id=l1_trade.id,
+                                                    )
+                                                    _dispatch_tg_alert(tg.send_raw_alert(shield_msg))
+                                                except Exception as tg_err:
+                                                    logger.warning("[PAPER-TG] Failed to send shield alert: %s", tg_err)
 
                                 elif layer.get("state") == "SL_HIT":
                                     exit_px = float(layer.get("exit_price") or existing.stop_loss or sl_px)
@@ -864,28 +1019,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     await db.commit()
                                     logger.info("[PAPER-AUTO] Engine SL_HIT closed Retracement %s (%s) @ %.2f ($%.2f)", sig_id, l_key, exit_px, existing.realized_pnl)
 
-                                    # Telegram Alert: SL Hit / Breakeven Hit
-                                    try:
-                                        is_be = existing.exit_reason == "BREAKEVEN_HIT"
-                                        header = "🛡 *BREAKEVEN HIT (0.00 PTS)*" if is_be else f"🛑 *STOP LOSS HIT ({pts:.2f} PTS)*"
-                                        pnl_str = f"+${existing.realized_pnl:.2f}" if existing.realized_pnl >= 0 else f"-${abs(existing.realized_pnl):.2f}"
-                                        dir_badge = "BUY / LONG ▲" if f_state.direction in ("LONG", "BUY") else "SELL / SHORT ▼"
-                                        sl_msg = (
-                                            f"{header}\n"
-                                            f"━━━━━━━━━━━━━━━━━━━━\n"
-                                            f"📊 *Strategy:* Fib Retracement ({l_key})\n"
-                                            f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
-                                            f"📈 *Direction:* {dir_badge}\n"
-                                            f"💵 *Entry:* ${entry_px:.2f}\n"
-                                            f"🛑 *Exit:* ${exit_px:.2f}\n"
-                                            f"💰 *Realized PnL:* {pnl_str}\n"
-                                            f"━━━━━━━━━━━━━━━━━━━━"
-                                        )
-                                        _dispatch_tg_alert(tg.send_raw_alert(sl_msg))
-                                    except Exception as tg_err:
-                                        logger.warning("[PAPER-TG] Failed to send SL hit alert: %s", tg_err)
-
-                                    # MT5 Bridge Live Close Dispatch
+                                    # 1. MT5 Bridge Live Close Dispatch
                                     try:
                                         from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                                         get_mt5_bridge_manager().enqueue_close(
@@ -896,6 +1030,26 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         )
                                     except Exception as mt5_err:
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch close to MT5: %s", mt5_err)
+
+                                    # 2. Telegram Alert: Hybrid SL Hit / Breakeven Hit
+                                    try:
+                                        sl_msg = _build_hybrid_close_msg(
+                                            strategy_name=f"Fib Retracement ({l_key})",
+                                            symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                            direction=f_state.direction,
+                                            entry_px=entry_px,
+                                            exit_px=exit_px,
+                                            pts=pts,
+                                            realized_pnl=existing.realized_pnl,
+                                            exit_reason=existing.exit_reason or "SL_HIT",
+                                            lot_size=existing.lot_size or 0.01,
+                                            opened_at=existing.opened_at,
+                                            closed_at=existing.closed_at,
+                                            paper_trade_id=existing.id,
+                                        )
+                                        _dispatch_tg_alert(tg.send_raw_alert(sl_msg))
+                                    except Exception as tg_err:
+                                        logger.warning("[PAPER-TG] Failed to send SL hit alert: %s", tg_err)
 
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[PAPER-SYNC] Fib sync error: %s", exc)
@@ -1066,20 +1220,19 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                             # Telegram Alert: SMC TP / SL Hit
                             try:
-                                is_tp = smc_outcome == "TP_HIT"
-                                header = f"🎯 *TAKE PROFIT HIT (+{pts:.2f} PTS)*" if is_tp else f"🛑 *STOP LOSS HIT (-{abs(pts):.2f} PTS)*"
-                                dir_badge = "BUY / LONG ▲" if dir_str == "LONG" else "SELL / SHORT ▼"
-                                pnl_sign = "+" if tf_open_trade.realized_pnl >= 0 else ""
-                                smc_close_msg = (
-                                    f"{header}\n"
-                                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"📊 *Strategy:* SMC With Fib (0.680)\n"
-                                    f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
-                                    f"📈 *Direction:* {dir_badge}\n"
-                                    f"💵 *Entry:* ${entry_chk:.2f}\n"
-                                    f"🏁 *Exit:* ${exit_px:.2f}\n"
-                                    f"💰 *Profit:* {pnl_sign}${tf_open_trade.realized_pnl:.2f}\n"
-                                    f"━━━━━━━━━━━━━━━━━━━━"
+                                smc_close_msg = _build_hybrid_close_msg(
+                                    strategy_name="SMC With Fib (0.680)",
+                                    symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                    direction=dir_str,
+                                    entry_px=entry_chk,
+                                    exit_px=exit_px,
+                                    pts=pts,
+                                    realized_pnl=tf_open_trade.realized_pnl,
+                                    exit_reason=exit_reason,
+                                    lot_size=tf_open_trade.lot_size or 0.01,
+                                    opened_at=tf_open_trade.opened_at,
+                                    closed_at=tf_open_trade.closed_at,
+                                    paper_trade_id=tf_open_trade.id,
                                 )
                                 _dispatch_tg_alert(tg.send_raw_alert(smc_close_msg))
                             except Exception as tg_err:
@@ -1227,21 +1380,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 existing_open_smc = new_trade
                                 logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (SMC %s %s) @ %.2f", sig_id, tf_key.upper(), dir_str, entry_px)
 
-                                # Telegram: Dispatch Trade Opened Alert
+                                # Telegram: Dispatch Hybrid Trade Opened Alert
                                 try:
-                                    dir_badge = "BUY / LONG ▲" if dir_str == "LONG" else "SELL / SHORT ▼"
-                                    msg = (
-                                        f"🚀 *TRADE OPENED ({trade_lot:.2f} Lots)*\n"
-                                        f"━━━━━━━━━━━━━━━━━━━━\n"
-                                        f"📊 *Strategy:* SMC With Fib (0.680)\n"
-                                        f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
-                                        f"📈 *Direction:* {dir_badge}\n"
-                                        f"💵 *Entry:* ${entry_px:.2f}\n"
-                                        f"🛑 *Stop Loss:* ${sl_px:.2f}\n"
-                                        f"🎯 *Take Profit:* ${tp_px:.2f}\n"
-                                        f"🧠 *AI Verdict:* {ai_short}\n"
-                                        f"⚡ *Multi-Slot:* {tf_key.upper()} Active (Parallel execution)\n"
-                                        f"━━━━━━━━━━━━━━━━━━━━"
+                                    msg = _build_hybrid_open_msg(
+                                        strategy_name="SMC With Fib (0.680)",
+                                        symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                        direction=dir_str,
+                                        lot_size=trade_lot,
+                                        entry_px=entry_px,
+                                        sl_px=sl_px,
+                                        tp_px=tp_px,
+                                        paper_trade_id=new_trade.id,
                                     )
                                     _dispatch_tg_alert(tg.send_raw_alert(msg))
                                 except Exception as tg_err:  # noqa: BLE001
@@ -1375,19 +1524,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 logger.info("[PAPER-AUTO] Opened trade %s (FIB_TREND %s %s) @ %.2f", sig_id, tf_key.upper(), dir_str, entry_px)
 
                                 try:
-                                    dir_badge = "BUY / LONG ▲" if dir_str == "LONG" else "SELL / SHORT ▼"
-                                    msg = (
-                                        f"🚀 *TRADE OPENED ({trade_lot:.2f} Lots)*\n"
-                                        f"━━━━━━━━━━━━━━━━━━━━\n"
-                                        f"📊 *Strategy:* Fib Go With Trend (9/21 EMA)\n"
-                                        f"🪙 *Symbol:* XAU/USD ({tf_key.upper()})\n"
-                                        f"📈 *Direction:* {dir_badge}\n"
-                                        f"💵 *Entry:* ${entry_px:.2f}\n"
-                                        f"🛑 *Stop Loss (0.236):* ${sl_px:.2f}\n"
-                                        f"🏆 *Target (1.618 Target):* ${tp_target:.2f}\n"
-                                        f"🧠 *AI Verdict:* {ai_short}\n"
-                                        f"⚡ *Multi-Slot:* {tf_key.upper()} Active (Parallel execution)\n"
-                                        f"━━━━━━━━━━━━━━━━━━━━"
+                                    msg = _build_hybrid_open_msg(
+                                        strategy_name="Fib Go With Trend (9/21 EMA)",
+                                        symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                        direction=dir_str,
+                                        lot_size=trade_lot,
+                                        entry_px=entry_px,
+                                        sl_px=sl_px,
+                                        tp_px=tp_target,
+                                        paper_trade_id=new_trade.id,
                                     )
                                     _dispatch_tg_alert(tg.send_raw_alert(msg))
                                 except Exception as tg_err:  # noqa: BLE001
@@ -1610,44 +1755,20 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     trade_tf = str(l_entry["timeframe"]).upper()
                                     break
 
-                        exec_cfg = get_execution_settings()
-                        is_cent = (exec_cfg.account_currency == "cent")
-                        curr_sym = "₹" if is_cent else "$"
-                        curr_name = "INR" if is_cent else "USD"
-
-                        if t.exit_reason == "TP_HIT":
-                            msg = (
-                                f"🎯 *TAKE PROFIT HIT!*\n"
-                                f"━━━━━━━━━━━━━━━━━━━━\n"
-                                f"📊 *Strategy:* {strat_name}\n"
-                                f"🪙 *Symbol:* XAU/USD ({trade_tf})\n"
-                                f"💵 *Entry:* ${entry:.2f}\n"
-                                f"💰 *Exit Price:* ${t.exit_price:.2f}\n"
-                                f"🏆 *Result:* +{pts:.2f} PTS (+{curr_sym}{t.realized_pnl:.2f} {curr_name})\n"
-                                f"━━━━━━━━━━━━━━━━━━━━"
-                            )
-                        elif t.exit_reason == "BREAKEVEN_HIT":
-                            msg = (
-                                f"🛡 *BREAKEVEN EXIT*\n"
-                                f"━━━━━━━━━━━━━━━━━━━━\n"
-                                f"📊 *Strategy:* {strat_name}\n"
-                                f"🪙 *Symbol:* XAU/USD ({trade_tf})\n"
-                                f"💵 *Entry:* ${entry:.2f}\n"
-                                f"💰 *Exit Price:* ${t.exit_price:.2f}\n"
-                                f"⚖️ *Result:* {pts:+.2f} PTS ({curr_sym}{t.realized_pnl:+.2f} {curr_name} — Capital Protected)\n"
-                                f"━━━━━━━━━━━━━━━━━━━━"
-                            )
-                        else:
-                            msg = (
-                                f"🛑 *STOP LOSS HIT*\n"
-                                f"━━━━━━━━━━━━━━━━━━━━\n"
-                                f"📊 *Strategy:* {strat_name}\n"
-                                f"🪙 *Symbol:* XAU/USD ({trade_tf})\n"
-                                f"💵 *Entry:* ${entry:.2f}\n"
-                                f"🛑 *Exit Price:* ${t.exit_price:.2f}\n"
-                                f"📉 *Result:* -{abs(pts):.2f} PTS (-{curr_sym}{abs(t.realized_pnl):.2f} {curr_name})\n"
-                                f"━━━━━━━━━━━━━━━━━━━━"
-                            )
+                        msg = _build_hybrid_close_msg(
+                            strategy_name=strat_name,
+                            symbol_tf=f"XAU/USD ({trade_tf})",
+                            direction=t.direction,
+                            entry_px=entry,
+                            exit_px=t.exit_price or entry,
+                            pts=pts,
+                            realized_pnl=t.realized_pnl or 0.0,
+                            exit_reason=t.exit_reason or "CLOSED",
+                            lot_size=t.lot_size or 0.01,
+                            opened_at=t.opened_at,
+                            closed_at=t.closed_at,
+                            paper_trade_id=t.id,
+                        )
                         _dispatch_tg_alert(tg.send_raw_alert(msg))
                     except Exception as tg_err:  # noqa: BLE001
                         logger.warning("[PAPER-TG] Failed to send close alert: %s", tg_err)
