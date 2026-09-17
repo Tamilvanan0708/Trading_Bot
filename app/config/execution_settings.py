@@ -131,8 +131,15 @@ def get_execution_settings() -> ExecutionSettings:
                 return _CURRENT_SETTINGS
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                if data.get("smart_shield_level") == "0.618":
+                    data["smart_shield_level"] = "0.500"
+                    try:
+                        with open(CONFIG_FILE, "w", encoding="utf-8") as fw:
+                            json.dump(data, fw, indent=2)
+                    except Exception:
+                        pass
                 _CURRENT_SETTINGS = ExecutionSettings(**data)
-                _LAST_CONFIG_MTIME = mtime
+                _LAST_CONFIG_MTIME = CONFIG_FILE.stat().st_mtime
                 return _CURRENT_SETTINGS
         except Exception:
             pass

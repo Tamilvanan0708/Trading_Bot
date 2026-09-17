@@ -3,10 +3,21 @@ API for RETRACEMENT_BOS_V1 — Exact Bullish BOS Retracement Strategy.
 """
 
 import asyncio
+from datetime import datetime, timezone
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def _iso_utc(dt) -> str | None:
+    if not dt:
+        return None
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    return str(dt)
 
 from app.core.logging import logger
 from app.database.connection import get_db_session
@@ -696,7 +707,7 @@ async def get_fib_retracement_dashboard(
                     "entry_price": ot.actual_entry or ot.target_entry,
                     "stop_loss": ot.stop_loss,
                     "take_profit": ot.take_profit_1,
-                    "opened_at": ot.opened_at.isoformat() if ot.opened_at else None,
+                    "opened_at": _iso_utc(ot.opened_at),
                     "timeframe": tf.upper(),
                 }
     except Exception as pt_err:
@@ -823,7 +834,7 @@ async def get_smc_fib_dashboard(
                     "entry_price": ot.actual_entry or ot.target_entry,
                     "stop_loss": ot.stop_loss,
                     "take_profit": ot.take_profit_1,
-                    "opened_at": ot.opened_at.isoformat() if ot.opened_at else None,
+                    "opened_at": _iso_utc(ot.opened_at),
                 }
     except Exception as pt_err:
         logger.warning("[STRATEGY] Error querying open paper trades for SMC: %s", pt_err)

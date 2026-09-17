@@ -411,8 +411,13 @@ const Charts = {
   },
 
   _tsLabel(ts) {
-    const d = new Date(ts);
+    if (!ts) return "—";
+    let s = String(ts).trim();
+    if (!s.endsWith("Z") && !s.includes("+") && !/[0-9]-[0-9]{2}:/.test(s)) {
+      s = s.replace(" ", "T") + "Z";
+    }
+    const d = new Date(s);
     if (isNaN(d.getTime())) return String(ts).slice(5, 16);
-    return d.toLocaleString(undefined, { hour12: false, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: true, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) + " IST";
   },
 };

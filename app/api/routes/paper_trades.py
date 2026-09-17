@@ -2,6 +2,7 @@
 Paper Trades & Performance API Routes.
 """
 
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,16 @@ from app.database.repository import Repository
 from app.paper_trading.sync import sync_strategy_paper_trades
 
 router = APIRouter(tags=["Paper Trading & Performance"])
+
+
+def _iso_utc(dt) -> str | None:
+    if not dt:
+        return None
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    return str(dt)
 
 
 def _serialize_trade(t, live_price: float | None = None) -> dict:
@@ -100,11 +111,11 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
         "take_profit_2": t.take_profit_2,
         "take_profit_3": t.take_profit_3,
         "risk_reward": risk_reward,
-        "opened_at": t.opened_at or t.created_at,
+        "opened_at": _iso_utc(t.opened_at or t.created_at),
         "exit_price": t.exit_price,
         "exit_reason": t.exit_reason,
-        "closed_at": t.closed_at,
-        "created_at": t.created_at,
+        "closed_at": _iso_utc(t.closed_at),
+        "created_at": _iso_utc(t.created_at),
     }
 
 

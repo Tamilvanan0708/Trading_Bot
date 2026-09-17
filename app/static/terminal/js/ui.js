@@ -19,14 +19,45 @@ const UI = {
   fmtPts(v) { return (v === null || v === undefined) ? "—" : Number(v).toFixed(1); },
   fmtPct(v) { return (v === null || v === undefined) ? "—" : Number(v).toFixed(2) + "%"; },
   fmtR(v) { return (v === null || v === undefined) ? "—" : (v > 0 ? "+" : "") + Number(v).toFixed(3) + "R"; },
+  _parseUTC(ts) {
+    if (!ts) return null;
+    let s = String(ts).trim();
+    if (!s.endsWith("Z") && !s.includes("+") && !/[0-9]-[0-9]{2}:/.test(s)) {
+      s = s.replace(" ", "T") + "Z";
+    }
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? new Date(ts) : d;
+  },
   fmtTs(ts) {
     if (!ts) return "—";
-    try { const d = new Date(ts); return d.toLocaleString(undefined, { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }); }
-    catch (_) { return String(ts); }
+    try {
+      const d = UI._parseUTC(ts);
+      if (!d || isNaN(d.getTime())) return String(ts);
+      return d.toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true
+      }) + " IST";
+    } catch (_) { return String(ts); }
   },
   fmtTsFull(ts) {
     if (!ts) return "—";
-    try { return new Date(ts).toLocaleString(); } catch (_) { return String(ts); }
+    try {
+      const d = UI._parseUTC(ts);
+      if (!d || isNaN(d.getTime())) return String(ts);
+      return d.toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true
+      }) + " IST";
+    } catch (_) { return String(ts); }
   },
 
   /* direction badge */

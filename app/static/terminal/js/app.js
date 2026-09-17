@@ -906,7 +906,7 @@ Routes["/live"] = (mount) => {
           : map.text === "NO DATA"
             ? "NO DATA — feed and cache unavailable"
             : "FEED DEGRADED — falling back to polling"}</span>` +
-        `<span class="update-clock" id="live-clock">${new Date().toISOString().replace("T", " ").slice(0, 19)}Z</span>`;
+        `<span class="update-clock" id="live-clock">${new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true })} IST</span>`;
     }
   }
 
@@ -924,7 +924,7 @@ Routes["/live"] = (mount) => {
     if (Array.isArray(payload.candles) && payload.candles.length) _liveCandles = payload.candles;
     setStatus(payload.data_status || "NO_DATA");
     const clock = document.getElementById("live-clock");
-    if (clock && payload.data_status) clock.textContent = new Date().toISOString().replace("T", " ").slice(0, 19) + "Z";
+    if (clock && payload.data_status) clock.textContent = new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true }) + " IST";
     redraw();
   }
 

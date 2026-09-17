@@ -7,7 +7,7 @@ Ensures exactly ONE 0.01 lot paper trade per unique strategy signal ID.
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 
 from sqlalchemy import and_, func, or_, select
@@ -52,6 +52,18 @@ def _dispatch_tg_alert(coro) -> asyncio.Task:
     _bg_tg_tasks.add(task)
     task.add_done_callback(_bg_tg_tasks.discard)
     return task
+
+
+def _format_ist_time(dt: datetime | None = None) -> str:
+    """Format datetime into Indian Standard Time (UTC+5:30) with explicit IST label."""
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    if dt is None:
+        target = datetime.now(ist_tz)
+    elif dt.tzinfo is None:
+        target = dt.replace(tzinfo=timezone.utc).astimezone(ist_tz)
+    else:
+        target = dt.astimezone(ist_tz)
+    return target.strftime("%d-%b %I:%M:%S %p IST")
 
 
 def _format_trade_duration(opened_at: datetime | None, closed_at: datetime | None = None) -> str:
@@ -105,6 +117,7 @@ def _build_hybrid_open_msg(
     sl_dist = abs(entry_px - sl_px)
     tp_dist = abs(tp_px - entry_px)
     rr_ratio = round(tp_dist / max(0.1, sl_dist), 1)
+    ist_time = _format_ist_time()
 
     return (
         f"🚀 *LIVE ORDER EXECUTED ({lot_size:.2f} Lots)*\n"
@@ -112,6 +125,7 @@ def _build_hybrid_open_msg(
         f"📊 *Strategy:* {strategy_name}\n"
         f"🪙 *Symbol:* {symbol_tf}\n"
         f"📈 *Direction:* {dir_badge}\n"
+        f"🕒 *Time (IST):* {ist_time}\n"
         f"🏛️ *Broker:* {broker_name}\n"
         f"🎫 *Ticket:* {ticket_str}\n"
         f"💵 *Fill Price:* ${entry_px:,.2f}\n"
@@ -140,6 +154,7 @@ def _build_hybrid_close_msg(
     _, ticket_str, balance_str = _get_hybrid_broker_info(paper_trade_id)
     dir_badge = "BUY / LONG ▲" if direction in ("LONG", "BUY") else "SELL / SHORT ▼"
     duration_str = _format_trade_duration(opened_at, closed_at)
+    ist_time = _format_ist_time(closed_at)
 
     exec_cfg = get_execution_settings()
     is_cent = (exec_cfg.account_currency == "cent")
@@ -154,6 +169,7 @@ def _build_hybrid_close_msg(
             f"📊 *Strategy:* {strategy_name}\n"
             f"🪙 *Symbol:* {symbol_tf}\n"
             f"📈 *Direction:* {dir_badge}\n"
+            f"🕒 *Exit Time (IST):* {ist_time}\n"
             f"🎫 *Closed Ticket:* {ticket_str}\n"
             f"💵 *Entry:* ${entry_px:,.2f} ➔ *Exit:* ${exit_px:,.2f}\n"
             f"⏱️ *Duration:* {duration_str}\n"
@@ -171,6 +187,7 @@ def _build_hybrid_close_msg(
             f"📊 *Strategy:* {strategy_name}\n"
             f"🪙 *Symbol:* {symbol_tf}\n"
             f"📈 *Direction:* {dir_badge}\n"
+            f"🕒 *Exit Time (IST):* {ist_time}\n"
             f"🎫 *Closed Ticket:* {ticket_str}\n"
             f"💵 *Entry:* ${entry_px:,.2f} ➔ *Exit:* ${exit_px:,.2f}\n"
             f"⏱️ *Duration:* {duration_str}\n"
@@ -188,6 +205,7 @@ def _build_hybrid_close_msg(
             f"📊 *Strategy:* {strategy_name}\n"
             f"🪙 *Symbol:* {symbol_tf}\n"
             f"📈 *Direction:* {dir_badge}\n"
+            f"🕒 *Exit Time (IST):* {ist_time}\n"
             f"🎫 *Closed Ticket:* {ticket_str}\n"
             f"💵 *Entry:* ${entry_px:,.2f} ➔ *Exit:* ${exit_px:,.2f}\n"
             f"⏱️ *Duration:* {duration_str}\n"
@@ -206,14 +224,16 @@ def _build_hybrid_shield_msg(
     paper_trade_id: str | None = None,
 ) -> str:
     _, ticket_str, _ = _get_hybrid_broker_info(paper_trade_id)
+    ist_time = _format_ist_time()
     return (
         f"🛡 *SMART SHIELD ACTIVATED*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 *Strategy:* {strategy_name}\n"
         f"🪙 *Symbol:* {symbol_tf}\n"
+        f"🕒 *Time (IST):* {ist_time}\n"
         f"⚡ *Trigger:* L{trigger_layer} TP Hit\n"
         f"🎫 *Ticket:* {ticket_str}\n"
-        f"🔒 *New L1 SL:* ${new_sl:,.2f} (Breakeven)\n"
+        f"🔒 *New L1 SL:* ${new_sl:,.2f} (0.500 Buffer)\n"
         f"🛡 *Downside Risk:* 0.00 (Risk-Free Trade)\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )

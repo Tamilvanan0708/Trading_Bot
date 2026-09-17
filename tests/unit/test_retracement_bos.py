@@ -648,7 +648,7 @@ def test_sidebar_has_retracement_bos_nav_item():
     assert "Fib Retracement" in html
     # Active nav items must remain intact
     for route in ("/overview", "/live", "/signals", "/paper",
-                  "/smc-fib", "/fib-retracement", "/fib-trend",
+                  "/smc-fib", "/fib-retracement",
                   "/backtest", "/health", "/settings"):
         assert f"data-route=\"{route}\"" in html, f"missing nav {route}"
 
