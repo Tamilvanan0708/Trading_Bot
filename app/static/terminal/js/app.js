@@ -4636,18 +4636,23 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const ptsCls = pts >= 0 ? "up" : "down";
     const ptsSign = pts >= 0 ? "+" : "";
     const hasPaperTrade = d.paper_trade && d.paper_trade.is_open;
-    const isEntryTouched = !hasPaperTrade && d.is_trade_active;
+    const isCompleted = d.outcome === "TP_HIT" || d.outcome === "SL_HIT" || d.state === "COMPLETED";
+    const isEntryTouched = !hasPaperTrade && !isCompleted && d.is_trade_active;
     const statusBadge = hasPaperTrade
       ? `<span class="badge badge-green">🟢 ACTIVE (${(d.paper_trade && d.paper_trade.lot_size) || 0.01} Lot)</span>`
-      : (isEntryTouched
-          ? '<span class="badge badge-amber">⚡ ENTRY TOUCHED (PENDING ORDER)</span>'
-          : (isSetup ? '<span class="badge badge-blue">WAITING FOR ENTRY</span>' : '<span class="badge badge-muted">SCANNING</span>'));
+      : (isCompleted
+          ? `<span class="badge badge-green">${d.outcome === "TP_HIT" ? "🏆 TP HIT (CLOSED)" : "🛑 SL HIT (CLOSED)"}</span>`
+          : (isEntryTouched
+              ? '<span class="badge badge-amber">⚡ ENTRY TOUCHED</span>'
+              : (isSetup ? '<span class="badge badge-blue">WAITING FOR ENTRY</span>' : '<span class="badge badge-muted">SCANNING</span>')));
 
     const stateBadge = hasPaperTrade
       ? '<span class="badge badge-green">TRADE_ACTIVE (LIVE)</span>'
-      : (isEntryTouched
-          ? '<span class="badge badge-amber">ENTRY_TOUCHED (PENDING ORDER)</span>'
-          : `<span class="badge badge-blue">${state}</span>`);
+      : (isCompleted
+          ? `<span class="badge badge-green">${d.outcome === "TP_HIT" ? "OUTCOME (TP HIT)" : "OUTCOME (SL HIT)"}</span>`
+          : (isEntryTouched
+              ? '<span class="badge badge-amber">ENTRY_TOUCHED</span>'
+              : `<span class="badge badge-blue">${state}</span>`));
 
     return `<div class="card" style="border-color:rgba(52,211,153,0.35);margin-bottom:var(--sp-3)">
       <div class="card-head">
@@ -4736,7 +4741,8 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       // has a genuinely active setup state (not NO_SETUP / WAITING_FOR_BOS).
       const engineIsActive = tfCard.state && tfCard.state !== "NO_SETUP" && tfCard.state !== "WAITING_FOR_BOS" && tfCard.state !== "SCANNING";
       const hasPaperTrade = tfCard.paper_trade && tfCard.paper_trade.is_open && engineIsActive;
-      const isEntryTouched = !hasPaperTrade && tfCard.is_trade_active;
+      const isCompleted = tfCard.outcome === "TP_HIT" || tfCard.outcome === "SL_HIT" || tfCard.state === "COMPLETED";
+      const isEntryTouched = !hasPaperTrade && !isCompleted && tfCard.is_trade_active;
       const isEntryReady = tfCard.is_entry_ready;
       const btnClass = isSel ? "btn btn-primary" : "btn btn-secondary";
 
@@ -4745,6 +4751,9 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       if (hasPaperTrade) {
         borderStyle = "border:1px solid #00e676;box-shadow:0 0 8px rgba(0,230,118,0.3);";
         activeBadge = `<span style="display:inline-flex;align-items:center;gap:4px;color:#00e676;font-size:10px;font-weight:800;margin-left:5px"><span class="dot dot-green" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#00e676;box-shadow:0 0 6px #00e676;animation:pulse 1.5s infinite"></span>ACTIVE</span>`;
+      } else if (isCompleted) {
+        borderStyle = "border:1px solid #10b981;box-shadow:0 0 6px rgba(16,185,129,0.25);";
+        activeBadge = `<span style="display:inline-flex;align-items:center;gap:4px;color:#10b981;font-size:10px;font-weight:800;margin-left:5px">● ${tfCard.outcome === "TP_HIT" ? "TP HIT" : "CLOSED"}</span>`;
       } else if (isEntryTouched) {
         borderStyle = "border:1px solid #f59e0b;box-shadow:0 0 6px rgba(245,158,11,0.25);";
         activeBadge = `<span style="display:inline-flex;align-items:center;gap:4px;color:#f59e0b;font-size:10px;font-weight:800;margin-left:5px"><span class="dot dot-amber" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f59e0b"></span>TOUCHED</span>`;
@@ -4882,12 +4891,15 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     // Only show ACTIVE execution mode when the engine is genuinely in an active state.
     const engineIsActive = tfData.state && tfData.state !== "NO_SETUP" && tfData.state !== "WAITING_FOR_BOS" && tfData.state !== "SCANNING";
     const hasPaperTrade = tfData.paper_trade && tfData.paper_trade.is_open && engineIsActive;
-    const isEntryTouched = !hasPaperTrade && tfData.is_trade_active;
+    const isCompleted = tfData.outcome === "TP_HIT" || tfData.outcome === "SL_HIT" || tfData.state === "COMPLETED";
+    const isEntryTouched = !hasPaperTrade && !isCompleted && tfData.is_trade_active;
     const execMode = hasPaperTrade
       ? `<span class="badge badge-green">🟢 ACTIVE (${(tfData.paper_trade && tfData.paper_trade.lot_size) || 0.01} Lot)</span>`
-      : (isEntryTouched
-          ? '<span class="badge badge-amber">⚡ ENTRY TOUCHED (PENDING ORDER)</span>'
-          : '<span class="badge badge-blue">MULTI-SLOT SCANNING</span>');
+      : (isCompleted
+          ? `<span class="badge badge-green">${tfData.outcome === "TP_HIT" ? "🏆 TP HIT (CLOSED)" : "🛑 SL HIT (CLOSED)"}</span>`
+          : (isEntryTouched
+              ? '<span class="badge badge-amber">⚡ ENTRY TOUCHED</span>'
+              : '<span class="badge badge-blue">MULTI-SLOT SCANNING</span>'));
     return `<div class="card-head"><span>STRUCTURE & SMC STATUS</span><span class="muted">${TF_LABELS[selectedTf] || selectedTf.toUpperCase()}</span></div>
     <div class="card-body">
       ${UI.kv([
