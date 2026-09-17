@@ -1002,21 +1002,30 @@ async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
 
     candles = []
     live_price = None
+    tf_enum = RETR_TF_MAP.get(tf)
+    if tf_enum is None:
+        raise HTTPException(status_code=400, detail=f"Unknown timeframe: {timeframe}")
+
     try:
-        snap = await svc.get_multi_timeframe_snapshot(symbol, include_forming=True)
-        tf_enum = RETR_TF_MAP.get(tf)
-        if tf_enum is None:
-            raise HTTPException(status_code=400, detail=f"Unknown timeframe: {timeframe}")
-        candles = list(snap.get_series(tf_enum))[-limit:]
-        live_price = snap.current_price
+        series_data = await svc.get_chart_series(symbol, tf_enum, limit=limit)
+        if series_data and series_data.get("candles"):
+            candles = list(series_data["candles"])[-limit:]
+            live_price = series_data.get("current_price")
     except Exception as exc:
-        logger.debug("Chart snapshot failed: %s", exc)
+        logger.debug("get_chart_series failed: %s", exc)
+
+    if not candles:
+        try:
+            snap = await svc.get_multi_timeframe_snapshot(symbol, include_forming=True)
+            candles = list(snap.get_series(tf_enum))[-limit:]
+            live_price = snap.current_price
+        except Exception as exc:
+            logger.debug("Chart snapshot failed: %s", exc)
 
     if len(candles) < 50:
         try:
             from app.data.live.binance_history import BinanceHistoryProvider
             provider = BinanceHistoryProvider()
-            tf_enum = RETR_TF_MAP.get(tf, TimeFrame.M5)
             fetched = await provider.get_ohlcv(symbol, tf_enum, limit=limit)
             if fetched:
                 candles = fetched[-limit:]

@@ -847,6 +847,26 @@ class LiveMarketDataService:
         the analysis pipeline always uses ``get_multi_timeframe_snapshot``
         (closed-only, lookahead-safe).
         """
+        from app.config.execution_settings import get_execution_settings
+        exec_cfg = get_execution_settings()
+        is_mt5 = (self.settings.LIVE_FEED_PROVIDER == "mt5") or self.settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+
+        if is_mt5:
+            mt5_p = getattr(self, "_mt5_provider", None)
+            if mt5_p is not None:
+                try:
+                    mt5_candles = await mt5_p.get_ohlcv(self._symbol, tf, limit=limit)
+                    if mt5_candles:
+                        cur_px = self._live_price if self._live_price is not None else mt5_candles[-1].close
+                        return {
+                            "closed": mt5_candles,
+                            "forming": None,
+                            "candles": mt5_candles,
+                            "current_price": cur_px,
+                        }
+                except Exception as exc:
+                    logger.warning("[MT5-CHART] Service get_chart_series failed: %s", exc)
+
         async with self._lock:
             closed_15 = list(self._closed_15m)
             closed_5 = list(self._closed_5m)

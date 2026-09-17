@@ -874,7 +874,7 @@ async function loadOverview() {
 };
 
 
-/* ================= LIVE MARKET (SSE + incremental native chart) ================= */
+/* ================= LIVE MARKET (TradingView Lightweight Charts + MT5 Feed) ================= */
 Routes["/live"] = (mount) => {
   const TFS = ["5m", "15m", "30m", "1h", "4h"];
   const SYMBOL = "XAUUSD";
@@ -882,15 +882,35 @@ Routes["/live"] = (mount) => {
   let _liveSeq = 0;          // stale-response guard: drop older async results
   let _liveES = null;        // active EventSource (closed on switch/navigate)
   let _livePollTimer = null;
+  let _overlayTimer = null;
   let _liveCandles = [];
+  let _chart = null;
+  let _candleSeries = null;
+  let _volumeSeries = null;
+  let _ro = null;
+  let _tradePriceLines = [];
+  let _fibPriceLines = [];
+  let _liveTickLine = null;
+  let _hasFitContent = false;
+  let _showTrades = true;
+  let _showFib = true;
 
   // data_status (backend truth) -> honest badge text/class.
   const LIVE_STATUS = {
-    HEALTHY:            { text: "LIVE",             cls: "badge badge-green", banner: "live" },
+    HEALTHY:            { text: "LIVE (MT5)",       cls: "badge badge-green", banner: "live" },
     HISTORICAL:         { text: "FEED DEGRADED",    cls: "badge badge-red",   banner: "degraded" },
     HISTORICAL_CACHE:   { text: "HISTORICAL CACHE", cls: "badge badge-blue",  banner: "cache" },
     NO_DATA:            { text: "NO DATA",          cls: "badge badge-dim",   banner: "" },
   };
+
+  function safeAddPriceLine(series, opts) {
+    if (!series || !opts || !Number.isFinite(Number(opts.price)) || Number(opts.price) <= 0) return null;
+    try {
+      return series.createPriceLine(opts);
+    } catch (_) {
+      return null;
+    }
+  }
 
   function setStatus(status) {
     const map = LIVE_STATUS[status] || LIVE_STATUS.NO_DATA;
@@ -899,8 +919,8 @@ Routes["/live"] = (mount) => {
     const banner = document.getElementById("live-feed-banner");
     if (banner) {
       banner.className = "feed-banner " + map.banner;
-      banner.innerHTML = `<span>${map.text === "LIVE"
-        ? "XAU/USD NATIVE LIVE CHART (SSE)"
+      banner.innerHTML = `<span>${map.text.includes("LIVE")
+        ? "XAU/USD TRADINGVIEW LIGHTWEIGHT CHART · MT5 FEED ACTIVE (SSE)"
         : map.text === "HISTORICAL CACHE"
           ? "SIGNAL INTELLIGENCE TERMINAL CHART · HISTORICAL CACHE (FEED NOT LIVE)"
           : map.text === "NO DATA"
@@ -910,10 +930,468 @@ Routes["/live"] = (mount) => {
     }
   }
 
-  function redraw() {
-    const canvas = document.getElementById("live-canvas");
-    if (canvas && window.Charts && _liveCandles.length) {
-      Charts.candlesLive(canvas, _liveCandles, { height: 620 });
+  function initChart() {
+    const container = document.getElementById("tv-chart-container");
+    if (!container) return;
+    if (typeof LightweightCharts === "undefined") {
+      container.innerHTML = '<div style="padding:40px;text-align:center;color:#ef5350;font-size:13px">LightweightCharts library failed to load. Please refresh the page.</div>';
+      return;
+    }
+
+    if (_chart) {
+      try { _chart.remove(); } catch (_) {}
+      _chart = null;
+      _candleSeries = null;
+      _volumeSeries = null;
+      _tradePriceLines = [];
+      _fibPriceLines = [];
+      _liveTickLine = null;
+    }
+
+    const boxW = container.clientWidth || 800;
+    const boxH = 620;
+
+    _chart = LightweightCharts.createChart(container, {
+      width: boxW,
+      height: boxH,
+      layout: {
+        background: { type: "solid", color: "#0b0e14" },
+        textColor: "#94a3b8",
+        fontSize: 11,
+        fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      },
+      grid: {
+        vertLines: { color: "rgba(255, 255, 255, 0.04)" },
+        horzLines: { color: "rgba(255, 255, 255, 0.04)" },
+      },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode ? LightweightCharts.CrosshairMode.Normal : 0,
+        vertLine: { color: "rgba(255, 255, 255, 0.2)", width: 1, style: 3 },
+        horzLine: { color: "rgba(255, 255, 255, 0.2)", width: 1, style: 3 },
+      },
+      rightPriceScale: {
+        borderColor: "rgba(255, 255, 255, 0.08)",
+        scaleMargins: { top: 0.1, bottom: 0.2 },
+        autoScale: true,
+      },
+      timeScale: {
+        borderColor: "rgba(255, 255, 255, 0.08)",
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    });
+
+    _candleSeries = _chart.addCandlestickSeries({
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderUpColor: "#22c55e",
+      borderDownColor: "#ef4444",
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+
+    try {
+      _volumeSeries = _chart.addHistogramSeries({
+        color: "rgba(255, 255, 255, 0.08)",
+        priceFormat: { type: "volume" },
+        priceScaleId: "",
+        scaleMargins: { top: 0.82, bottom: 0 },
+      });
+    } catch (_) {}
+
+    // Crosshair legend
+    _chart.subscribeCrosshairMove((param) => {
+      const el = document.getElementById("legend-ohlc");
+      const chgEl = document.getElementById("legend-chg");
+      if (!el || !param || !param.seriesData || !_candleSeries) return;
+      const bar = param.seriesData.get(_candleSeries);
+      if (!bar) return;
+      const diff = bar.close - bar.open;
+      const pct = bar.open ? (diff / bar.open) * 100 : 0;
+      const sign = diff >= 0 ? "+" : "";
+      const col = diff >= 0 ? "#22c55e" : "#ef4444";
+      el.innerHTML = `O: <b style="color:${col}">$${bar.open.toFixed(2)}</b>  H: <b>$${bar.high.toFixed(2)}</b>  L: <b>$${bar.low.toFixed(2)}</b>  C: <b style="color:${col}">$${bar.close.toFixed(2)}</b>`;
+      if (chgEl) {
+        chgEl.innerHTML = `<span style="color:${col};font-weight:600">${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)</span>`;
+      }
+    });
+
+    // ResizeObserver for responsive chart
+    if (window.ResizeObserver) {
+      _ro = new ResizeObserver((entries) => {
+        for (const e of entries) {
+          if (_chart && e.contentRect.width > 0) {
+            try { _chart.resize(e.contentRect.width, boxH); } catch (_) {}
+          }
+        }
+      });
+      _ro.observe(container);
+    }
+  }
+
+  function formatCandles(rawCandles) {
+    if (!Array.isArray(rawCandles) || !rawCandles.length) return [];
+    const formatted = [];
+    for (const c of rawCandles) {
+      let unix = null;
+      if (typeof c.time === "number") {
+        unix = c.time;
+      } else if (c.timestamp) {
+        unix = Math.floor(new Date(c.timestamp).getTime() / 1000);
+      }
+      if (!unix || !Number.isFinite(unix)) continue;
+      const o = Number(c.open);
+      const h = Number(c.high);
+      const l = Number(c.low);
+      const cl = Number(c.close);
+      if (!Number.isFinite(o) || !Number.isFinite(cl)) continue;
+      formatted.push({
+        time: unix,
+        open: o,
+        high: Number.isFinite(h) ? h : Math.max(o, cl),
+        low: Number.isFinite(l) ? l : Math.min(o, cl),
+        close: cl,
+        volume: Number(c.volume) || 0,
+      });
+    }
+    formatted.sort((a, b) => a.time - b.time);
+    const deduped = [];
+    const seen = new Set();
+    for (const bar of formatted) {
+      if (!seen.has(bar.time)) {
+        seen.add(bar.time);
+        deduped.push(bar);
+      }
+    }
+    return deduped;
+  }
+
+  function renderCandles(rawCandles, livePrice) {
+    if (!_candleSeries) return;
+    const candles = formatCandles(rawCandles);
+    if (!candles.length) return;
+    _liveCandles = candles;
+
+    try {
+      _candleSeries.setData(candles);
+      if (_volumeSeries) {
+        _volumeSeries.setData(candles.map((b) => ({
+          time: b.time,
+          value: b.volume,
+          color: b.close >= b.open ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)",
+        })));
+      }
+      if (!_hasFitContent && _chart) {
+        _chart.timeScale().fitContent();
+        _hasFitContent = true;
+      }
+    } catch (err) {
+      console.warn("[TV-Live] Error setting candle data:", err);
+    }
+
+    const curPx = livePrice || candles[candles.length - 1].close;
+    updateLiveTickLine(curPx);
+  }
+
+  function updateLiveTickLine(price) {
+    if (!_candleSeries || !Number.isFinite(Number(price)) || Number(price) <= 0) return;
+    if (_liveTickLine) {
+      try { _candleSeries.removePriceLine(_liveTickLine); } catch (_) {}
+      _liveTickLine = null;
+    }
+    try {
+      _liveTickLine = safeAddPriceLine(_candleSeries, {
+        price: Number(price),
+        color: "#facc15",
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Dotted : 2,
+        axisLabelVisible: true,
+        title: `⚡️ MT5 LIVE $${Number(price).toFixed(2)}`,
+      });
+    } catch (_) {}
+  }
+
+  function findNearestCandle(candles, targetSec) {
+    if (!candles || !candles.length) return null;
+    let closest = candles[0];
+    let minDiff = Math.abs(candles[0].time - targetSec);
+    for (let i = 1; i < candles.length; i++) {
+      const diff = Math.abs(candles[i].time - targetSec);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = candles[i];
+      }
+    }
+    return closest;
+  }
+
+  async function renderOverlays() {
+    if (!_candleSeries) return;
+
+    // Clear old lines
+    _tradePriceLines.forEach((pl) => { try { _candleSeries.removePriceLine(pl); } catch (_) {} });
+    _tradePriceLines = [];
+    _fibPriceLines.forEach((pl) => { try { _candleSeries.removePriceLine(pl); } catch (_) {} });
+    _fibPriceLines = [];
+
+    const markers = [];
+
+    // 1. Trades Overlay (Active and Recent Paper Trades)
+    if (_showTrades) {
+      try {
+        const rawTrades = await API.paperTrades();
+        const trades = Array.isArray(rawTrades) ? rawTrades : (rawTrades && rawTrades.database_trades) || [];
+        const activeTf = currentTF.toUpperCase();
+
+        const openTrades = trades.filter((t) => (t.status || t.state || "").toUpperCase() === "OPEN");
+        const openEl = document.getElementById("live-open-trades-info");
+        if (openEl) {
+          openEl.innerHTML = openTrades.length > 0
+            ? `<span class="badge badge-green" style="font-size:11px">● ${openTrades.length} ACTIVE TRADE${openTrades.length > 1 ? "S" : ""}</span>`
+            : `<span class="badge badge-dim" style="font-size:11px">NO ACTIVE TRADES</span>`;
+        }
+
+        trades.forEach((t) => {
+          const isClosed = (t.status || t.state || "").toUpperCase() === "CLOSED";
+          const tTf = String(t.timeframe || (t.signal_id && t.signal_id.includes("_1H_") ? "1H" : (t.signal_id && t.signal_id.includes("_30M_") ? "30M" : (t.signal_id && t.signal_id.includes("_15M_") ? "15M" : "5M")))).toUpperCase();
+          const isBuy = String(t.direction || "").toUpperCase() === "BUY" || String(t.direction || "").toUpperCase() === "LONG";
+          const entryPx = Number(t.entry_price || t.actual_entry || t.target_entry);
+          const slPx = Number(t.stop_loss || t.sl);
+          const tpPx = Number(t.take_profit || t.tp || t.tp1);
+          const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0)));
+
+          // Horizontal price lines for open trades
+          if (!isClosed) {
+            if (Number.isFinite(entryPx) && entryPx > 0) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: entryPx,
+                color: isBuy ? "#00e5ff" : "#f59e0b",
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Solid : 0,
+                axisLabelVisible: true,
+                title: `🎯 [${tTf} ${t.layer || "ENTRY"} ${isBuy ? "BUY" : "SHORT"}] $${entryPx.toFixed(2)}`,
+              });
+              if (pl) _tradePriceLines.push(pl);
+            }
+            if (Number.isFinite(slPx) && slPx > 0) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: slPx,
+                color: "#ef4444",
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Dashed : 1,
+                axisLabelVisible: true,
+                title: `🛑 [${tTf} SL] $${slPx.toFixed(2)}`,
+              });
+              if (pl) _tradePriceLines.push(pl);
+            }
+            if (Number.isFinite(tpPx) && tpPx > 0) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: tpPx,
+                color: "#10b981",
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Dashed : 1,
+                axisLabelVisible: true,
+                title: `🏆 [${tTf} TP] $${tpPx.toFixed(2)}`,
+              });
+              if (pl) _tradePriceLines.push(pl);
+            }
+          }
+
+          // Candlestick markers for trades
+          if (_liveCandles.length > 0) {
+            const rawTs = t.opened_at || t.created_at || t.closed_at;
+            if (rawTs) {
+              const tradeUnix = Math.floor(new Date(rawTs).getTime() / 1000);
+              const nearestCandle = findNearestCandle(_liveCandles, tradeUnix);
+              if (nearestCandle && Math.abs(nearestCandle.time - tradeUnix) < 86400 * 3) {
+                if (!isClosed) {
+                  markers.push({
+                    time: nearestCandle.time,
+                    position: isBuy ? "belowBar" : "aboveBar",
+                    color: isBuy ? "#00e5ff" : "#f59e0b",
+                    shape: isBuy ? "arrowUp" : "arrowDown",
+                    text: `${tTf} ${t.layer || ""} ${isBuy ? "BUY" : "SHORT"} @ $${entryPx.toFixed(2)}`,
+                  });
+                } else {
+                  const won = pnl > 0;
+                  markers.push({
+                    time: nearestCandle.time,
+                    position: won ? "aboveBar" : "belowBar",
+                    color: won ? "#10b981" : "#ef4444",
+                    shape: "circle",
+                    text: won ? `🏆 TP HIT +$${pnl.toFixed(2)}` : `🛑 SL HIT -$${Math.abs(pnl).toFixed(2)}`,
+                  });
+                }
+              }
+            }
+          }
+        });
+      } catch (e) {
+        console.warn("[TV-Live] Error fetching paper trades:", e);
+      }
+    }
+
+    // 2. Fibonacci Retracement Levels Overlay
+    if (_showFib) {
+      try {
+        const res = await fetch(API.base + `/retracement/chart/XAUUSD/${currentTF}?limit=150`);
+        if (res.ok) {
+          const chartData = await res.json();
+          const levs = chartData.fib_levels || {};
+          const retr = levs.fib_retracement;
+          const smc = levs.smc_fib;
+          const trd = levs.fib_trend;
+
+          const fibInfoEl = document.getElementById("live-fib-info");
+
+          if (retr && retr.state && !["NO_SETUP", "COMPLETED", "INVALIDATED"].includes(retr.state)) {
+            if (fibInfoEl) {
+              fibInfoEl.innerHTML = `<span class="badge badge-amber" style="font-size:11px">📐 FIB RETRACEMENT: ${retr.state} (${retr.direction || ""})</span>`;
+            }
+            // Target 1.000
+            if (retr.tp) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(retr.tp),
+                color: "#10b981",
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Solid : 0,
+                axisLabelVisible: true,
+                title: `🏆 FIB TARGET (1.000): $${Number(retr.tp).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+            // L1 0.618
+            if (retr.l1_entry) {
+              const isFilled = retr.l1_state === "FILLED" || retr.l1_state === "TP_HIT";
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(retr.l1_entry),
+                color: "#f59e0b",
+                lineWidth: 2,
+                lineStyle: isFilled ? 0 : 1,
+                axisLabelVisible: true,
+                title: `🎯 L1 (0.618) [${retr.l1_state || "PENDING"}]: $${Number(retr.l1_entry).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+            // L2 0.500
+            if (retr.l2_entry) {
+              const isFilled = retr.l2_state === "FILLED" || retr.l2_state === "TP_HIT";
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(retr.l2_entry),
+                color: "#06b6d4",
+                lineWidth: 1,
+                lineStyle: isFilled ? 0 : 1,
+                axisLabelVisible: true,
+                title: `🎯 L2 (0.500) [${retr.l2_state || "PENDING"}]: $${Number(retr.l2_entry).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+            // L3 0.382
+            if (retr.l3_entry) {
+              const isFilled = retr.l3_state === "FILLED" || retr.l3_state === "TP_HIT";
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(retr.l3_entry),
+                color: "#3b82f6",
+                lineWidth: 1,
+                lineStyle: isFilled ? 0 : 1,
+                axisLabelVisible: true,
+                title: `🎯 L3 (0.382) [${retr.l3_state || "PENDING"}]: $${Number(retr.l3_entry).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+            // SL 0.236
+            if (retr.sl) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(retr.sl),
+                color: "#ef4444",
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Solid : 0,
+                axisLabelVisible: true,
+                title: `🛑 FIB SL (0.236): $${Number(retr.sl).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+            // BOS
+            if (retr.bos) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(retr.bos),
+                color: "#c084fc",
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Dashed : 1,
+                axisLabelVisible: true,
+                title: `⚡️ BOS (${retr.direction || ""}): $${Number(retr.bos).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+          } else if (smc && smc.state && !["NO_SETUP", "COMPLETED", "INVALIDATED"].includes(smc.state)) {
+            if (fibInfoEl) {
+              fibInfoEl.innerHTML = `<span class="badge badge-purple" style="font-size:11px">🏛 SMC WITH FIB: ${smc.state}</span>`;
+            }
+            if (smc.entry) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(smc.entry),
+                color: "#f59e0b",
+                lineWidth: 2,
+                lineStyle: smc.entry_touched ? 0 : 1,
+                axisLabelVisible: true,
+                title: `🎯 0.680 ENTRY: $${Number(smc.entry).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+            if (smc.equilibrium) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(smc.equilibrium),
+                color: "#06b6d4",
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Dotted : 2,
+                axisLabelVisible: true,
+                title: `⚖️ 0.500 EQ: $${Number(smc.equilibrium).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+            if (smc.sl) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(smc.sl),
+                color: "#ef4444",
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Solid : 0,
+                axisLabelVisible: true,
+                title: `🛑 STOP LOSS: $${Number(smc.sl).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+            if (smc.tp) {
+              const pl = safeAddPriceLine(_candleSeries, {
+                price: Number(smc.tp),
+                color: "#10b981",
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle ? LightweightCharts.LineStyle.Solid : 0,
+                axisLabelVisible: true,
+                title: `🏆 TAKE PROFIT: $${Number(smc.tp).toFixed(2)}`,
+              });
+              if (pl) _fibPriceLines.push(pl);
+            }
+          } else if (fibInfoEl) {
+            fibInfoEl.innerHTML = `<span class="badge badge-dim" style="font-size:11px">FIB SETUP: SCANNING</span>`;
+          }
+        }
+      } catch (e) {
+        console.warn("[TV-Live] Error fetching fib levels:", e);
+      }
+    }
+
+    // Set markers on candle series
+    if (_candleSeries) {
+      if (markers.length > 0) {
+        markers.sort((a, b) => a.time - b.time);
+        try {
+          _candleSeries.setMarkers(markers);
+        } catch (e) {
+          console.warn("[TV-Live] Error setting markers:", e);
+        }
+      } else {
+        try { _candleSeries.setMarkers([]); } catch (_) {}
+      }
     }
   }
 
@@ -921,11 +1399,14 @@ Routes["/live"] = (mount) => {
   function applyPayload(payload, seq) {
     if (seq !== _liveSeq) return;   // stale response from a previous timeframe
     if (!payload) return;
-    if (Array.isArray(payload.candles) && payload.candles.length) _liveCandles = payload.candles;
+    if (Array.isArray(payload.candles) && payload.candles.length) {
+      renderCandles(payload.candles, payload.current_price);
+    }
     setStatus(payload.data_status || "NO_DATA");
     const clock = document.getElementById("live-clock");
-    if (clock && payload.data_status) clock.textContent = new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true }) + " IST";
-    redraw();
+    if (clock && payload.data_status) {
+      clock.textContent = new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: true }) + " IST";
+    }
   }
 
   function stopStream() {
@@ -983,6 +1464,7 @@ Routes["/live"] = (mount) => {
     _liveSeq += 1;
     currentTF = tf;
     _liveCandles = [];
+    _hasFitContent = false;
     document.querySelectorAll(".btn[data-tf]").forEach((b) => {
       b.className = `btn ${b.dataset.tf === tf ? "btn-primary" : "btn-ghost"}`;
     });
@@ -990,7 +1472,8 @@ Routes["/live"] = (mount) => {
     if (label) label.textContent = tf.toUpperCase();
     stopStream();
     setStatus("NO_DATA");
-    // Paint from cache immediately (never blocks the page), then open the stream.
+
+    // Paint from cache immediately, then open stream
     const seq = _liveSeq;
     startPolling(tf);
     setTimeout(() => {
@@ -998,41 +1481,111 @@ Routes["/live"] = (mount) => {
       stopStream();
       startStream(tf);
     }, 250);
-  }
-  const switchTF = loadTF;   // timeframe switch with stale-response (seq) guard
 
-  window.__viewCleanup = () => { stopStream(); };
+    // Sync overlays for this timeframe
+    renderOverlays();
+  }
+  const switchTF = loadTF;
+
+  window.__viewCleanup = () => {
+    stopStream();
+    if (_overlayTimer) { clearInterval(_overlayTimer); _overlayTimer = null; }
+    if (_ro) { try { _ro.disconnect(); } catch (_) {} _ro = null; }
+    if (_chart) { try { _chart.remove(); } catch (_) {} _chart = null; }
+  };
 
   mount.innerHTML = `
     <div class="stack">
       <div class="row-between">
-        <div class="section-title">Live Market — XAU/USD · <span id="live-tf-label">15M</span></div>
-        <div class="tf-toolbar">${TFS.map((t) => `<button class="btn ${t === currentTF ? "btn-primary" : "btn-ghost"}" data-tf="${t}">${t.toUpperCase()}</button>`).join("")}</div>
+        <div class="section-title" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span>Live Market — XAU/USD · <span id="live-tf-label">15M</span></span>
+          <span id="live-open-trades-info"></span>
+          <span id="live-fib-info"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div class="tf-toolbar">${TFS.map((t) => `<button class="btn ${t === currentTF ? "btn-primary" : "btn-ghost"}" data-tf="${t}">${t.toUpperCase()}</button>`).join("")}</div>
+          <button class="btn btn-ghost" id="btn-fit-chart" title="Fit Chart Scale" style="font-size:12px;padding:4px 10px">⤢ Fit</button>
+          <button class="btn ${ _showTrades ? "btn-primary" : "btn-ghost"}" id="btn-toggle-trades" style="font-size:11px;padding:4px 8px">Trades</button>
+          <button class="btn ${ _showFib ? "btn-primary" : "btn-ghost"}" id="btn-toggle-fib" style="font-size:11px;padding:4px 8px">Fib Levels</button>
+        </div>
       </div>
       <div class="feed-banner" id="live-feed-banner">
         <span>CONNECTING…</span>
         <span class="update-clock" id="live-clock">—</span>
       </div>
-      <div class="card" style="padding:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:var(--bg-0)">
-        <div class="card-head" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center">
-          <span>Native incremental chart</span>
-          <span class="muted" style="display:flex;align-items:center;gap:8px">
+      <div class="card" style="padding:0;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:#0b0e14;box-shadow:0 10px 30px rgba(0,0,0,0.5)">
+        <div class="card-head" style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.02)">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-weight:600;color:#f8fafc">TradingView Lightweight Chart</span>
+            <span class="badge badge-blue" style="font-size:10px;text-transform:uppercase">MT5 Engine</span>
+          </div>
+          <div class="muted" style="display:flex;align-items:center;gap:8px">
             <span id="live-status-badge" class="badge badge-dim">NO DATA</span>
-            <span style="font-size:11px">SSE stream · polling fallback · cache seed</span>
-          </span>
+            <span style="font-size:11px">SSE real-time stream · 60 FPS</span>
+          </div>
         </div>
-        <div class="card-body" style="padding:8px;height:640px">
-          <canvas id="live-canvas" style="width:100%;height:620px;display:block"></canvas>
+        <div class="card-body" style="padding:0;height:620px;position:relative">
+          <div id="tv-chart-container" style="width:100%;height:620px;position:relative;background:#0b0e14">
+            <div id="tv-chart-legend" style="position:absolute;top:10px;left:14px;z-index:20;font-size:12px;font-family:monospace;pointer-events:none;color:#94a3b8;display:flex;gap:12px;background:rgba(15,23,42,0.85);padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.08);backdrop-filter:blur(4px)">
+              <span id="legend-sym" style="font-weight:700;color:#f8fafc">XAUUSD</span>
+              <span id="legend-ohlc">O: — H: — L: — C: —</span>
+              <span id="legend-chg">—</span>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="live-info-strip" id="live-info-strip"></div>
+      <div class="live-info-strip" id="live-info-strip" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:6px;border:1px solid rgba(255,255,255,0.05);font-size:11px;color:#94a3b8;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+          <span style="font-weight:600;color:#cbd5e1">Chart Legend:</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#00e5ff;display:inline-block"></span> Entry</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#ef4444;display:inline-block"></span> Stop Loss</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#10b981;display:inline-block"></span> Take Profit (1.000 Target)</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#f59e0b;display:inline-block"></span> Fib L1 (0.618)</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#06b6d4;display:inline-block"></span> Fib L2 (0.500)</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#3b82f6;display:inline-block"></span> Fib L3 (0.382)</span>
+        </div>
+        <div><span>Interactive: Pan · Zoom · Hover OHLC</span></div>
+      </div>
     </div>`;
 
+  // Initialize chart instance
+  initChart();
+
+  // Toolbar event listeners
   document.querySelectorAll(".btn[data-tf]").forEach((b) => {
     b.addEventListener("click", () => switchTF(b.dataset.tf));
   });
 
+  const fitBtn = document.getElementById("btn-fit-chart");
+  if (fitBtn) {
+    fitBtn.addEventListener("click", () => {
+      if (_chart) _chart.timeScale().fitContent();
+    });
+  }
+
+  const toggleTradesBtn = document.getElementById("btn-toggle-trades");
+  if (toggleTradesBtn) {
+    toggleTradesBtn.addEventListener("click", () => {
+      _showTrades = !_showTrades;
+      toggleTradesBtn.className = `btn ${_showTrades ? "btn-primary" : "btn-ghost"}`;
+      renderOverlays();
+    });
+  }
+
+  const toggleFibBtn = document.getElementById("btn-toggle-fib");
+  if (toggleFibBtn) {
+    toggleFibBtn.addEventListener("click", () => {
+      _showFib = !_showFib;
+      toggleFibBtn.className = `btn ${_showFib ? "btn-primary" : "btn-ghost"}`;
+      renderOverlays();
+    });
+  }
+
+  // Load initial timeframe
   loadTF(currentTF);
+
+  // Periodic overlays sync every 10 seconds
+  _overlayTimer = setInterval(renderOverlays, 10000);
 };
 
 

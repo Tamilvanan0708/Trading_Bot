@@ -77,35 +77,61 @@ async def _resolve_chart_payload(
     except Exception:  # noqa: BLE001
         pass
 
-    # 2. REST historical data with a SHORT deadline (skipped in fast mode).
+    # 2. Direct MT5 or REST historical data with a SHORT deadline (skipped in fast mode).
     if not fast:
-        try:
-            from app.data.live.binance_history import BinanceHistoryProvider
-            from app.config.settings import get_settings
-            provider = BinanceHistoryProvider(get_settings())
+        from app.config.settings import get_settings
+        from app.config.execution_settings import get_execution_settings
+        settings = get_settings()
+        exec_cfg = get_execution_settings()
+        is_mt5 = (settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
 
-            async def _fetch_rest():
-                return await provider.get_ohlcv(symbol, tf, limit=200)
+        if is_mt5:
+            try:
+                mt5_p = getattr(service, "_mt5_provider", None)
+                if mt5_p is not None:
+                    mt5_bars = await mt5_p.get_ohlcv(symbol, tf, limit=200)
+                    if mt5_bars:
+                        candles = [c.model_dump(mode="json") for c in mt5_bars]
+                        return {
+                            "symbol": symbol,
+                            "timeframe": tf.value,
+                            "timestamp": mt5_bars[-1].timestamp,
+                            "current_price": mt5_bars[-1].close,
+                            "candles": candles,
+                            "closed": candles,
+                            "forming": None,
+                            "candle_count": len(candles),
+                            "data_status": "HEALTHY",
+                        }
+            except Exception as e:
+                logger.warning("[MT5-CHART] Failed to fetch MT5 bars in _resolve_chart_payload: %s", e)
+        else:
+            try:
+                from app.data.live.binance_history import BinanceHistoryProvider
+                provider = BinanceHistoryProvider(settings)
 
-            rest_candles = await asyncio.wait_for(_fetch_rest(), timeout=5.0)
-            if rest_candles:
-                candles = [c.model_dump(mode="json") for c in rest_candles]
-                current_price = rest_candles[-1].close
-                ts = rest_candles[-1].timestamp
-                data_status = "HISTORICAL"
-                return {
-                    "symbol": symbol,
-                    "timeframe": tf.value,
-                    "timestamp": ts,
-                    "current_price": current_price,
-                    "candles": candles,
-                    "closed": candles,
-                    "forming": None,
-                    "candle_count": len(candles),
-                    "data_status": data_status,
-                }
-        except Exception:  # noqa: BLE001
-            pass
+                async def _fetch_rest():
+                    return await provider.get_ohlcv(symbol, tf, limit=200)
+
+                rest_candles = await asyncio.wait_for(_fetch_rest(), timeout=5.0)
+                if rest_candles:
+                    candles = [c.model_dump(mode="json") for c in rest_candles]
+                    current_price = rest_candles[-1].close
+                    ts = rest_candles[-1].timestamp
+                    data_status = "HISTORICAL"
+                    return {
+                        "symbol": symbol,
+                        "timeframe": tf.value,
+                        "timestamp": ts,
+                        "current_price": current_price,
+                        "candles": candles,
+                        "closed": candles,
+                        "forming": None,
+                        "candle_count": len(candles),
+                        "data_status": data_status,
+                    }
+            except Exception:  # noqa: BLE001
+                pass
 
     # 3. Persisted research cache (fast, local — used by fast mode so the page
     #    paints immediately, and as a final fallback in full mode).
