@@ -116,8 +116,48 @@ class MT5MarketDataProvider(LiveMarketDataProvider, BrokerAccountProvider):
                         f"MT5 login failed: {self._mt5.last_error()}"
                     )
             self._connected = True
+            self._resolve_symbol()
             logger.info("MT5 provider connected (symbol=%s).", self._symbol)
             return True
+
+    def _resolve_symbol(self) -> str:
+        """Ensure self._symbol is valid and selected in MT5 MarketWatch.
+        Tries self._symbol first; if unavailable, probes common broker Gold aliases."""
+        candidates = [self._symbol]
+        try:
+            from app.config.execution_settings import get_execution_settings
+            cfg_sym = getattr(get_execution_settings(), "mt5_symbol", None)
+            if cfg_sym and cfg_sym not in candidates:
+                candidates.insert(0, cfg_sym)
+        except Exception:
+            pass
+
+        for alias in ("XAUUSD-VIP", "XAUUSD", "XAUUSD.m", "GOLD", "XAUUSDm"):
+            if alias not in candidates:
+                candidates.append(alias)
+
+        for sym in candidates:
+            if not sym:
+                continue
+            try:
+                info = self._mt5.symbol_info(sym)
+                if info is not None:
+                    self._mt5.symbol_select(sym, True)
+                    if self._symbol != sym:
+                        logger.info("[MT5-SYMBOL] Auto-resolved broker symbol '%s' -> '%s'", self._symbol, sym)
+                        self._symbol = sym
+                    return sym
+            except Exception:
+                pass
+
+        return self._symbol
+
+    def _sanitize_symbol(self, symbol: str) -> str:
+        if symbol == self._symbol:
+            return symbol
+        if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
+            return self._symbol
+        return symbol
 
     def disconnect(self) -> None:
         with self._call_lock:
@@ -178,6 +218,7 @@ class MT5MarketDataProvider(LiveMarketDataProvider, BrokerAccountProvider):
     # ------------------------------------------------------------------
 
     async def get_latest_price(self, symbol: str) -> float:
+        symbol = self._sanitize_symbol(symbol)
         tick = await self.get_tick(symbol)
         if tick is None:
             raise DataProviderError(f"No tick available for {symbol}.")
@@ -191,6 +232,7 @@ class MT5MarketDataProvider(LiveMarketDataProvider, BrokerAccountProvider):
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[Candle]:
+        symbol = self._sanitize_symbol(symbol)
         mt5_tf = self._to_mt5_timeframe(timeframe)
         if start_time is not None:
             end = end_time or datetime.now(timezone.utc)
@@ -217,6 +259,7 @@ class MT5MarketDataProvider(LiveMarketDataProvider, BrokerAccountProvider):
         as_of_time: datetime | None = None,
         m15_limit: int = 400,
     ) -> MultiTimeframeSnapshot:
+        symbol = self._sanitize_symbol(symbol)
         m15 = await self.get_ohlcv(symbol, TimeFrame.M15, limit=m15_limit)
         if not m15:
             raise DataProviderError(f"No M15 data available for {symbol}.")
@@ -248,6 +291,7 @@ class MT5MarketDataProvider(LiveMarketDataProvider, BrokerAccountProvider):
     # ------------------------------------------------------------------
 
     async def get_tick(self, symbol: str) -> Tick | None:
+        symbol = self._sanitize_symbol(symbol)
         info = await self._call_mt5(self._mt5.symbol_info_tick, symbol)
         if info is None:
             return None
@@ -266,6 +310,7 @@ class MT5MarketDataProvider(LiveMarketDataProvider, BrokerAccountProvider):
         )
 
     async def get_spread(self, symbol: str) -> float:
+        symbol = self._sanitize_symbol(symbol)
         tick = await self.get_tick(symbol)
         if tick is not None and tick.spread > 0:
             return tick.spread

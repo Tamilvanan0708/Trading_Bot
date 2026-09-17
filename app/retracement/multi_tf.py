@@ -143,15 +143,38 @@ class RetracementMultiTFMonitor:
 
         try:
             from app.config.settings import get_settings
+            from app.config.execution_settings import get_execution_settings
+            from app.data.live.service import get_live_service
             from app.data.live.binance_history import BinanceHistoryProvider
-            provider = BinanceHistoryProvider(get_settings())
+
+            settings = get_settings()
+            exec_cfg = get_execution_settings()
+            is_mt5 = (settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+
+            provider = None
+            if is_mt5:
+                live_svc = get_live_service()
+                provider = getattr(live_svc, "_mt5_provider", None)
+                if provider is None or not getattr(provider, "_connected", False):
+                    from app.data.mt5_provider import MT5DataProvider
+                    provider = MT5DataProvider(settings)
+                    try:
+                        await provider.connect_async()
+                    except Exception as exc:
+                        logger.warning("[RETR-MULTI] MT5 connect in bootstrap failed: %s", exc)
+            elif not is_mt5:
+                provider = BinanceHistoryProvider(settings)
+
+            if provider is None:
+                return getattr(self, "_cached_hist_candles", {})
+
             result = {}
 
             tf_limits = {
-                "5m": 120,
-                "15m": 100,
-                "30m": 80,
-                "1h": 60,
+                "5m": 200,
+                "15m": 200,
+                "30m": 120,
+                "1h": 100,
                 "4h": 50,
             }
 

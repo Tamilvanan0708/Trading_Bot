@@ -81,9 +81,18 @@ class LiveMarketDataService:
     ) -> None:
         self.settings = settings or get_settings()
         self.registry = FeedRegistry.get_instance()
-        self._historical_provider = historical_provider
-
         self._symbol = self.settings.DEFAULT_SYMBOL
+        # Auto-resolve symbol to broker symbol (e.g. XAUUSD-VIP) when MT5 is provider or bridge enabled
+        try:
+            from app.config.execution_settings import get_execution_settings
+            exec_cfg = get_execution_settings()
+            if getattr(exec_cfg, "mt5_bridge_enabled", False) or self.settings.LIVE_FEED_PROVIDER == "mt5" or self.settings.MT5_ENABLED:
+                if getattr(exec_cfg, "mt5_symbol", None):
+                    self._symbol = exec_cfg.mt5_symbol
+                elif getattr(self.settings, "MT5_SYMBOL", None):
+                    self._symbol = self.settings.MT5_SYMBOL
+        except Exception:
+            pass
         self._tick_buffer_minutes = 15
         self._lock = asyncio.Lock()
         self._closed_15m: list[Candle] = []
@@ -229,13 +238,18 @@ class LiveMarketDataService:
     async def _start_mt5_polling(self) -> None:
         """Poll MT5 ticks and push them through the normal aggregation pipeline."""
         from app.data.mt5_provider import MT5MarketDataProvider
+        from app.config.execution_settings import get_execution_settings
 
-        if not self.settings.MT5_ENABLED:
-            logger.info("MT5 provider requested but MT5_ENABLED=false; skipping.")
+        exec_cfg = get_execution_settings()
+        mt5_allowed = self.settings.MT5_ENABLED or (self.settings.LIVE_FEED_PROVIDER == "mt5") or getattr(exec_cfg, "mt5_bridge_enabled", False)
+        if not mt5_allowed:
+            logger.info("MT5 provider requested but MT5 is disabled; skipping.")
             return
+
+        target_sym = getattr(exec_cfg, "mt5_symbol", None) or self.settings.MT5_SYMBOL or self._symbol
         try:
             provider = MT5MarketDataProvider(
-                symbol=self._symbol,
+                symbol=target_sym,
                 login=self.settings.MT5_LOGIN,
                 server=self.settings.MT5_SERVER,
                 password=self.settings.MT5_PASSWORD,
@@ -244,6 +258,8 @@ class LiveMarketDataService:
             )
             await provider.connect_async()
             self._mt5_provider = provider
+            self._symbol = provider._symbol
+            logger.info("[MT5-POLLING] Polling started on symbol %s", self._symbol)
         except Exception as exc:  # noqa: BLE001
             logger.error("MT5 connection failed: %s", exc)
             return
@@ -358,13 +374,18 @@ class LiveMarketDataService:
     async def _load_historical_base(self) -> None:
         """Load a REAL base 15M series (MT5 or Binance REST) with validation."""
         candles: list[Candle] = []
-        if self.settings.LIVE_FEED_PROVIDER == "mt5" and self.settings.MT5_ENABLED:
+        from app.config.execution_settings import get_execution_settings
+        exec_cfg = get_execution_settings()
+        is_mt5 = (self.settings.LIVE_FEED_PROVIDER == "mt5") or self.settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+
+        if is_mt5:
             try:
                 from app.data.mt5_provider import MT5MarketDataProvider
                 mt5_p = getattr(self, "_mt5_provider", None)
                 if mt5_p is None:
+                    target_sym = getattr(exec_cfg, "mt5_symbol", None) or self.settings.MT5_SYMBOL or self._symbol
                     mt5_p = MT5MarketDataProvider(
-                        symbol=self._symbol,
+                        symbol=target_sym,
                         login=self.settings.MT5_LOGIN,
                         server=self.settings.MT5_SERVER,
                         password=self.settings.MT5_PASSWORD,
@@ -373,15 +394,17 @@ class LiveMarketDataService:
                     )
                     await mt5_p.connect_async()
                     self._mt5_provider = mt5_p
+                    self._symbol = mt5_p._symbol
                 candles = await mt5_p.get_ohlcv(self._symbol, TimeFrame.M15, limit=800)
-                self._gap_count = 0
-                self._dup_count = 0
-                self._ooo_count = 0
-                logger.info("[MT5-HISTORY] Successfully loaded %d 15M candles directly from MT5.", len(candles))
+                if candles:
+                    self._gap_count = 0
+                    self._dup_count = 0
+                    self._ooo_count = 0
+                    logger.info("[MT5-HISTORY] Successfully loaded %d 15M candles directly from MT5 (%s).", len(candles), self._symbol)
             except Exception as exc:  # noqa: BLE001
                 logger.error("[MT5-HISTORY] Failed to load from MT5: %s", exc)
 
-        if not candles:
+        if not candles and not is_mt5:
             provider = self._historical_provider
             if provider is None:
                 provider = BinanceHistoryProvider(self.settings)
@@ -411,11 +434,16 @@ class LiveMarketDataService:
                 return
 
         if not candles:
-            self._last_history_error = self._last_history_error or "Binance REST returned no candles"
+            # Check local JSON fallback before giving up
+            candles = await asyncio.to_thread(self._load_local_json_fallback_15m)
+
+        if not candles:
+            err_msg = "MT5 returned no 15M bars" if is_mt5 else (self._last_history_error or "Market data returned no candles")
+            self._last_history_error = err_msg
             self._closed_15m = []
-            self._refresh_status = "FAILED"
-            self._refresh_error = self._last_history_error
-            logger.error("DEGRADED: Binance REST returned no real 15M candles — no fallback applied.")
+            self._refresh_status = "FAILED" if not is_mt5 else "RUNNING"
+            self._refresh_error = err_msg
+            logger.warning("Historical data load returned no candles: %s", err_msg)
             return
 
         # Join historical candles with future live candles:
@@ -446,16 +474,21 @@ class LiveMarketDataService:
     async def _load_5m_base(self) -> None:
         """Load a REAL 5M base series (MT5 or Binance REST) for the 5m live chart."""
         candles: list[Candle] = []
-        if self.settings.LIVE_FEED_PROVIDER == "mt5" and self.settings.MT5_ENABLED:
+        from app.config.execution_settings import get_execution_settings
+        exec_cfg = get_execution_settings()
+        is_mt5 = (self.settings.LIVE_FEED_PROVIDER == "mt5") or self.settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+
+        if is_mt5:
             try:
                 mt5_p = getattr(self, "_mt5_provider", None)
                 if mt5_p is not None:
                     candles = await mt5_p.get_ohlcv(self._symbol, TimeFrame.M5, limit=400)
-                    logger.info("[MT5-HISTORY] Successfully loaded %d 5M candles directly from MT5.", len(candles))
+                    if candles:
+                        logger.info("[MT5-HISTORY] Successfully loaded %d 5M candles directly from MT5.", len(candles))
             except Exception as exc:  # noqa: BLE001
                 logger.error("[MT5-HISTORY] Failed to load 5M candles from MT5: %s", exc)
 
-        if not candles:
+        if not candles and not is_mt5:
             provider = self._historical_provider
             if provider is None:
                 provider = BinanceHistoryProvider(self.settings)
@@ -515,8 +548,12 @@ class LiveMarketDataService:
 
         Returns a dict with ``status`` (SUCCESS / FAILED) and metadata.
         """
-        provider = self._historical_provider
-        if provider is None:
+        from app.config.execution_settings import get_execution_settings
+        exec_cfg = get_execution_settings()
+        is_mt5 = (self.settings.LIVE_FEED_PROVIDER == "mt5") or self.settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+
+        provider = getattr(self, "_historical_provider", None)
+        if provider is None and not is_mt5:
             provider = BinanceHistoryProvider(self.settings)
 
         self._refresh_status = "RUNNING"
@@ -526,7 +563,7 @@ class LiveMarketDataService:
         limit = min(max(int(lookback * 4), self.settings.LIVE_HISTORY_MIN_CANDLES), 800)
 
         fetched: list[Candle] = []
-        if self.settings.LIVE_FEED_PROVIDER == "mt5" and self.settings.MT5_ENABLED:
+        if is_mt5:
             try:
                 mt5_p = getattr(self, "_mt5_provider", None)
                 if mt5_p is not None:
@@ -535,6 +572,17 @@ class LiveMarketDataService:
                 logger.error("[MT5-HISTORY] Refresh error: %s", exc)
 
         if not fetched:
+            if is_mt5:
+                # MT5 is active but returned no bars temporarily; do NOT call Binance with MT5 symbols (e.g. XAUUSD-VIP)
+                logger.warning("[MT5-HISTORY] Refresh yielded 0 bars from MT5; keeping existing candles without Binance fallback.")
+                if self._closed_15m:
+                    return {"status": "SUCCESS", "count": len(self._closed_15m), "source": "mt5_cached"}
+                self._refresh_status = "FAILED"
+                self._refresh_error = "MT5 returned no bars"
+                return {"status": "FAILED", "error": "MT5 returned no bars"}
+
+            if provider is None:
+                provider = BinanceHistoryProvider(self.settings)
             try:
                 fetched, report = await provider.load_base_15m(limit=limit)
             except Exception as exc:
@@ -544,18 +592,18 @@ class LiveMarketDataService:
                 # the data-quality gate can block new trades.
                 self._refresh_status = "FAILED"
                 self._refresh_error = str(exc)
-            if self._closed_15m:
-                self._history_fallback = True
-                logger.warning(
-                    "[HISTORY] Refresh FAILED (%s); serving %d stale in-memory candles "
-                    "with degraded status. _last_history_refresh_at NOT advanced.",
-                    exc, len(self._closed_15m),
-                )
-            else:
-                self._history_fallback = False
-                logger.error("[HISTORY] Refresh FAILED and no candles in memory. Reason: %s", exc)
-            logger.error("[SAFETY] Paper trading remains BLOCKED while data is degraded")
-            return {"status": "FAILED", "error": str(exc)}
+                if self._closed_15m:
+                    self._history_fallback = True
+                    logger.warning(
+                        "[HISTORY] Refresh FAILED (%s); serving %d stale in-memory candles "
+                        "with degraded status. _last_history_refresh_at NOT advanced.",
+                        exc, len(self._closed_15m),
+                    )
+                else:
+                    self._history_fallback = False
+                    logger.error("[HISTORY] Refresh FAILED and no candles in memory. Reason: %s", exc)
+                logger.error("[SAFETY] Paper trading remains BLOCKED while data is degraded")
+                return {"status": "FAILED", "error": str(exc)}
 
         now = datetime.now(timezone.utc)
         cutoff = _bucket_start(now, self._tick_buffer_minutes)
@@ -598,10 +646,12 @@ class LiveMarketDataService:
         # Also refresh 5M candles for low-timeframe strategies & chart
         try:
             mt5_p = getattr(self, "_mt5_provider", None)
-            if self.settings.LIVE_FEED_PROVIDER == "mt5" and mt5_p is not None:
+            if is_mt5 and mt5_p is not None:
                 fetched_5m = await mt5_p.get_ohlcv(self._symbol, TimeFrame.M5, limit=200)
-            else:
+            elif not is_mt5:
                 fetched_5m = await provider.get_ohlcv(self._symbol, TimeFrame.M5, limit=200)
+            else:
+                fetched_5m = []
             if fetched_5m:
                 cutoff_5m = _bucket_start(now, 5)
                 async with self._lock:

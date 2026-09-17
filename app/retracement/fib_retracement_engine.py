@@ -459,8 +459,28 @@ class DualRetracementEngine:
             if (setup.sl_price - setup.entry_price) < 4.5:
                 setup.sl_price = round(setup.entry_price + 4.5, 2)
 
+    def _min_continuation_pullback(self) -> float:
+        close = self._candles[-1].close if self._candles else 0.0
+        tf = str(self.timeframe).lower()
+        if close < 500.0:
+            return 4.0
+        is_gold = close > 1000.0
+        if is_gold:
+            if tf in ("1m", "3m"):
+                return 2.0
+            if tf == "5m":
+                return 4.0
+            if tf == "15m":
+                return 6.0
+            return 10.0
+        if tf in ("1m", "3m"):
+            return 0.0005
+        if tf == "5m":
+            return 0.0010
+        return 0.0020
+
     def _detect_fresh_bos_if_available(self, candle: Candle, direction: str) -> list[RetracementEvent]:
-        """Detect if a genuine macro BOS formed while waiting for entry.
+        """Detect if a genuine macro or continuation BOS formed while waiting for entry.
         Filters out micro-swings (< min_impulse_range) to keep structural anchor locked.
         """
         setup = self.setup
@@ -476,26 +496,69 @@ class DualRetracementEngine:
 
         lookback_bars = self._anchor_lookback_bars()
 
+        tf_str = str(self.timeframe).lower()
+        is_short_tf = tf_str in ("1m", "3m", "5m")
+
         if direction == "LONG":
             last_sh = confirmed_highs[-1]
             if last_sh.timestamp > setup.bos_timestamp and last_sh.price > setup.bos_price:
                 if len(self._candles) >= 2 and self._candles[-2].close > last_sh.price:
                     return []
                 if candle.close > last_sh.price and last_sh.index < len(self._candles) - 1:
-                    # Look for swing lows formed AFTER the previous BOS timestamp to isolate the current leg
-                    recent_lows = [
-                        s for s in confirmed_lows
-                        if s.timestamp >= setup.bos_timestamp and s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
-                    ]
-                    if recent_lows:
-                        anchor_low = min(recent_lows, key=lambda s: s.price)
-                    else:
-                        lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
-                        if not lows_before:
-                            return []
-                        anchor_low = min(lows_before, key=lambda s: s.price)
+                    anchor_low_price = None
+                    anchor_low_ts = None
+                    min_pb = self._min_continuation_pullback()
 
-                    anchor_low_price = self._sanitize_anchor_swing(anchor_low.index, "LOW")
+                    if is_short_tf:
+                        # Fast scalping (1m/3m/5m): Staircase Higher Low rollover
+                        pullback_lows = [
+                            s for s in confirmed_lows
+                            if s.timestamp >= last_sh.timestamp and s.index < len(self._candles) - 1
+                            and s.price > setup.point_2_price and (last_sh.price - s.price) >= min_pb
+                        ]
+                        if pullback_lows:
+                            cand = min(pullback_lows, key=lambda s: s.price)
+                            anchor_low_price = self._sanitize_anchor_swing(cand.index, "LOW")
+                            anchor_low_ts = cand.timestamp
+
+                        if anchor_low_price is None:
+                            dip_candles = self._candles[last_sh.index:len(self._candles) - 1]
+                            if dip_candles:
+                                dip_candle = min(dip_candles, key=lambda c: c.low)
+                                if dip_candle.low > setup.point_2_price and (last_sh.price - dip_candle.low) >= min_pb:
+                                    anchor_low_price = round(dip_candle.low, 2)
+                                    anchor_low_ts = dip_candle.timestamp
+
+                        if anchor_low_price is None:
+                            recent_hls = [
+                                s for s in confirmed_lows
+                                if s.timestamp >= setup.bos_timestamp and s.price > setup.point_2_price and s.index <= last_sh.index
+                            ]
+                            if recent_hls:
+                                best_hl = recent_hls[-1]
+                                if (last_sh.price - best_hl.price) >= min_pb:
+                                    anchor_low_price = self._sanitize_anchor_swing(best_hl.index, "LOW")
+                                    anchor_low_ts = best_hl.timestamp
+                    else:
+                        # Higher timeframes (15m/30m/1h): keep macro structural base anchor
+                        recent_lows = [
+                            s for s in confirmed_lows
+                            if s.timestamp >= setup.bos_timestamp and s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars
+                        ]
+                        if recent_lows:
+                            cand = min(recent_lows, key=lambda s: s.price)
+                            anchor_low_price = self._sanitize_anchor_swing(cand.index, "LOW")
+                            anchor_low_ts = cand.timestamp
+                        else:
+                            lows_before = [s for s in confirmed_lows if s.index <= last_sh.index and (last_sh.index - s.index) <= lookback_bars]
+                            if lows_before:
+                                cand = min(lows_before, key=lambda s: s.price)
+                                anchor_low_price = self._sanitize_anchor_swing(cand.index, "LOW")
+                                anchor_low_ts = cand.timestamp
+
+                    if anchor_low_price is None:
+                        return []
+
                     leg_range = candle.high - anchor_low_price
                     if leg_range < self._min_impulse_range():
                         return []
@@ -510,7 +573,7 @@ class DualRetracementEngine:
                         bos_price=last_sh.price,
                         bos_timestamp=last_sh.timestamp,
                         point_2_price=anchor_low_price,
-                        point_2_timestamp=anchor_low.timestamp,
+                        point_2_timestamp=anchor_low_ts or candle.timestamp,
                         current_high_price=candle.high,
                         current_high_timestamp=candle.timestamp,
                         dynamic_tp=candle.high,
@@ -518,6 +581,7 @@ class DualRetracementEngine:
                     )
                     self._apply_bullish_fib(new_setup, anchor_low_price, candle.high)
                     self.setup = new_setup
+                    self._last_traded_bos_high_ts = last_sh.timestamp
                     self._candles_since_bos = 0
                     return [RetracementEvent(
                         setup_id=new_setup.setup_id,
@@ -526,7 +590,7 @@ class DualRetracementEngine:
                         state_after=RetracementState.TP_DYNAMIC,
                         timestamp=candle.timestamp,
                         price=candle.close,
-                        metadata={"rollover": True, "reason": "Fresh micro BOS replacement"}
+                        metadata={"rollover": True, "reason": "Rollover to Continuation BOS"}
                     )]
 
         elif direction == "SHORT":
@@ -535,19 +599,60 @@ class DualRetracementEngine:
                 if len(self._candles) >= 2 and self._candles[-2].close < last_sl.price:
                     return []
                 if candle.close < last_sl.price and last_sl.index < len(self._candles) - 1:
-                    recent_highs = [
-                        s for s in confirmed_highs
-                        if s.timestamp >= setup.bos_timestamp and s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
-                    ]
-                    if recent_highs:
-                        anchor_high = max(recent_highs, key=lambda s: s.price)
-                    else:
-                        highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
-                        if not highs_before:
-                            return []
-                        anchor_high = max(highs_before, key=lambda s: s.price)
+                    anchor_high_price = None
+                    anchor_high_ts = None
+                    min_pb = self._min_continuation_pullback()
 
-                    anchor_high_price = self._sanitize_anchor_swing(anchor_high.index, "HIGH")
+                    if is_short_tf:
+                        # Fast scalping (1m/3m/5m): Staircase Lower High rollover
+                        pullback_highs = [
+                            s for s in confirmed_highs
+                            if s.timestamp >= last_sl.timestamp and s.index < len(self._candles) - 1
+                            and s.price < setup.point_2_price and (s.price - last_sl.price) >= min_pb
+                        ]
+                        if pullback_highs:
+                            cand = max(pullback_highs, key=lambda s: s.price)
+                            anchor_high_price = self._sanitize_anchor_swing(cand.index, "HIGH")
+                            anchor_high_ts = cand.timestamp
+
+                        if anchor_high_price is None:
+                            rally_candles = self._candles[last_sl.index:len(self._candles) - 1]
+                            if rally_candles:
+                                rally_candle = max(rally_candles, key=lambda c: c.high)
+                                if rally_candle.high < setup.point_2_price and (rally_candle.high - last_sl.price) >= min_pb:
+                                    anchor_high_price = round(rally_candle.high, 2)
+                                    anchor_high_ts = rally_candle.timestamp
+
+                        if anchor_high_price is None:
+                            recent_lhs = [
+                                s for s in confirmed_highs
+                                if s.timestamp >= setup.bos_timestamp and s.price < setup.point_2_price and s.index <= last_sl.index
+                            ]
+                            if recent_lhs:
+                                best_lh = recent_lhs[-1]
+                                if (best_lh.price - last_sl.price) >= min_pb:
+                                    anchor_high_price = self._sanitize_anchor_swing(best_lh.index, "HIGH")
+                                    anchor_high_ts = best_lh.timestamp
+                    else:
+                        # Higher timeframes (15m/30m/1h): keep macro structural base anchor
+                        recent_highs = [
+                            s for s in confirmed_highs
+                            if s.timestamp >= setup.bos_timestamp and s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars
+                        ]
+                        if recent_highs:
+                            cand = max(recent_highs, key=lambda s: s.price)
+                            anchor_high_price = self._sanitize_anchor_swing(cand.index, "HIGH")
+                            anchor_high_ts = cand.timestamp
+                        else:
+                            highs_before = [s for s in confirmed_highs if s.index <= last_sl.index and (last_sl.index - s.index) <= lookback_bars]
+                            if highs_before:
+                                cand = max(highs_before, key=lambda s: s.price)
+                                anchor_high_price = self._sanitize_anchor_swing(cand.index, "HIGH")
+                                anchor_high_ts = cand.timestamp
+
+                    if anchor_high_price is None:
+                        return []
+
                     leg_range = anchor_high_price - candle.low
                     if leg_range < self._min_impulse_range():
                         return []
@@ -562,7 +667,7 @@ class DualRetracementEngine:
                         bos_price=last_sl.price,
                         bos_timestamp=last_sl.timestamp,
                         point_2_price=anchor_high_price,
-                        point_2_timestamp=anchor_high.timestamp,
+                        point_2_timestamp=anchor_high_ts or candle.timestamp,
                         current_high_price=candle.low,
                         current_high_timestamp=candle.timestamp,
                         dynamic_tp=candle.low,
@@ -570,6 +675,7 @@ class DualRetracementEngine:
                     )
                     self._apply_bearish_fib(new_setup, anchor_high_price, candle.low)
                     self.setup = new_setup
+                    self._last_traded_bos_low_ts = last_sl.timestamp
                     self._candles_since_bos = 0
                     return [RetracementEvent(
                         setup_id=new_setup.setup_id,
@@ -578,22 +684,25 @@ class DualRetracementEngine:
                         state_after=RetracementState.TP_DYNAMIC,
                         timestamp=candle.timestamp,
                         price=candle.close,
-                        metadata={"rollover": True, "reason": "Fresh micro BOS replacement"}
+                        metadata={"rollover": True, "reason": "Rollover to Continuation BOS"}
                     )]
 
         return []
 
     def _max_expiry_bars(self) -> int:
+        close = self._candles[-1].close if self._candles else 0.0
+        if close < 500.0:
+            return 80
         tf = str(self.timeframe).lower()
-        if tf == "1m":
-            return 30
-        if tf == "3m":
-            return 30
-        if tf == "5m":
-            return 36
+        if tf in ("1m", "3m", "5m"):
+            return 15  # 15 bars (75 mins for 5m)
         if tf == "15m":
-            return 48
-        return 80
+            return 20  # 20 bars (5 hours)
+        if tf == "30m":
+            return 24  # 24 bars (12 hours)
+        if tf == "1h":
+            return 30  # 30 bars (30 hours)
+        return 30
 
     def _max_trade_bars(self) -> int:
         tf = str(self.timeframe).lower()
@@ -761,7 +870,7 @@ class DualRetracementEngine:
                 fresh_events = self._detect_fresh_bos_if_available(candle, "LONG")
                 if fresh_events:
                     setup.state = RetracementState.INVALIDATED
-                    setup.invalidation_reason = "Superceded by fresh structural BOS."
+                    setup.invalidation_reason = "Rollover to Continuation BOS."
                     self._archived_setups.append(setup)
                     return fresh_events
 
@@ -828,7 +937,7 @@ class DualRetracementEngine:
                 fresh_events = self._detect_fresh_bos_if_available(candle, "SHORT")
                 if fresh_events:
                     setup.state = RetracementState.INVALIDATED
-                    setup.invalidation_reason = "Superceded by fresh structural BOS."
+                    setup.invalidation_reason = "Rollover to Continuation BOS."
                     self._archived_setups.append(setup)
                     return fresh_events
 
