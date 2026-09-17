@@ -159,7 +159,7 @@ def _build_hybrid_close_msg(
     exec_cfg = get_execution_settings()
     is_cent = (exec_cfg.account_currency == "cent")
 
-    is_be = exit_reason == "BREAKEVEN_HIT" or (abs(pts) <= 0.5 and exit_reason != "TP_HIT")
+    is_be = exit_reason in ("BREAKEVEN_HIT", "BREAKEVEN") or (abs(pts) <= 0.5 and exit_reason not in ("TP_HIT", "SL_HIT"))
     is_profit = pts > 0.5 or exit_reason in ("TP_HIT", "TRAILING_SL_HIT")
 
     if is_be:
@@ -387,14 +387,29 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     # Only sweep if engine has no active setup right now
                     if getattr(_engine, "setup", None) is not None:
                         continue
-                    # Determine exit price and reason from last_completed
+
+                    # Safety Guard 1: NEVER sweep freshly opened trades (< 15 minutes / 900 seconds)
+                    # A live trade must have ample breathing room to reach full TP or SL!
+                    if _ot.opened_at:
+                        _ot_tz = _ot.opened_at if _ot.opened_at.tzinfo else _ot.opened_at.replace(tzinfo=timezone.utc)
+                        if (datetime.now(timezone.utc) - _ot_tz).total_seconds() < 900:
+                            continue
+
+                    # Determine exit price and reason from last_completed ONLY if it matches THIS setup!
                     _lc = getattr(_engine, "last_completed", None)
                     if _lc is None and getattr(_slot, "last_completed", None) is not None:
                         _lc = _slot.last_completed
-                    if _lc is None and _ot.opened_at:
-                        _ot_tz = _ot.opened_at if _ot.opened_at.tzinfo else _ot.opened_at.replace(tzinfo=timezone.utc)
-                        if (datetime.now(timezone.utc) - _ot_tz).total_seconds() < 60:
-                            continue
+
+                    _lc_matches = False
+                    if _lc is not None and getattr(_lc, "point_2_price", None) is not None:
+                        _p2_str = str(int(_lc.point_2_price))
+                        if _p2_str in (_ot.signal_id or ""):
+                            _lc_matches = True
+
+                    if not _lc_matches:
+                        # Old setup from hours ago does NOT belong to this trade! Hold active trade for TP/SL.
+                        continue
+
                     _outcome = getattr(_lc, "outcome", None) if _lc else None
                     _locked_tp = getattr(_lc, "locked_tp", None) if _lc else None
                     _sl_price = getattr(_lc, "sl_price", None) if _lc else None
@@ -407,8 +422,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         _exit_px = float(_locked_tp)
                         _exit_reason = "TP_HIT"
                     else:
-                        _exit_px = fib_tf_price.get(_ot_tf) or live_price or _entry_px
-                        _exit_reason = "ENGINE_RESET_ORPHAN"
+                        continue  # Never force-close on unconfirmed outcome
                     _pts = round(
                         (_exit_px - _entry_px) if _direction == "LONG" else (_entry_px - _exit_px), 2
                     ) if _entry_px else 0.0
