@@ -235,9 +235,15 @@ async def execute_safe_update(remote_hash: str) -> None:
     )
     await send_tg_notice(init_msg)
 
-    # 2. Run git pull
+    # 2. Run git pull (with automatic conflict resolution for local runtime files)
     t0 = time.time()
     rc, pull_out = run_cmd("git pull origin main", timeout=60)
+    if rc != 0 and ("would be overwritten by merge" in pull_out or "local changes" in pull_out):
+        logger.warning("[AUTO-UPDATER] Local file conflict detected during pull. Discarding local data changes and retrying...")
+        run_cmd("git checkout -- data/execution_settings.json", timeout=15)
+        run_cmd("git stash", timeout=15)
+        rc, pull_out = run_cmd("git pull origin main", timeout=60)
+
     if rc != 0:
         logger.error("[AUTO-UPDATER] git pull failed: %s", pull_out)
         err_msg = (
