@@ -235,18 +235,19 @@ async def execute_safe_update(remote_hash: str) -> None:
     )
     await send_tg_notice(init_msg)
 
-    # 2. Run git pull (with automatic conflict resolution for local runtime files)
+    # 2. Run git pull (bulletproof sync with auto-stash & reset fallback)
     t0 = time.time()
-    # Preemptively discard local runtime modifications to tracked config/data files so pull never conflicts
-    run_cmd("git checkout -- data/execution_settings.json", timeout=15)
+    # Stash any local runtime changes so git pull never conflicts with untracked/modified local files
+    run_cmd("git stash --include-untracked", timeout=15)
     rc, pull_out = run_cmd("git pull origin main", timeout=60)
-    if rc != 0 and ("would be overwritten by merge" in pull_out or "local changes" in pull_out or "error:" in pull_out.lower()):
-        logger.warning("[AUTO-UPDATER] Local file conflict detected during pull. Force-resetting to origin/main...")
+    if rc != 0:
+        logger.warning("[AUTO-UPDATER] Normal pull failed (%s). Forcing clean sync via reset --hard...", pull_out[:100])
         run_cmd("git fetch origin main", timeout=30)
-        run_cmd("git reset --hard origin/main", timeout=20)
-        rc, pull_out = run_cmd("git status", timeout=15)
+        rc, reset_out = run_cmd("git reset --hard origin/main", timeout=20)
         if rc == 0:
-            pull_out = f"Reset hard to origin/main ({remote_hash})"
+            pull_out = f"Cleanly synced to origin/main ({remote_hash})"
+        else:
+            pull_out = reset_out
 
     if rc != 0:
         logger.error("[AUTO-UPDATER] git pull failed: %s", pull_out)

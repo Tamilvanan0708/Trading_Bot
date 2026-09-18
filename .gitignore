@@ -21,6 +21,7 @@ data/*.db-shm
 data/*.db-wal
 
 # Data
+data/execution_settings.json
 data/raw/*.csv
 data/processed/*.json
 data/research/*.json
