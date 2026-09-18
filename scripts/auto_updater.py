@@ -97,7 +97,7 @@ def has_open_trades() -> bool:
     # 3. Check SQLite DB directly
     try:
         import sqlite3
-        for db_name in ["trading.db", "trading_view.db"]:
+        for db_name in ["xauusd_agent.db", "trading.db", "trading_view.db"]:
             db_file = REPO_ROOT / "data" / db_name
             if db_file.exists():
                 conn = sqlite3.connect(str(db_file))
@@ -237,12 +237,16 @@ async def execute_safe_update(remote_hash: str) -> None:
 
     # 2. Run git pull (with automatic conflict resolution for local runtime files)
     t0 = time.time()
+    # Preemptively discard local runtime modifications to tracked config/data files so pull never conflicts
+    run_cmd("git checkout -- data/execution_settings.json", timeout=15)
     rc, pull_out = run_cmd("git pull origin main", timeout=60)
-    if rc != 0 and ("would be overwritten by merge" in pull_out or "local changes" in pull_out):
-        logger.warning("[AUTO-UPDATER] Local file conflict detected during pull. Discarding local data changes and retrying...")
-        run_cmd("git checkout -- data/execution_settings.json", timeout=15)
-        run_cmd("git stash", timeout=15)
-        rc, pull_out = run_cmd("git pull origin main", timeout=60)
+    if rc != 0 and ("would be overwritten by merge" in pull_out or "local changes" in pull_out or "error:" in pull_out.lower()):
+        logger.warning("[AUTO-UPDATER] Local file conflict detected during pull. Force-resetting to origin/main...")
+        run_cmd("git fetch origin main", timeout=30)
+        run_cmd("git reset --hard origin/main", timeout=20)
+        rc, pull_out = run_cmd("git status", timeout=15)
+        if rc == 0:
+            pull_out = f"Reset hard to origin/main ({remote_hash})"
 
     if rc != 0:
         logger.error("[AUTO-UPDATER] git pull failed: %s", pull_out)
