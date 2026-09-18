@@ -994,18 +994,6 @@ class DualRetracementEngine:
                     setup.locked_tp = l1["tp"]
                     setup.tp_locked = True
                 setup.state = RetracementState.TRADE_ACTIVE
-                # Same-candle TP check: if a layer was just filled and the same candle
-                # also reaches the layer's TP, require candle.close >= tp to ensure the bounce
-                # occurred after entry rather than before the pullback.
-                for layer in setup.layers.values():
-                    if layer["state"] != "FILLED":
-                        continue
-                    if setup.direction == "LONG" and candle.close >= layer["tp"]:
-                        layer["state"] = "TP_HIT"
-                        layer["exit_price"] = layer["tp"]
-                    elif setup.direction == "SHORT" and candle.close <= layer["tp"]:
-                        layer["state"] = "TP_HIT"
-                        layer["exit_price"] = layer["tp"]
 
         return events
 
@@ -1186,12 +1174,13 @@ class DualRetracementEngine:
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
-                # If layer was filled in this exact candle, candle.high happened before fill unless close >= tp
+                # If layer was filled in this exact candle, TP cannot be validated on the same candle.
+                # TP must be confirmed on subsequent candles or via evaluate_live_price ticks after entry.
                 is_fill_candle = (
                     (layer.get("filled_candle_ts") is not None and layer.get("filled_candle_ts") == candle.timestamp)
                     or (layer.get("filled_at") == candle.timestamp.isoformat())
                 )
-                if is_fill_candle and candle.close < layer["tp"]:
+                if is_fill_candle:
                     continue
 
                 if candle.high >= layer["tp"]:
@@ -1222,7 +1211,7 @@ class DualRetracementEngine:
                     (layer.get("filled_candle_ts") is not None and layer.get("filled_candle_ts") == candle.timestamp)
                     or (layer.get("filled_at") == candle.timestamp.isoformat())
                 )
-                if is_fill_candle and candle.close > layer["tp"]:
+                if is_fill_candle:
                     continue
 
                 if candle.low <= layer["tp"]:
