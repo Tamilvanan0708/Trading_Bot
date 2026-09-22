@@ -5554,6 +5554,103 @@ Routes["/fib-trend"] = (mount) => {
   );
 };
 
+/* ================= LIVE VS BACKTEST COMPARISON HELPER ================= */
+function renderLiveComparisonCard(comp, sumSym = "₹") {
+  if (!comp || !comp.enabled) return '';
+  const list = comp.comparisons || [];
+  if (list.length === 0) {
+    return `
+    <div class="card" style="margin-bottom:var(--sp-3);border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02)">
+      <div class="card-head" style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:700;color:#64b5f6;display:flex;align-items:center;gap:8px">
+          <span>⚡ LIVE VS BACKTEST EXECUTION PARITY</span>
+          <span class="badge badge-dim">0 Live Trades in Range</span>
+        </div>
+        <span class="muted" style="font-size:11px">Auto-Cross Reference</span>
+      </div>
+      <div class="card-body" style="padding:14px;font-size:12px;color:var(--text-muted)">
+        ℹ️ No actual paper/live trades were recorded in this backtest date window. Try selecting <b>Today</b> or recent days to see instant side-by-side execution parity against live MT5 trades.
+      </div>
+    </div>`;
+  }
+
+  const rows = list.map((c, i) => {
+    let statusBadge = '<span class="badge badge-green">🎯 100% MATCH</span>';
+    if (c.status === "SLIPPAGE_VARIANCE") {
+      statusBadge = `<span class="badge badge-yellow" title="Slippage: ${c.slippage_pts} pts">⚠️ SLIPPAGE (${c.slippage_pts}p)</span>`;
+    } else if (c.status === "DIVERGED") {
+      statusBadge = `<span class="badge badge-red" title="Outcome differed: Live=${c.live_outcome} vs BT=${c.backtest_outcome}">❌ DIVERGED</span>`;
+    } else if (c.status === "LIVE_ONLY") {
+      statusBadge = '<span class="badge badge-blue">📱 LIVE ONLY</span>';
+    } else if (c.status === "BACKTEST_ONLY") {
+      statusBadge = '<span class="badge badge-dim">⚡ BT ONLY</span>';
+    }
+
+    const tTime = c.live_time || c.backtest_time;
+    const dirBadge = c.direction === "LONG"
+      ? '<span class="badge badge-green" style="font-size:10px">BUY ▲</span>'
+      : '<span class="badge badge-red" style="font-size:10px">SELL ▼</span>';
+
+    const btEntryStr = c.backtest_entry != null ? `$${Number(c.backtest_entry).toFixed(2)}` : '—';
+    const liveEntryStr = c.live_entry != null ? `$${Number(c.live_entry).toFixed(2)}` : '—';
+    const slipStr = c.slippage_pts != null ? `${Number(c.slippage_pts).toFixed(2)} pts` : '—';
+
+    const btExitStr = c.backtest_exit != null ? `$${Number(c.backtest_exit).toFixed(2)} (${c.backtest_outcome || '—'})` : '—';
+    const liveExitStr = c.live_exit != null ? `$${Number(c.live_exit).toFixed(2)} (${c.live_outcome || '—'})` : '—';
+
+    return `<tr>
+      <td class="muted">${i + 1}</td>
+      <td><b>${UI.fmtTs(tTime)}</b></td>
+      <td><b>${UI.esc(c.strategy || '—')}</b> <span class="badge badge-blue" style="font-size:10px">${UI.esc(c.timeframe || '—')}</span></td>
+      <td>${dirBadge}</td>
+      <td class="num font-mono" style="color:#64b5f6">${btEntryStr}</td>
+      <td class="num font-mono" style="color:#81c784;font-weight:700">${liveEntryStr}</td>
+      <td class="num font-mono" style="color:${c.slippage_pts > 0.8 ? '#ffb74d' : 'var(--text-dim)'}">${slipStr}</td>
+      <td class="num font-mono" style="font-size:11px">${btExitStr}</td>
+      <td class="num font-mono" style="font-size:11px;font-weight:600">${liveExitStr}</td>
+      <td>${statusBadge}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+  <!-- LIVE VS BACKTEST PARITY BREAKDOWN CARD -->
+  <div class="card" style="margin-bottom:var(--sp-3);border:1px solid rgba(41,98,255,0.3);background:rgba(20,25,38,0.7)">
+    <div class="card-head" style="background:rgba(41,98,255,0.08);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div style="font-weight:700;color:#90caf9;display:flex;align-items:center;gap:8px">
+        <span>⚡ LIVE VS BACKTEST EXECUTION PARITY</span>
+        <span class="badge badge-green" style="font-size:10px">${comp.parity_rate_pct}% Parity Rate</span>
+        <span class="badge badge-cyan" style="font-size:10px">${comp.outcome_agreement_pct}% Outcome Agreement</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted)">
+        Matched: <b style="color:#fff">${comp.matched_count}</b> · Avg Slippage: <b style="color:#ffd54f">${comp.avg_entry_slippage_pts} pts</b>
+      </div>
+    </div>
+    <div class="card-body flush">
+      <div class="table-wrap" style="max-height:340px;overflow-y:auto">
+        <table class="term">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>ENTRY TIME (IST)</th>
+              <th>STRATEGY / TF</th>
+              <th>DIR</th>
+              <th class="num">BACKTEST ENTRY</th>
+              <th class="num">LIVE ENTRY</th>
+              <th class="num">SLIPPAGE</th>
+              <th class="num">BACKTEST EXIT</th>
+              <th class="num">LIVE EXIT</th>
+              <th>PARITY STATUS</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ================= BACKTEST LAB ================= */
 Routes["/backtest"] = (mount) => {
   let backtestData = window.__lastBacktestData || null;
@@ -5687,6 +5784,8 @@ Routes["/backtest"] = (mount) => {
           </div>
         </div>
         ` : ''}
+
+        ${renderLiveComparisonCard(backtestData?.live_comparison, sumSym)}
       `;
     }
 

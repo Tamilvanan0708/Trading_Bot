@@ -392,7 +392,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     # A live trade must have ample breathing room to reach full TP or SL!
                     if _ot.opened_at:
                         _ot_tz = _ot.opened_at if _ot.opened_at.tzinfo else _ot.opened_at.replace(tzinfo=timezone.utc)
-                        if (datetime.now(timezone.utc) - _ot_tz).total_seconds() < 900:
+                        if abs((datetime.now(timezone.utc) - _ot_tz).total_seconds()) < 900:
                             continue
 
                     # Determine exit price and reason from last_completed ONLY if it matches THIS setup!
@@ -402,12 +402,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                     _lc_matches = False
                     if _lc is not None and getattr(_lc, "point_2_price", None) is not None:
-                        _p2_str = str(int(_lc.point_2_price))
-                        if _p2_str in (_ot.signal_id or ""):
+                        _lc_p2_ts = getattr(_lc, "point_2_timestamp", None)
+                        _lc_anchor_ts = int(_lc_p2_ts.timestamp()) if (_lc_p2_ts and hasattr(_lc_p2_ts, "timestamp")) else int(_lc.point_2_price)
+                        _lc_p1_ts = getattr(_lc, "point_1_timestamp", None)
+                        _lc_bos_seg = f"_{int(_lc_p1_ts.timestamp())}" if (_lc_p1_ts and hasattr(_lc_p1_ts, "timestamp")) else ""
+                        _lc_anchor = f"{int(_lc.point_2_price)}_{_lc_anchor_ts}{_lc_bos_seg}"
+
+                        if _lc_anchor in (_ot.signal_id or "") or (getattr(_lc, "setup_id", None) and getattr(_lc, "setup_id") in (_ot.signal_id or "")):
                             _lc_matches = True
 
                     if not _lc_matches:
-                        # Old setup from hours ago does NOT belong to this trade! Hold active trade for TP/SL.
+                        # Old setup does NOT belong to this trade! Hold active trade for genuine TP/SL.
                         continue
 
                     _outcome = getattr(_lc, "outcome", None) if _lc else None

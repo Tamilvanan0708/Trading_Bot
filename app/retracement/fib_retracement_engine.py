@@ -1174,14 +1174,22 @@ class DualRetracementEngine:
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
-                # If layer was filled in this exact candle, TP cannot be validated on the same candle.
-                # TP must be confirmed on subsequent candles or via evaluate_live_price ticks after entry.
-                is_fill_candle = (
-                    (layer.get("filled_candle_ts") is not None and layer.get("filled_candle_ts") == candle.timestamp)
-                    or (layer.get("filled_at") == candle.timestamp.isoformat())
-                )
-                if is_fill_candle:
-                    continue
+                # Strictly require candle.timestamp > fill_ts to prevent historical candle replay from triggering TP!
+                fill_ts = layer.get("filled_candle_ts") or setup.entry_timestamp
+                if fill_ts is not None:
+                    if isinstance(fill_ts, str):
+                        try:
+                            fill_ts = datetime.fromisoformat(fill_ts)
+                        except Exception:
+                            fill_ts = None
+                    if fill_ts is not None:
+                        c_ts = candle.timestamp
+                        if c_ts.tzinfo and fill_ts.tzinfo is None:
+                            fill_ts = fill_ts.replace(tzinfo=c_ts.tzinfo)
+                        elif fill_ts.tzinfo and c_ts.tzinfo is None:
+                            c_ts = c_ts.replace(tzinfo=fill_ts.tzinfo)
+                        if c_ts <= fill_ts:
+                            continue
 
                 if candle.high >= layer["tp"]:
                     layer["state"] = "TP_HIT"
@@ -1207,12 +1215,22 @@ class DualRetracementEngine:
             for layer in setup.layers.values():
                 if layer["state"] != "FILLED" or layer.get("tp") is None:
                     continue
-                is_fill_candle = (
-                    (layer.get("filled_candle_ts") is not None and layer.get("filled_candle_ts") == candle.timestamp)
-                    or (layer.get("filled_at") == candle.timestamp.isoformat())
-                )
-                if is_fill_candle:
-                    continue
+                # Strictly require candle.timestamp > fill_ts to prevent historical candle replay from triggering TP!
+                fill_ts = layer.get("filled_candle_ts") or setup.entry_timestamp
+                if fill_ts is not None:
+                    if isinstance(fill_ts, str):
+                        try:
+                            fill_ts = datetime.fromisoformat(fill_ts)
+                        except Exception:
+                            fill_ts = None
+                    if fill_ts is not None:
+                        c_ts = candle.timestamp
+                        if c_ts.tzinfo and fill_ts.tzinfo is None:
+                            fill_ts = fill_ts.replace(tzinfo=c_ts.tzinfo)
+                        elif fill_ts.tzinfo and c_ts.tzinfo is None:
+                            c_ts = c_ts.replace(tzinfo=fill_ts.tzinfo)
+                        if c_ts <= fill_ts:
+                            continue
 
                 if candle.low <= layer["tp"]:
                     layer["state"] = "TP_HIT"
@@ -1269,6 +1287,11 @@ class DualRetracementEngine:
         setup = self.setup
         if setup is None or setup.state in (RetracementState.NO_SETUP, RetracementState.COMPLETED, RetracementState.INVALIDATED):
             return []
+        if live_price is None or live_price <= 0:
+            return []
+        if setup.entry_price and setup.entry_price > 0:
+            if not (0.5 * setup.entry_price <= live_price <= 2.0 * setup.entry_price):
+                return []
 
         ts = timestamp or (self._candles[-1].timestamp if self._candles else datetime.now(timezone.utc))
         curr_candle_ts = curr_candle_ts or (self._candles[-1].timestamp if self._candles else (timestamp or ts))

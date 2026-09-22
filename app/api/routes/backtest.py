@@ -112,10 +112,11 @@ class StrategyBacktestRequest(BaseModel):
 
 
 @router.post("/run-strategy")
-async def run_strategy_backtest(req: StrategyBacktestRequest):
-    """Executes multi-timeframe strategy backtest with single active trade lock."""
+async def run_strategy_backtest(req: StrategyBacktestRequest, db: AsyncSession = Depends(get_db_session)):
+    """Executes multi-timeframe strategy backtest with single active trade lock and live execution parity comparison."""
     from datetime import datetime, timezone
     from app.backtesting.strategy_simulator import StrategyBacktester
+    from app.backtesting.live_comparison import compare_backtest_with_live_trades
 
     def _parse_dt(d_str: str, is_end: bool = False) -> datetime:
         from datetime import timedelta
@@ -154,7 +155,33 @@ async def run_strategy_backtest(req: StrategyBacktestRequest):
 
     try:
         result = await backtester.run(req.strategy, s_dt, e_dt, timeframe=req.timeframe)
+
+        # Compute Live vs Backtest Parity Alignment
+        try:
+            trades_raw = result.get("all_trades") or []
+            live_comp = await compare_backtest_with_live_trades(
+                trades_raw,
+                s_dt,
+                e_dt,
+                db,
+                selected_strategy=req.strategy,
+                selected_timeframe=req.timeframe,
+            )
+            result["live_comparison"] = live_comp
+        except Exception as comp_err:
+            result["live_comparison"] = {
+                "enabled": False,
+                "error": str(comp_err),
+                "comparisons": [],
+            }
+
         return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Backtest execution failed: {exc}")
+
+
+@router.post("/compare-live")
+async def compare_live_with_backtest(req: StrategyBacktestRequest, db: AsyncSession = Depends(get_db_session)):
+    """Runs backtest and produces dedicated Live vs Backtest execution parity report."""
+    return await run_strategy_backtest(req, db=db)
 
