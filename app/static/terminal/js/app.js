@@ -5580,6 +5580,12 @@ Routes["/backtest"] = (mount) => {
     const isCent = (summary?.account_currency === "cent") || (window.__btCurrency === "cent") || (!window.__btCurrency);
     const currSym = isCent ? "₹" : "$";
 
+    const now = new Date();
+    const padZero = (n) => String(n).padStart(2, '0');
+    const todayStr = `${now.getFullYear()}-${padZero(now.getMonth() + 1)}-${padZero(now.getDate())}`;
+    const defaultFromDate = window.__btFromDate || '2026-01-01';
+    const defaultToDate = window.__btToDate || todayStr;
+
     let summaryHtml = "";
     if (summary) {
       const pnlCls = summary.net_profit_usd >= 0 ? "up" : "down";
@@ -5747,7 +5753,19 @@ Routes["/backtest"] = (mount) => {
 
       <!-- CONFIG CARD -->
       <div class="card">
-        <div class="card-head"><span>BACKTEST PARAMETERS</span></div>
+        <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <span>BACKTEST PARAMETERS</span>
+          <!-- QUICK DATE RANGE PRESETS -->
+          <div style="display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap">
+            <span style="font-size:10px;font-weight:700;color:var(--text-dim);margin-right:2px">⚡ QUICK RANGES:</span>
+            <button type="button" class="btn btn-xs ${window.__btPreset === 'today' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="today" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">Today</button>
+            <button type="button" class="btn btn-xs ${window.__btPreset === 'yesterday' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="yesterday" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">Yesterday</button>
+            <button type="button" class="btn btn-xs ${window.__btPreset === '7d' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="7d" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">Last 7 Days</button>
+            <button type="button" class="btn btn-xs ${window.__btPreset === '30d' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="30d" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">Last 30 Days</button>
+            <button type="button" class="btn btn-xs ${window.__btPreset === 'this_month' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="this_month" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">This Month</button>
+            <button type="button" class="btn btn-xs ${window.__btPreset === 'ytd' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="ytd" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">2026 YTD</button>
+          </div>
+        </div>
         <div class="card-body">
           <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">
             <div style="flex:1;min-width:180px">
@@ -5809,12 +5827,12 @@ Routes["/backtest"] = (mount) => {
 
             <div style="flex:1;min-width:120px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">FROM DATE</label>
-              <input type="date" id="bt-from-date" class="form-input" min="2025-12-11" max="2026-09-11" value="${window.__btFromDate || '2026-01-01'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+              <input type="date" id="bt-from-date" class="form-input" min="2025-12-11" max="${todayStr}" value="${defaultFromDate}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div style="flex:1;min-width:120px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TO DATE</label>
-              <input type="date" id="bt-to-date" class="form-input" min="2025-12-11" max="2026-09-11" value="${window.__btToDate || '2026-08-31'}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+              <input type="date" id="bt-to-date" class="form-input" min="2025-12-11" max="${todayStr}" value="${defaultToDate}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div>
@@ -5997,6 +6015,84 @@ Routes["/backtest"] = (mount) => {
           isLoading = false;
           renderView();
         }
+      });
+    }
+
+    // Wire up Quick Date Presets
+    mount.querySelectorAll(".bt-preset-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const preset = btn.dataset.preset;
+        window.__btPreset = preset;
+        const n = new Date();
+        const p = (num) => String(num).padStart(2, '0');
+        const tStr = `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+        let fDate = tStr;
+        let tDate = tStr;
+
+        if (preset === "today") {
+          fDate = tStr;
+          tDate = tStr;
+        } else if (preset === "yesterday") {
+          const y = new Date(n);
+          y.setDate(y.getDate() - 1);
+          fDate = `${y.getFullYear()}-${p(y.getMonth() + 1)}-${p(y.getDate())}`;
+          tDate = fDate;
+        } else if (preset === "7d") {
+          const d7 = new Date(n);
+          d7.setDate(d7.getDate() - 7);
+          fDate = `${d7.getFullYear()}-${p(d7.getMonth() + 1)}-${p(d7.getDate())}`;
+          tDate = tStr;
+        } else if (preset === "30d") {
+          const d30 = new Date(n);
+          d30.setDate(d30.getDate() - 30);
+          fDate = `${d30.getFullYear()}-${p(d30.getMonth() + 1)}-${p(d30.getDate())}`;
+          tDate = tStr;
+        } else if (preset === "this_month") {
+          fDate = `${n.getFullYear()}-${p(n.getMonth() + 1)}-01`;
+          tDate = tStr;
+        } else if (preset === "ytd") {
+          fDate = `${n.getFullYear()}-01-01`;
+          tDate = tStr;
+        }
+
+        window.__btFromDate = fDate;
+        window.__btToDate = tDate;
+
+        const fromEl = mount.querySelector("#bt-from-date");
+        const toEl = mount.querySelector("#bt-to-date");
+        if (fromEl) fromEl.value = fDate;
+        if (toEl) toEl.value = tDate;
+
+        mount.querySelectorAll(".bt-preset-btn").forEach(b => {
+          b.classList.remove("btn-primary");
+          b.classList.add("btn-outline");
+        });
+        btn.classList.remove("btn-outline");
+        btn.classList.add("btn-primary");
+      });
+    });
+
+    // Wire up manual date changes
+    const fInput = mount.querySelector("#bt-from-date");
+    if (fInput) {
+      fInput.addEventListener("change", (e) => {
+        window.__btFromDate = e.target.value;
+        window.__btPreset = null;
+        mount.querySelectorAll(".bt-preset-btn").forEach(b => {
+          b.classList.remove("btn-primary");
+          b.classList.add("btn-outline");
+        });
+      });
+    }
+    const tInput = mount.querySelector("#bt-to-date");
+    if (tInput) {
+      tInput.addEventListener("change", (e) => {
+        window.__btToDate = e.target.value;
+        window.__btPreset = null;
+        mount.querySelectorAll(".bt-preset-btn").forEach(b => {
+          b.classList.remove("btn-primary");
+          b.classList.add("btn-outline");
+        });
       });
     }
 

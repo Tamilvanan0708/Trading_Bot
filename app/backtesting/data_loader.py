@@ -79,9 +79,10 @@ def filter_forex_trading_days(candles: list[Candle]) -> list[Candle]:
 
 def get_available_forex_data_range() -> dict[str, Any]:
     """Returns available historical Forex dataset dates and metadata."""
+    now_utc = datetime.now(timezone.utc)
     return {
         "min_date": "2025-12-11",
-        "max_date": "2026-09-11",
+        "max_date": now_utc.strftime("%Y-%m-%d"),
         "market": "FOREX_5DAY",
         "market_label": "Forex 5-Day (Mon–Fri only)",
         "symbol": "XAUUSD",

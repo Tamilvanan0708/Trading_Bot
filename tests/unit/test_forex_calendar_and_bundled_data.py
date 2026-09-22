@@ -56,7 +56,7 @@ def test_get_available_forex_data_range():
     assert dr["symbol"] == "XAUUSD"
     assert dr["market"] == "FOREX_5DAY"
     assert "2025-12-11" in dr["min_date"]
-    assert "2026-09-11" in dr["max_date"]
+    assert dr["max_date"] >= "2026-09-11"
     assert "15m" in dr["timeframes"]
 
 
@@ -79,7 +79,7 @@ def test_data_range_api_endpoint():
         data = resp.json()
         assert data["market"] == "FOREX_5DAY"
         assert data["min_date"] == "2025-12-11"
-        assert data["max_date"] == "2026-09-11"
+        assert data["max_date"] >= "2026-09-11"
 
 
 @pytest.mark.asyncio
