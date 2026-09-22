@@ -49,6 +49,24 @@ def _extract_strategy(t: PaperTradeModel) -> str:
     return "FIB_WITH_RETRACEMENT"
 
 
+def _normalize_bt_strategy(raw_strategy: str) -> str:
+    """Normalize backtest trade strategy strings to canonical API names.
+
+    Backtest records store human-readable names like:
+      - "Fib Retracement [L1]", "Fib Retracement [L2]" → FIB_WITH_RETRACEMENT
+      - "Fib Go with Trend"                             → FIB_GO_WITH_TREND
+      - "SMC With Fib", "SMC_WITH_FIB"                  → SMC_WITH_FIB
+    """
+    s = raw_strategy.upper().strip()
+    if "RETRACEM" in s or "FIB_RETR" in s:
+        return "FIB_WITH_RETRACEMENT"
+    if "TREND" in s:
+        return "FIB_GO_WITH_TREND"
+    if "SMC" in s:
+        return "SMC_WITH_FIB"
+    return s
+
+
 async def compare_backtest_with_live_trades(
     backtest_trades: list[dict],
     start_dt: datetime,
@@ -113,15 +131,16 @@ async def compare_backtest_with_live_trades(
     # Prepare backtest trades list
     bt_list: list[dict] = []
     for b in backtest_trades:
-        bt_strat = str(b.get("strategy") or "").upper()
+        bt_strat = _normalize_bt_strategy(str(b.get("strategy") or ""))
         bt_tf = str(b.get("timeframe") or "").upper()
-        if selected_strategy != "ALL" and bt_strat != selected_strategy:
+        if selected_strategy != "ALL" and bt_strat != selected_strategy.upper():
             continue
         if selected_timeframe.upper() != "ALL" and bt_tf != selected_timeframe.upper():
             continue
 
         bt_list.append({
             **b,
+            "strategy": bt_strat,  # store normalized name for display
             "entry_dt": _parse_ts(b.get("entry_time")),
             "matched": False,
         })

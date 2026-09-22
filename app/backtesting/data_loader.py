@@ -203,6 +203,11 @@ async def fetch_historical_candles(
     5. Applies Forex 5-Day Market Calendar Filter (strips Saturday/Sunday weekend bars).
     """
     os.makedirs(CACHE_DIR, exist_ok=True)
+    # Ensure end_dt never extends past the current UTC moment to avoid future candle ingestion
+    now_utc = datetime.now(timezone.utc)
+    if end_dt > now_utc:
+        end_dt = now_utc
+
     tf_str = timeframe.lower()
     binance_tf = TF_INTERVAL_MAP.get(tf_str, "15m")
     binance_symbol = "XAUUSDT" if symbol.upper() in ("XAUUSD", "XAUUSDT") else symbol.upper()

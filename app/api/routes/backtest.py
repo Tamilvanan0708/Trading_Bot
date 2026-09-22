@@ -138,6 +138,12 @@ async def run_strategy_backtest(req: StrategyBacktestRequest, db: AsyncSession =
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid end_date format, expected YYYY-MM-DD or ISO date")
 
+    # Cap end_date to current UTC time — prevents backtest from consuming future candles
+    # when the user picks "Today" or any date that extends past the current moment
+    now_utc = datetime.now(timezone.utc)
+    if e_dt > now_utc:
+        e_dt = now_utc
+
     if s_dt >= e_dt:
         raise HTTPException(status_code=400, detail="start_date must be before end_date")
 
@@ -158,7 +164,7 @@ async def run_strategy_backtest(req: StrategyBacktestRequest, db: AsyncSession =
 
         # Compute Live vs Backtest Parity Alignment
         try:
-            trades_raw = result.get("all_trades") or []
+            trades_raw = result.get("trades") or []
             live_comp = await compare_backtest_with_live_trades(
                 trades_raw,
                 s_dt,
