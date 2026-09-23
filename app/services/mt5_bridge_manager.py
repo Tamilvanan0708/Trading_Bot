@@ -216,8 +216,9 @@ class MT5BridgeManager:
             "tp_points": tp_pts,
             "strategy": "Fib Retracement",
             "layer": str(order_data.get("layer", "L1")),
+            "timeframe": str(order_data.get("timeframe", "5M")).upper(),
             "magic_number": exec_cfg.mt5_magic_number,
-            "comment": f"XAU_AI_{order_data.get('layer', 'L1')}",
+            "comment": str(order_data.get("comment") or f"XAU_{order_data.get('timeframe', '5M')}_{order_data.get('layer', 'L1')}").strip()[:31],
             "created_at": time.time(),
             "status": "PENDING",
             "paper_trade_id": order_data.get("paper_trade_id"),
@@ -303,6 +304,7 @@ class MT5BridgeManager:
                 else:
                     filling = mt5.ORDER_FILLING_RETURN
 
+            order_comment = str(order_payload.get("comment", "Fib Retracement"))[:31]
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": symbol,
@@ -313,10 +315,33 @@ class MT5BridgeManager:
                 "tp": tp if tp > 0 else 0.0,
                 "deviation": 20,
                 "magic": int(order_payload.get("magic_number", 123456)),
-                "comment": str(order_payload.get("comment", "Fib Retracement"))[:31],
+                "comment": order_comment,
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": filling,
             }
+
+            # Guard: Prevent duplicate order if position with matching comment or paper_trade_id already exists in MT5
+            try:
+                open_positions = mt5.positions_get(symbol=symbol)
+                if open_positions:
+                    for pos in open_positions:
+                        pos_comm = getattr(pos, "comment", "")
+                        if order_comment and pos_comm == order_comment:
+                            logger.warning(
+                                "[MT5-NATIVE] Position already active in MT5 for comment '%s' (Ticket #%d). Skipping duplicate send.",
+                                order_comment,
+                                pos.ticket,
+                            )
+                            self.record_execution_report({
+                                "order_id": order_payload["id"],
+                                "ticket": pos.ticket,
+                                "status": "FILLED",
+                                "fill_price": pos.price_open,
+                                "retcode": mt5.TRADE_RETCODE_DONE,
+                            })
+                            return {"ticket": pos.ticket, "price": pos.price_open, "status": "FILLED"}
+            except Exception as pos_chk_err:
+                logger.debug("[MT5-NATIVE] Duplicate position check error: %s", pos_chk_err)
 
             res = mt5.order_send(request)
             if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:

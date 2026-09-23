@@ -927,13 +927,20 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     # MT5 Bridge Live Execution Dispatch (Strictly Fib Retracement Only)
                                     try:
                                         from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                        from datetime import timedelta
                                         sl_distance = round(abs(entry_px - sl_px), 2)
                                         tp_distance = round(abs(tp_px - entry_px), 2)
+                                        ist_tz = timezone(timedelta(hours=5, minutes=30))
+                                        open_time_ist = (new_trade.opened_at or datetime.now(timezone.utc)).astimezone(ist_tz).strftime("%H:%M")
+                                        trade_comment = f"XAU_{tf_key.upper()}_{l_key}_{open_time_ist}"[:31]
+
                                         get_mt5_bridge_manager().enqueue_order({
                                             "id": f"mt5-{new_trade.id[:8]}",
                                             "paper_trade_id": new_trade.id,
                                             "strategy": "Fib Retracement",
                                             "layer": l_key,
+                                            "timeframe": tf_key.upper(),
+                                            "comment": trade_comment,
                                             "direction": f_state.direction,
                                             "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
                                             "lot_size": trade_lot,
@@ -944,6 +951,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             "tp_points": tp_distance,
                                             "execution_mode": "POINTS_DISTANCE",
                                         })
+                                        # Record persistent MT5_DISPATCHED in state_logs to prevent duplicate orders across server restarts
+                                        trade_logs = list(new_trade.state_logs or [])
+                                        trade_logs.append({
+                                            "event": "MT5_DISPATCHED",
+                                            "comment": trade_comment,
+                                            "time": datetime.now(timezone.utc).isoformat(),
+                                        })
+                                        new_trade.state_logs = trade_logs
+                                        await db.commit()
                                     except Exception as mt5_err:  # noqa: BLE001
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch order to MT5 queue: %s", mt5_err)
 
@@ -1633,37 +1649,68 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                     mgr = get_mt5_bridge_manager()
                     for ot in open_trades:
-                        if not mgr.is_paper_trade_enqueued(ot.id):
-                            sig_s = (ot.signal_id or "").upper()
-                            is_fib_retr = "FIB_RETR" in sig_s or any("RETRACEMENT" in str(l) for l in (ot.state_logs or []))
-                            if is_fib_retr:
-                                ot_entry = ot.actual_entry or ot.target_entry or 0.0
-                                ot_sl = ot.stop_loss or 0.0
-                                ot_tp = ot.take_profit_1 or 0.0
-                                if ot_entry > 0:
-                                    layer_name = "L1"
-                                    for lk in ("L1", "L2", "L3"):
-                                        if lk in sig_s:
-                                            layer_name = lk
-                                            break
-                                    sl_d = round(abs(ot_entry - ot_sl), 2) if ot_sl > 0 else 3.0
-                                    tp_d = round(abs(ot_tp - ot_entry), 2) if ot_tp > 0 else 3.0
-                                    mgr.enqueue_order({
-                                        "id": f"mt5-{ot.id[:8]}",
-                                        "paper_trade_id": ot.id,
-                                        "strategy": "Fib Retracement",
-                                        "layer": layer_name,
-                                        "direction": ot.direction,
-                                        "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
-                                        "lot_size": ot.lot_size or 0.01,
-                                        "entry_price": ot_entry,
-                                        "stop_loss": ot_sl,
-                                        "take_profit_1": ot_tp,
-                                        "sl_points": sl_d,
-                                        "tp_points": tp_d,
-                                        "execution_mode": "POINTS_DISTANCE",
-                                    })
-                                    logger.info("[MT5-BRIDGE] Catch-up dispatched active open trade %s (Fib Retr %s) to MT5", ot.id, layer_name)
+                        # Check persistent state_logs to ensure we NEVER duplicate dispatch across restarts
+                        already_dispatched = any(
+                            isinstance(l, dict) and l.get("event") in ("MT5_DISPATCHED", "MT5_FILLED")
+                            for l in (ot.state_logs or [])
+                        )
+                        if already_dispatched or mgr.is_paper_trade_enqueued(ot.id):
+                            continue
+
+                        sig_s = (ot.signal_id or "").upper()
+                        is_fib_retr = "FIB_RETR" in sig_s or any("RETRACEMENT" in str(l) for l in (ot.state_logs or []))
+                        if is_fib_retr:
+                            ot_entry = ot.actual_entry or ot.target_entry or 0.0
+                            ot_sl = ot.stop_loss or 0.0
+                            ot_tp = ot.take_profit_1 or 0.0
+                            if ot_entry > 0:
+                                layer_name = "L1"
+                                for lk in ("L1", "L2", "L3"):
+                                    if lk in sig_s:
+                                        layer_name = lk
+                                        break
+                                ot_tf = "5M"
+                                for candidate in ("15M", "30M", "1H", "2H", "4H", "5M"):
+                                    if f"_{candidate}_" in sig_s or sig_s.startswith(f"FIB_RETR_{candidate}_"):
+                                        ot_tf = candidate
+                                        break
+
+                                from datetime import timedelta
+                                ist_tz = timezone(timedelta(hours=5, minutes=30))
+                                ot_time = ot.opened_at or datetime.now(timezone.utc)
+                                if ot_time.tzinfo is None:
+                                    ot_time = ot_time.replace(tzinfo=timezone.utc)
+                                ist_str = ot_time.astimezone(ist_tz).strftime("%H:%M")
+                                trade_comment = f"XAU_{ot_tf}_{layer_name}_{ist_str}"[:31]
+
+                                sl_d = round(abs(ot_entry - ot_sl), 2) if ot_sl > 0 else 3.0
+                                tp_d = round(abs(ot_tp - ot_entry), 2) if ot_tp > 0 else 3.0
+                                mgr.enqueue_order({
+                                    "id": f"mt5-{ot.id[:8]}",
+                                    "paper_trade_id": ot.id,
+                                    "strategy": "Fib Retracement",
+                                    "layer": layer_name,
+                                    "timeframe": ot_tf,
+                                    "comment": trade_comment,
+                                    "direction": ot.direction,
+                                    "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                    "lot_size": ot.lot_size or 0.01,
+                                    "entry_price": ot_entry,
+                                    "stop_loss": ot_sl,
+                                    "take_profit_1": ot_tp,
+                                    "sl_points": sl_d,
+                                    "tp_points": tp_d,
+                                    "execution_mode": "POINTS_DISTANCE",
+                                })
+                                ot_logs = list(ot.state_logs or [])
+                                ot_logs.append({
+                                    "event": "MT5_DISPATCHED",
+                                    "comment": trade_comment,
+                                    "time": datetime.now(timezone.utc).isoformat(),
+                                })
+                                ot.state_logs = ot_logs
+                                await db.commit()
+                                logger.info("[MT5-BRIDGE] Catch-up dispatched active open trade %s (Fib Retr %s %s) to MT5", ot.id, ot_tf, layer_name)
                 except Exception as mt5_catch_err:
                     logger.warning("[MT5-BRIDGE] Catch-up sync error: %s", mt5_catch_err)
 
