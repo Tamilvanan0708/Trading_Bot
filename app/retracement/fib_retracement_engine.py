@@ -1001,11 +1001,24 @@ class DualRetracementEngine:
         """Fill L1/L2/L3 for a bullish setup as price retraces DOWN the grid."""
         setup = self.setup
         fills = []
-        for layer, ratio, tp_ratio in (
+
+        # Direction 1: Higher TF L1 Only — skip L2/L3 for 15M/30M/1H
+        all_layers = [
             ("L1", 0.618, 1.000),
             ("L2", 0.500, 0.618),
             ("L3", 0.382, 0.618),
-        ):
+        ]
+        try:
+            from app.config.execution_settings import get_execution_settings
+            _exc = get_execution_settings()
+            if _exc.higher_tf_l1_only:
+                htf_list = [t.lower() for t in (_exc.higher_tf_l1_only_timeframes or [])]
+                if str(self.timeframe).lower() in htf_list:
+                    all_layers = [("L1", 0.618, 1.000)]
+        except Exception:
+            pass
+
+        for layer, ratio, tp_ratio in all_layers:
             if layer in setup.layers:
                 continue  # already filled
             attr = f"fib_{ratio:.3f}".replace(".", "_")
@@ -1037,11 +1050,24 @@ class DualRetracementEngine:
         """Fill L1/L2/L3 for a bearish setup as price retraces UP the grid."""
         setup = self.setup
         fills = []
-        for layer, ratio, tp_ratio in (
+
+        # Direction 1: Higher TF L1 Only — skip L2/L3 for 15M/30M/1H
+        all_layers = [
             ("L1", 0.618, 1.000),
             ("L2", 0.500, 0.618),
             ("L3", 0.382, 0.618),
-        ):
+        ]
+        try:
+            from app.config.execution_settings import get_execution_settings
+            _exc = get_execution_settings()
+            if _exc.higher_tf_l1_only:
+                htf_list = [t.lower() for t in (_exc.higher_tf_l1_only_timeframes or [])]
+                if str(self.timeframe).lower() in htf_list:
+                    all_layers = [("L1", 0.618, 1.000)]
+        except Exception:
+            pass
+
+        for layer, ratio, tp_ratio in all_layers:
             if layer in setup.layers:
                 continue
             attr = f"fib_{ratio:.3f}".replace(".", "_")
@@ -1200,7 +1226,13 @@ class DualRetracementEngine:
                     #   NOTE: Do NOT overwrite setup.sl_price (0.236 invalidation level)!
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
                         exec_cfg = get_execution_settings()
-                        if getattr(exec_cfg, "smart_shield_enabled", True):
+                        # Direction 3: Skip Smart Shield for higher TFs — L1 SL stays fixed at 0.236
+                        _htf_skip = False
+                        if getattr(exec_cfg, "higher_tf_l1_only", False):
+                            _htf_list = [t.lower() for t in getattr(exec_cfg, "higher_tf_l1_only_timeframes", [])]
+                            if str(self.timeframe).lower() in _htf_list:
+                                _htf_skip = True
+                        if not _htf_skip and getattr(exec_cfg, "smart_shield_enabled", True):
                             shield_lvl = self.smart_shield_level or getattr(exec_cfg, "smart_shield_level", "0.500")
                             target_level = setup.fib_0_500 if shield_lvl == "0.500" else setup.fib_0_618
                             if target_level is not None and (setup.layers["L1"].get("sl") is None or setup.layers["L1"]["sl"] < target_level):
@@ -1241,7 +1273,13 @@ class DualRetracementEngine:
                     #   NOTE: Do NOT overwrite setup.sl_price (0.236 invalidation level)!
                     if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"]["state"] == "FILLED":
                         exec_cfg = get_execution_settings()
-                        if getattr(exec_cfg, "smart_shield_enabled", True):
+                        # Direction 3: Skip Smart Shield for higher TFs — L1 SL stays fixed at 0.236
+                        _htf_skip = False
+                        if getattr(exec_cfg, "higher_tf_l1_only", False):
+                            _htf_list = [t.lower() for t in getattr(exec_cfg, "higher_tf_l1_only_timeframes", [])]
+                            if str(self.timeframe).lower() in _htf_list:
+                                _htf_skip = True
+                        if not _htf_skip and getattr(exec_cfg, "smart_shield_enabled", True):
                             shield_lvl = self.smart_shield_level or getattr(exec_cfg, "smart_shield_level", "0.500")
                             target_level = setup.fib_0_500 if shield_lvl == "0.500" else setup.fib_0_618
                             if target_level is not None and (setup.layers["L1"].get("sl") is None or setup.layers["L1"]["sl"] > target_level):

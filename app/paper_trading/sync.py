@@ -525,6 +525,12 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     current_anchor = f"{int(f_state.point_2_price)}_{anchor_ts}{bos_ts_seg}"
 
                     for l_key, layer in f_state.layers.items():
+                        # Direction 1: Higher TF L1 Only — skip L2/L3 for 15M/30M/1H
+                        if l_key in ("L2", "L3") and exec_cfg.higher_tf_l1_only:
+                            htf_list = [t.lower() for t in (exec_cfg.higher_tf_l1_only_timeframes or [])]
+                            if tf_key.lower() in htf_list:
+                                continue
+
                         ratio_val = 0.618 if l_key == "L1" else (0.500 if l_key == "L2" else 0.382)
                         attr = f"fib_{ratio_val:.3f}".replace(".", "_")
                         l_entry = getattr(f_state, attr, None) or float(layer.get("entry_price") or 0.0)
@@ -1899,93 +1905,103 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             and "FIB_RETR" in (t.signal_id or "")
                         )
                         if exec_cfg.smart_shield_enabled and is_retr_l2_l3:
-                            trig_layer = "2" if "_L2_" in (t.signal_id or "") else "3"
-                            l1_sig_match = t.signal_id.replace("_L2_", "_L1_").replace("_L3_", "_L1_")
-                            l1_trade = (await db.execute(
-                                select(PaperTradeModel).where(
-                                    PaperTradeModel.signal_id == l1_sig_match,
-                                    PaperTradeModel.state == "OPEN",
-                                )
-                            )).scalars().first()
-
-                            if not l1_trade:
-                                parts = (t.signal_id or "").split("_")
-                                if len(parts) >= 5:
-                                    p2_seg = parts[4]
-                                    l1_trade = (await db.execute(
-                                        select(PaperTradeModel).where(
-                                            PaperTradeModel.signal_id.like(f"FIB_RETR_{trade_tf}_L1_{p2_seg}%"),
-                                            PaperTradeModel.state == "OPEN",
-                                        )
-                                    )).scalars().first()
-
-                            if l1_trade:
-                                if exec_cfg.smart_shield_level == "0.618":
-                                    target_level = float(t.take_profit_1 or t.exit_price or 0.0)
-                                else:
-                                    target_level = float(t.actual_entry or t.target_entry or 0.0)
-
-                                try:
-                                    from app.retracement.multi_tf import get_dual_engine
-                                    dual_eng = get_dual_engine()
-                                    live_state = dual_eng.get_state(trade_tf.lower()) if dual_eng else None
-                                    if live_state and live_state.point_2_price:
-                                        if exec_cfg.smart_shield_level == "0.618" and live_state.fib_0_618:
-                                            target_level = float(live_state.fib_0_618)
-                                        elif live_state.fib_0_500:
-                                            target_level = float(live_state.fib_0_500)
-                                except Exception:
-                                    pass
-
-                                should_trail = False
-                                if l1_trade.direction == "LONG" and target_level > (l1_trade.stop_loss or 0.0):
-                                    should_trail = True
-                                elif l1_trade.direction == "SHORT" and 0.0 < target_level < (l1_trade.stop_loss or 999999.0):
-                                    should_trail = True
-
-                                if should_trail:
-                                    l1_trade.stop_loss = round(target_level, 2)
-                                    l1_logs = list(l1_trade.state_logs or [])
-                                    l1_logs.append({
-                                        "event": "SMART_SHIELD_TRAILED",
-                                        "shield_level": exec_cfg.smart_shield_level,
-                                        "new_sl": l1_trade.stop_loss,
-                                        "trigger_layer": trig_layer,
-                                        "time": datetime.now(timezone.utc).isoformat(),
-                                    })
-                                    l1_trade.state_logs = l1_logs
-                                    await db.commit()
-                                    logger.info(
-                                        "[PAPER-FAST-MONITOR] Smart Shield (%s): L%s TP hit -> trailed L1 SL to %.2f",
-                                        exec_cfg.smart_shield_level,
-                                        trig_layer,
-                                        l1_trade.stop_loss,
+                            # Direction 3: Skip Smart Shield for higher TFs — L1 SL stays fixed at 0.236
+                            _htf_skip = False
+                            if getattr(exec_cfg, "higher_tf_l1_only", False):
+                                _htf_list = [t.lower() for t in getattr(exec_cfg, "higher_tf_l1_only_timeframes", [])]
+                                if trade_tf.lower() in _htf_list:
+                                    _htf_skip = True
+                                    logger.info("[PAPER-FAST-MONITOR] Smart Shield SKIPPED for %s (higher TF L1-only mode, SL stays at 0.236)", trade_tf)
+                            if _htf_skip:
+                                pass  # SL stays fixed at 0.236 for higher TFs
+                            else:
+                                trig_layer = "2" if "_L2_" in (t.signal_id or "") else "3"
+                                l1_sig_match = t.signal_id.replace("_L2_", "_L1_").replace("_L3_", "_L1_")
+                                l1_trade = (await db.execute(
+                                    select(PaperTradeModel).where(
+                                        PaperTradeModel.signal_id == l1_sig_match,
+                                        PaperTradeModel.state == "OPEN",
                                     )
+                                )).scalars().first()
 
-                                    # 1. MT5 Bridge Live SL Modify Dispatch
-                                    try:
-                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                        get_mt5_bridge_manager().enqueue_modify(
-                                            paper_trade_id=l1_trade.id,
-                                            symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
-                                            new_sl=l1_trade.stop_loss,
-                                            direction=l1_trade.direction,
-                                        )
-                                    except Exception as mt5_err:
-                                        logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5 from fast monitor: %s", mt5_err)
+                                if not l1_trade:
+                                    parts = (t.signal_id or "").split("_")
+                                    if len(parts) >= 5:
+                                        p2_seg = parts[4]
+                                        l1_trade = (await db.execute(
+                                            select(PaperTradeModel).where(
+                                                PaperTradeModel.signal_id.like(f"FIB_RETR_{trade_tf}_L1_{p2_seg}%"),
+                                                PaperTradeModel.state == "OPEN",
+                                            )
+                                        )).scalars().first()
 
-                                    # 2. Telegram Alert: Smart Shield Trailing SL
+                                if l1_trade:
+                                    if exec_cfg.smart_shield_level == "0.618":
+                                        target_level = float(t.take_profit_1 or t.exit_price or 0.0)
+                                    else:
+                                        target_level = float(t.actual_entry or t.target_entry or 0.0)
+
                                     try:
-                                        shield_msg = _build_hybrid_shield_msg(
-                                            strategy_name="Fib Retracement (L1 Protected)",
-                                            symbol_tf=f"XAU/USD ({trade_tf})",
-                                            trigger_layer=trig_layer,
-                                            new_sl=l1_trade.stop_loss,
-                                            paper_trade_id=l1_trade.id,
+                                        from app.retracement.multi_tf import get_dual_engine
+                                        dual_eng = get_dual_engine()
+                                        live_state = dual_eng.get_state(trade_tf.lower()) if dual_eng else None
+                                        if live_state and live_state.point_2_price:
+                                            if exec_cfg.smart_shield_level == "0.618" and live_state.fib_0_618:
+                                                target_level = float(live_state.fib_0_618)
+                                            elif live_state.fib_0_500:
+                                                target_level = float(live_state.fib_0_500)
+                                    except Exception:
+                                        pass
+
+                                    should_trail = False
+                                    if l1_trade.direction == "LONG" and target_level > (l1_trade.stop_loss or 0.0):
+                                        should_trail = True
+                                    elif l1_trade.direction == "SHORT" and 0.0 < target_level < (l1_trade.stop_loss or 999999.0):
+                                        should_trail = True
+
+                                    if should_trail:
+                                        l1_trade.stop_loss = round(target_level, 2)
+                                        l1_logs = list(l1_trade.state_logs or [])
+                                        l1_logs.append({
+                                            "event": "SMART_SHIELD_TRAILED",
+                                            "shield_level": exec_cfg.smart_shield_level,
+                                            "new_sl": l1_trade.stop_loss,
+                                            "trigger_layer": trig_layer,
+                                            "time": datetime.now(timezone.utc).isoformat(),
+                                        })
+                                        l1_trade.state_logs = l1_logs
+                                        await db.commit()
+                                        logger.info(
+                                            "[PAPER-FAST-MONITOR] Smart Shield (%s): L%s TP hit -> trailed L1 SL to %.2f",
+                                            exec_cfg.smart_shield_level,
+                                            trig_layer,
+                                            l1_trade.stop_loss,
                                         )
-                                        _dispatch_tg_alert(tg.send_raw_alert(shield_msg))
-                                    except Exception as tg_err:
-                                        logger.warning("[PAPER-TG] Failed to send shield alert from fast monitor: %s", tg_err)
+
+                                        # 1. MT5 Bridge Live SL Modify Dispatch
+                                        try:
+                                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                            get_mt5_bridge_manager().enqueue_modify(
+                                                paper_trade_id=l1_trade.id,
+                                                symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                                new_sl=l1_trade.stop_loss,
+                                                direction=l1_trade.direction,
+                                            )
+                                        except Exception as mt5_err:
+                                            logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5 from fast monitor: %s", mt5_err)
+
+                                        # 2. Telegram Alert: Smart Shield Trailing SL
+                                        try:
+                                            shield_msg = _build_hybrid_shield_msg(
+                                                strategy_name="Fib Retracement (L1 Protected)",
+                                                symbol_tf=f"XAU/USD ({trade_tf})",
+                                                trigger_layer=trig_layer,
+                                                new_sl=l1_trade.stop_loss,
+                                                paper_trade_id=l1_trade.id,
+                                            )
+                                            _dispatch_tg_alert(tg.send_raw_alert(shield_msg))
+                                        except Exception as tg_err:
+                                            logger.warning("[PAPER-TG] Failed to send shield alert from fast monitor: %s", tg_err)
                     except Exception as shield_err:
                         logger.warning("[PAPER-FAST-MONITOR] Smart Shield check failed: %s", shield_err)
 

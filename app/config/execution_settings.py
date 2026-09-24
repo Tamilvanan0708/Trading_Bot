@@ -114,6 +114,24 @@ class ExecutionSettings(BaseModel):
         default="classic",
         description="classic (Sept 8 proven anchor + rolling span + continuation BOS) | experimental (macro locked origin)"
     )
+    higher_tf_l1_only: bool = Field(
+        default=True,
+        description="When True, 15M/30M/1H use L1 only (no L2/L3 layers). 5M keeps all 3 layers."
+    )
+    higher_tf_l1_only_timeframes: list[str] = Field(
+        default=["15m", "30m", "1h"],
+        description="Timeframes where only L1 is allowed (L2/L3 disabled). Default: 15m, 30m, 1h."
+    )
+    spread_filter_enabled: bool = Field(
+        default=True,
+        description="Block MT5 orders when live spread exceeds max_spread_points"
+    )
+    max_spread_points: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=10.0,
+        description="Maximum allowed spread in points. Orders blocked when spread exceeds this value."
+    )
 
 
 _CURRENT_SETTINGS: ExecutionSettings | None = None

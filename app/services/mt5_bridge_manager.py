@@ -222,6 +222,8 @@ class MT5BridgeManager:
             "created_at": time.time(),
             "status": "PENDING",
             "paper_trade_id": order_data.get("paper_trade_id"),
+            "spread_filter_enabled": getattr(exec_cfg, "spread_filter_enabled", True),
+            "max_spread_points": float(getattr(exec_cfg, "max_spread_points", 2.0)),
         }
 
         with self._lock:
@@ -231,6 +233,20 @@ class MT5BridgeManager:
         # Attempt direct execution via native Python MetaTrader5 on Windows
         native_res = self._execute_native_mt5_order(order_payload)
         if native_res:
+            if native_res.get("status") == "BLOCKED_HIGH_SPREAD":
+                with self._lock:
+                    if order_id in self._pending_ids:
+                        self._pending_ids.remove(order_id)
+                    order_payload["status"] = "BLOCKED_SPREAD"
+                    order_payload["spread"] = native_res.get("spread")
+                return {
+                    "status": "blocked_spread",
+                    "order_id": order_id,
+                    "spread": native_res.get("spread"),
+                    "max_spread": native_res.get("max_spread"),
+                    "reason": f"Live spread {native_res.get('spread')} pts exceeds max allowed {native_res.get('max_spread')} pts.",
+                }
+
             with self._lock:
                 if order_id in self._pending_ids:
                     self._pending_ids.remove(order_id)
@@ -287,6 +303,27 @@ class MT5BridgeManager:
             is_buy = action in ("BUY", "LONG")
             order_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
             price = tick.ask if is_buy else tick.bid
+
+            # Direction 4: Live Spread Filter Check
+            live_spread = round(abs(tick.ask - tick.bid), 2)
+            exec_cfg = get_execution_settings()
+            if getattr(exec_cfg, "spread_filter_enabled", True):
+                max_spread = float(getattr(exec_cfg, "max_spread_points", 2.0))
+                if live_spread > max_spread:
+                    logger.warning(
+                        "[MT5-NATIVE] SPREAD FILTER TRIGGERED: Live spread %.2f pts exceeds maximum allowed %.2f pts for %s. Order %s BLOCKED.",
+                        live_spread,
+                        max_spread,
+                        symbol,
+                        order_payload.get("id"),
+                    )
+                    return {
+                        "ticket": None,
+                        "price": 0.0,
+                        "status": "BLOCKED_HIGH_SPREAD",
+                        "spread": live_spread,
+                        "max_spread": max_spread,
+                    }
 
             lot = float(order_payload.get("lot_size") or 0.01)
             sl = float(order_payload.get("stop_loss") or 0.0)

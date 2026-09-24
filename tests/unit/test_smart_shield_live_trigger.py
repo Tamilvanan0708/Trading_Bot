@@ -17,10 +17,10 @@ async def test_fast_monitor_triggers_smart_shield_on_l2_tp(in_memory_db):
     exec_cfg.strategy_smc_fib = False
     exec_cfg.strategy_fib_trend = False
 
-    # Create companion L1 and L2 paper trades
+    # Create companion L1 and L2 paper trades on 5M (where Smart Shield is active)
     l1_trade = PaperTradeModel(
         id="test-l1-trade",
-        signal_id="FIB_RETR_15M_L1_4315_1789083900",
+        signal_id="FIB_RETR_5M_L1_4315_1789083900",
         symbol="XAUUSD",
         direction="LONG",
         state="OPEN",
@@ -38,7 +38,7 @@ async def test_fast_monitor_triggers_smart_shield_on_l2_tp(in_memory_db):
 
     l2_trade = PaperTradeModel(
         id="test-l2-trade",
-        signal_id="FIB_RETR_15M_L2_4315_1789083900",
+        signal_id="FIB_RETR_5M_L2_4315_1789083900",
         symbol="XAUUSD",
         direction="LONG",
         state="OPEN",
