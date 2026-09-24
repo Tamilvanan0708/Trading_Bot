@@ -673,6 +673,22 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             )
                                             continue
 
+                                    # Idea 1: Entry Chase Guard (Do Not Chase if market has moved too far past Fib entry towards TP)
+                                    if getattr(exec_cfg, "chase_filter_enabled", True):
+                                        max_chase = float(getattr(exec_cfg, "max_chase_points", 2.0))
+                                        if f_state.direction in ("LONG", "BUY") and effective_check_price > (entry_px + max_chase):
+                                            logger.info(
+                                                "[PAPER-AUTO] Chase Guard: skipping %s: live price %.2f drifted %.2f pts past entry %.2f (max allowed: %.2f)",
+                                                sig_id, effective_check_price, abs(effective_check_price - entry_px), entry_px, max_chase,
+                                            )
+                                            continue
+                                        elif f_state.direction in ("SHORT", "SELL") and effective_check_price < (entry_px - max_chase):
+                                            logger.info(
+                                                "[PAPER-AUTO] Chase Guard: skipping %s: live price %.2f drifted %.2f pts past entry %.2f (max allowed: %.2f)",
+                                                sig_id, effective_check_price, abs(effective_check_price - entry_px), entry_px, max_chase,
+                                            )
+                                            continue
+
                                 # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
                                 # 1) If cross_tf_dedup_enabled is True: matches entry (≤5.0) / SL (≤2.5) / TP (≤2.5)
                                 # 2) Default: always blocks near-identical duplicate entries (≤0.50 pt diff) across TFs with same direction & SL
@@ -940,7 +956,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         open_time_ist = (new_trade.opened_at or datetime.now(timezone.utc)).astimezone(ist_tz).strftime("%H:%M")
                                         trade_comment = f"XAU_{tf_key.upper()}_{l_key}_{open_time_ist}"[:31]
 
-                                        get_mt5_bridge_manager().enqueue_order({
+                                        mt5_res = get_mt5_bridge_manager().enqueue_order({
                                             "id": f"mt5-{new_trade.id[:8]}",
                                             "paper_trade_id": new_trade.id,
                                             "strategy": "Fib Retracement",
@@ -957,13 +973,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             "tp_points": tp_distance,
                                             "execution_mode": "POINTS_DISTANCE",
                                         })
-                                        # Record persistent MT5_DISPATCHED in state_logs to prevent duplicate orders across server restarts
+
                                         trade_logs = list(new_trade.state_logs or [])
-                                        trade_logs.append({
-                                            "event": "MT5_DISPATCHED",
-                                            "comment": trade_comment,
-                                            "time": datetime.now(timezone.utc).isoformat(),
-                                        })
+                                        # Idea 3: Synchronize actual_entry with real MT5 fill price
+                                        if mt5_res and mt5_res.get("status") == "filled_native":
+                                            fill_px = float(mt5_res.get("price") or entry_px)
+                                            new_trade.actual_entry = fill_px
+                                            trade_logs.append({
+                                                "event": "MT5_FILLED",
+                                                "ticket": mt5_res.get("ticket"),
+                                                "price": fill_px,
+                                                "comment": trade_comment,
+                                                "time": datetime.now(timezone.utc).isoformat(),
+                                            })
+                                        elif mt5_res and mt5_res.get("status") in ("blocked_chase", "blocked_spread"):
+                                            trade_logs.append({
+                                                "event": "MT5_BLOCKED",
+                                                "status": mt5_res.get("status"),
+                                                "reason": mt5_res.get("reason"),
+                                                "time": datetime.now(timezone.utc).isoformat(),
+                                            })
+                                        else:
+                                            trade_logs.append({
+                                                "event": "MT5_DISPATCHED",
+                                                "comment": trade_comment,
+                                                "time": datetime.now(timezone.utc).isoformat(),
+                                            })
                                         new_trade.state_logs = trade_logs
                                         await db.commit()
                                     except Exception as mt5_err:  # noqa: BLE001

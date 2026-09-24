@@ -1025,6 +1025,13 @@ class DualRetracementEngine:
             entry_level = getattr(setup, attr, None)
             if entry_level is None:
                 continue
+
+            # Idea 2: True Pullback Condition:
+            # An impulse expansion candle that pushes to a new high cannot falsely trigger
+            # a retracement fill with its starting low. Price must pull back down into the entry.
+            if setup.current_high_timestamp == candle.timestamp and candle.close > entry_level:
+                continue
+
             if candle.low <= entry_level:
                 if layer == "L1":
                     tp = setup.fib_1_000
@@ -1074,6 +1081,13 @@ class DualRetracementEngine:
             entry_level = getattr(setup, attr, None)
             if entry_level is None:
                 continue
+
+            # Idea 2: True Pullback Condition:
+            # An impulse dump candle that pushes to a new low cannot falsely trigger
+            # a retracement fill with its starting high. Price must pull back up into the entry.
+            if setup.current_high_timestamp == candle.timestamp and candle.close < entry_level:
+                continue
+
             if candle.high >= entry_level:
                 if layer == "L1":
                     tp = setup.fib_1_000

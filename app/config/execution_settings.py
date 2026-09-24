@@ -132,6 +132,16 @@ class ExecutionSettings(BaseModel):
         le=10.0,
         description="Maximum allowed spread in points. Orders blocked when spread exceeds this value."
     )
+    chase_filter_enabled: bool = Field(
+        default=True,
+        description="Block MT5 orders if live price has drifted too far away from the intended Fib entry level"
+    )
+    max_chase_points: float = Field(
+        default=2.0,
+        ge=0.5,
+        le=10.0,
+        description="Maximum allowed distance in points from intended Fib entry. Orders blocked if gap exceeds this."
+    )
 
 
 _CURRENT_SETTINGS: ExecutionSettings | None = None

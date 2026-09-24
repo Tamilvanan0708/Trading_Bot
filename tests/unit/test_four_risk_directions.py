@@ -210,3 +210,76 @@ def test_direction_4_spread_filter_allows_normal_spread():
             assert res["status"] == "FILLED"
             assert res["ticket"] == 999123
             mock_mt5.order_send.assert_called_once()
+
+
+def test_idea_1_chase_guard_blocks_late_market_order():
+    """Verify MT5 blocks orders when live price has drifted too far past entry level towards TP."""
+    mgr = MT5BridgeManager()
+    mock_mt5 = MagicMock()
+    mock_mt5.terminal_info.return_value = MagicMock(connected=True)
+
+    # Intended SELL entry: 4278.48. Current market bid: 4263.67 (drifted 14.81 pts down!)
+    mock_tick = MagicMock()
+    mock_tick.ask = 4264.00
+    mock_tick.bid = 4263.67
+    mock_mt5.symbol_info_tick.return_value = mock_tick
+
+    with patch.dict("sys.modules", {"MetaTrader5": mock_mt5}):
+        with patch("app.services.mt5_bridge_manager.get_execution_settings") as mock_cfg:
+            mock_cfg.return_value = ExecutionSettings(
+                chase_filter_enabled=True,
+                max_chase_points=2.0,
+                spread_filter_enabled=False,
+            )
+
+            res = mgr._execute_native_mt5_order({
+                "id": "order-chase-test-1",
+                "symbol": "XAUUSD-VIP",
+                "action": "SELL",
+                "entry_price": 4278.48,
+                "lot_size": 0.50,
+            })
+
+            assert res is not None
+            assert res["status"] == "BLOCKED_CHASE"
+            assert res["gap"] > 14.0
+            mock_mt5.order_send.assert_not_called()
+
+
+def test_idea_2_true_pullback_condition_in_engine():
+    """Verify an impulse dump candle that expands to a new low cannot falsely trigger a SHORT retracement fill."""
+    from app.retracement.models import RetracementSetup, RetracementState
+    engine = DualRetracementEngine(timeframe="5m")
+
+    # Bearish setup: Top Anchor @ 4288, Low @ 4270, 0.618 @ 4278.00
+    setup = RetracementSetup(
+        direction="SHORT",
+        timeframe="5m",
+        state=RetracementState.TP_DYNAMIC,
+        point_2_price=4288.0,
+        current_high_price=4270.0,
+        fib_0_618=4278.00,
+        sl_price=4290.00,
+        fib_1_000=4260.00,
+        layers={},
+    )
+    engine.setup = setup
+
+    # 1. Impulse dump candle: opens at 4280, makes a NEW LOW at 4263, closes at 4263.50
+    # Even though its high (4280) is >= 4278, it is establishing the new low, NOT pulling back!
+    c_dump = _make_candle("2026-09-24T01:50:00+00:00", 4280, 4281, 4263.0, 4263.5)
+    setup.current_high_price = 4263.0
+    setup.current_high_timestamp = c_dump.timestamp
+
+    fills = engine._fill_short_layers(c_dump)
+    # Must NOT fill L1 on the dump candle!
+    assert len(fills) == 0, "Impulse dump candle should NOT trigger retracement entry!"
+    assert "L1" not in setup.layers
+
+    # 2. Subsequent candle: opens at 4263.5, bounces UP to 4278.50 (real pullback!)
+    c_pullback = _make_candle("2026-09-24T01:55:00+00:00", 4263.5, 4279.0, 4263.0, 4278.5)
+    fills_pb = engine._fill_short_layers(c_pullback)
+    assert len(fills_pb) == 1, "Subsequent pullback candle touching 0.618 SHOULD fill L1!"
+    assert fills_pb[0]["layer"] == "L1"
+    assert "L1" in setup.layers
+

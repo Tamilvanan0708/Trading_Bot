@@ -247,6 +247,20 @@ class MT5BridgeManager:
                     "reason": f"Live spread {native_res.get('spread')} pts exceeds max allowed {native_res.get('max_spread')} pts.",
                 }
 
+            if native_res.get("status") == "BLOCKED_CHASE":
+                with self._lock:
+                    if order_id in self._pending_ids:
+                        self._pending_ids.remove(order_id)
+                    order_payload["status"] = "BLOCKED_CHASE"
+                    order_payload["gap"] = native_res.get("gap")
+                return {
+                    "status": "blocked_chase",
+                    "order_id": order_id,
+                    "gap": native_res.get("gap"),
+                    "max_chase": native_res.get("max_chase"),
+                    "reason": f"Live price drifted {native_res.get('gap')} pts past entry target {native_res.get('entry_target')}. Blocked chasing market.",
+                }
+
             with self._lock:
                 if order_id in self._pending_ids:
                     self._pending_ids.remove(order_id)
@@ -323,6 +337,36 @@ class MT5BridgeManager:
                         "status": "BLOCKED_HIGH_SPREAD",
                         "spread": live_spread,
                         "max_spread": max_spread,
+                    }
+
+            # Idea 1: Entry Chase Guard (Prevent late market orders when price has already drifted far from Fib level)
+            entry_target = float(order_payload.get("entry_price") or 0.0)
+            if getattr(exec_cfg, "chase_filter_enabled", True) and entry_target > 0:
+                max_chase = float(getattr(exec_cfg, "max_chase_points", 2.0))
+                gap = round(abs(price - entry_target), 2)
+                is_chasing = False
+                if is_buy and price > (entry_target + max_chase):
+                    is_chasing = True
+                elif not is_buy and price < (entry_target - max_chase):
+                    is_chasing = True
+
+                if is_chasing:
+                    logger.warning(
+                        "[MT5-NATIVE] CHASE GUARD TRIGGERED: Live price %.2f drifted %.2f pts past entry target %.2f (max allowed: %.2f pts) for %s. Order %s BLOCKED.",
+                        price,
+                        gap,
+                        entry_target,
+                        max_chase,
+                        symbol,
+                        order_payload.get("id"),
+                    )
+                    return {
+                        "ticket": None,
+                        "price": 0.0,
+                        "status": "BLOCKED_CHASE",
+                        "gap": gap,
+                        "max_chase": max_chase,
+                        "entry_target": entry_target,
                     }
 
             lot = float(order_payload.get("lot_size") or 0.01)
