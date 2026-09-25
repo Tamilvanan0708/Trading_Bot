@@ -120,6 +120,8 @@ class DualRetracementEngine:
             return 40
         if tf == "30m":
             return 50
+        if tf == "1h":
+            return 12
         return 60
 
     def _min_impulse_range(self) -> float:
