@@ -478,6 +478,58 @@ class StrategyBacktester:
         trades: list[BacktestTradeRecord] = []
         tf_active_setup: dict[str, str | None] = {tf: None for tf in timeframes}
         resolved_layers: set[tuple[str, str]] = set()
+
+        def _check_and_record_layers(setup_obj, eng_obj, current_tf, current_ts, exit_iso):
+            if setup_obj is None or not getattr(setup_obj, "layers", None):
+                return
+            allowed_layers = ("L1",) if eng_obj.should_skip_deeper_layers else ("L1", "L2", "L3")
+            for l_key in allowed_layers:
+                if l_key not in setup_obj.layers:
+                    continue
+                l_data = setup_obj.layers[l_key]
+                lid = (setup_obj.setup_id, l_key)
+                if lid not in resolved_layers and l_data.get("state") in ("TP_HIT", "SL_HIT"):
+                    resolved_layers.add(lid)
+                    filled_at_str = l_data.get("filled_at")
+                    if filled_at_str:
+                        entry_dt = datetime.fromisoformat(filled_at_str)
+                        if entry_dt.tzinfo is None:
+                            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                        if entry_dt < start_date:
+                            continue
+                    is_long = setup_obj.direction == "LONG"
+                    entry_px = float(l_data["entry_price"])
+                    initial_sl = float(l_data.get("initial_sl") or setup_obj.sl_price or (entry_px - 8.0 if is_long else entry_px + 8.0))
+                    if abs(entry_px - initial_sl) < 1.0:
+                        initial_sl = (entry_px - 8.0) if is_long else (entry_px + 8.0)
+                    sl_px = float(l_data.get("sl") or initial_sl)
+                    tp_px = float(l_data.get("tp") or (entry_px + 16.0 if is_long else entry_px - 16.0))
+                    exit_reason = l_data["state"]
+                    exit_px = float(l_data.get("exit_price") or (tp_px if exit_reason == "TP_HIT" else sl_px))
+
+                    pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
+                    trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, entry_px, initial_sl)
+
+                    trades.append(BacktestTradeRecord(
+                        trade_id=f"RETR_{current_tf.upper()}_{l_key}_{int(current_ts.timestamp())}",
+                        strategy=f"Fib Retracement [{l_key}]",
+                        timeframe=current_tf.upper(),
+                        direction=setup_obj.direction,
+                        zero_level=float(setup_obj.point_2_price or 0.0),
+                        entry_time=l_data.get("filled_at") or current_ts.isoformat(),
+                        entry_price=entry_px,
+                        sl_price=initial_sl,
+                        tp_price=tp_px,
+                        exit_time=exit_iso,
+                        exit_price=exit_px,
+                        exit_reason=exit_reason,
+                        pnl_pts=pts,
+                        pnl_usd=pnl_usd,
+                        r_multiple=r_mult,
+                        status="WIN" if pnl_usd > 0 else "LOSS",
+                        lot_size=trade_lot,
+                    ))
+
         for ts, tf, candle in timeline:
             eng = engines[tf]
 
@@ -497,67 +549,18 @@ class StrategyBacktester:
                     if eng.setup is None:
                         break
                     eng.evaluate_live_price(px, tick_ts, curr_candle_ts=candle.timestamp)
+                    # Instant sync: If trade resolved on intra-candle tick, record and release engine immediately
+                    if eng.setup and eng.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
+                        _check_and_record_layers(eng.setup, eng, tf, ts, tick_ts.isoformat())
+                        eng.archive_completed()
+                        break
 
             # 1. Advance engine with this candle
             eng.process_candle(candle)
-            setup = eng.setup
 
-            # 2. Track layer fills and resolutions (Multi-Slot Parallel Execution)
-            if setup is not None and setup.layers:
-                # Higher TF L1 Only — restrict to L1 if configured for this timeframe
-                allowed_layers = ("L1",) if eng.should_skip_deeper_layers else ("L1", "L2", "L3")
-                for l_key in allowed_layers:
-                    if l_key not in setup.layers:
-                        continue
-                    l_data = setup.layers[l_key]
-                    lid = (setup.setup_id, l_key)
-                    if lid not in resolved_layers and l_data.get("state") in ("TP_HIT", "SL_HIT"):
-                        resolved_layers.add(lid)
-                        # Guard: Ignore layers that filled during the warmup window before start_date
-                        filled_at_str = l_data.get("filled_at")
-                        if filled_at_str:
-                            entry_dt = datetime.fromisoformat(filled_at_str)
-                            if entry_dt.tzinfo is None:
-                                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
-                            if entry_dt < start_date:
-                                continue
-                        is_long = setup.direction == "LONG"
-                        entry_px = float(l_data["entry_price"])
-                        # Initial entry SL used for risk calculation & lot sizing
-                        initial_sl = float(l_data.get("initial_sl") or setup.sl_price or (entry_px - 8.0 if is_long else entry_px + 8.0))
-                        if abs(entry_px - initial_sl) < 1.0:
-                            initial_sl = (entry_px - 8.0) if is_long else (entry_px + 8.0)
-                        # Current SL may have been trailed by Smart Shield
-                        sl_px = float(l_data.get("sl") or initial_sl)
-                        tp_px = float(l_data.get("tp") or (entry_px + 16.0 if is_long else entry_px - 16.0))
-                        exit_reason = l_data["state"]
-                        exit_px = float(l_data.get("exit_price") or (tp_px if exit_reason == "TP_HIT" else sl_px))
-
-                        pts = round((exit_px - entry_px) if is_long else (entry_px - exit_px), 2)
-                        trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, entry_px, initial_sl)
-
-                        trades.append(BacktestTradeRecord(
-                            trade_id=f"RETR_{tf.upper()}_{l_key}_{int(ts.timestamp())}",
-                            strategy=f"Fib Retracement [{l_key}]",
-                            timeframe=tf.upper(),
-                            direction=setup.direction,
-                            zero_level=float(setup.point_2_price or 0.0),
-                            entry_time=l_data.get("filled_at") or candle.timestamp.isoformat(),
-                            entry_price=entry_px,
-                            sl_price=initial_sl,
-                            tp_price=tp_px,
-                            exit_time=candle.timestamp.isoformat(),
-                            exit_price=exit_px,
-                            exit_reason=exit_reason,
-                            pnl_pts=pts,
-                            pnl_usd=pnl_usd,
-                            r_multiple=r_mult,
-                            status="WIN" if pnl_usd > 0 else "LOSS",
-                            lot_size=trade_lot,
-                        ))
-
-            # 3. Setup completion / invalidation lifecycle
-            if setup is not None and setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
+            # 2. Track layer fills and resolutions on candle close
+            _check_and_record_layers(eng.setup, eng, tf, ts, candle.timestamp.isoformat())
+            if eng.setup and eng.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
                 eng.archive_completed()
 
         # Close any open layers at the end of the simulation window across all timeframes

@@ -257,7 +257,9 @@ class DualRetracementEngine:
 
         # Auto-archive: if setup is now completed/invalidated, clear it and immediately try to detect a new BOS
         if self.setup is not None and self.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
-            pass
+            self.archive_completed()
+            if self.setup is None:
+                events.extend(self._detect_bos(candle))
 
         self._events.extend(events)
         return events
