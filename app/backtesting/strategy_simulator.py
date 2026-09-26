@@ -504,7 +504,9 @@ class StrategyBacktester:
 
             # 2. Track layer fills and resolutions (Multi-Slot Parallel Execution)
             if setup is not None and setup.layers:
-                for l_key in ("L1", "L2", "L3"):
+                # Higher TF L1 Only — restrict to L1 if configured for this timeframe
+                allowed_layers = ("L1",) if eng.should_skip_deeper_layers else ("L1", "L2", "L3")
+                for l_key in allowed_layers:
                     if l_key not in setup.layers:
                         continue
                     l_data = setup.layers[l_key]
