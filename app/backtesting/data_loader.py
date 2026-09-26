@@ -30,6 +30,7 @@ BINANCE_REST_BASE_URLS = [
 ]
 
 TF_INTERVAL_MAP = {
+    "1m": "1m",
     "5m": "5m",
     "15m": "15m",
     "30m": "30m",
@@ -40,6 +41,7 @@ TF_INTERVAL_MAP = {
 }
 
 TF_ENUM_MAP = {
+    "1m": TimeFrame.M1,
     "5m": TimeFrame.M5,
     "15m": TimeFrame.M15,
     "30m": TimeFrame.M30,

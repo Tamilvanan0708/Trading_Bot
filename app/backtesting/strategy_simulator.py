@@ -462,11 +462,30 @@ class StrategyBacktester:
 
         engines = {tf: DualRetracementEngine(symbol=self.symbol, timeframe=tf, engine_mode=self.engine_mode) for tf in timeframes}
 
-        # Fetch candles for each timeframe in parallel
-        candle_results = await asyncio.gather(*[
-            fetch_historical_candles(self.symbol, tf, warmup_start, end_date)
-            for tf in timeframes
-        ])
+        # Fetch candles for each timeframe in parallel + 1m candles for high-precision intra-candle replay
+        fetch_coros = [fetch_historical_candles(self.symbol, tf, warmup_start, end_date) for tf in timeframes]
+
+        async def _safe_fetch_m1():
+            try:
+                return await fetch_historical_candles(self.symbol, "1m", warmup_start, end_date)
+            except Exception as m1_err:
+                logger.debug("[BACKTEST] 1m candle fetch skipped: %s", m1_err)
+                return []
+        fetch_coros.append(_safe_fetch_m1())
+
+        all_results = await asyncio.gather(*fetch_coros)
+        candle_results = all_results[:len(timeframes)]
+        m1_candles: list[Candle] = all_results[-1] or []
+
+        import bisect
+        m1_timestamps = [c.timestamp for c in m1_candles] if m1_candles else []
+        tf_durations = {
+            "5m": timedelta(minutes=5),
+            "15m": timedelta(minutes=15),
+            "30m": timedelta(minutes=30),
+            "1h": timedelta(hours=1),
+        }
+
         tf_candles: dict[str, list[Candle]] = dict(zip(timeframes, candle_results))
 
         timeline: list[tuple[datetime, str, Candle]] = []
@@ -535,25 +554,58 @@ class StrategyBacktester:
 
             # 0. Live-Tick Intra-Candle Simulation:
             # If the engine has an active setup waiting for entry (TP_DYNAMIC) or in trade (TRADE_ACTIVE),
-            # simulate intra-candle price ticks (Open -> Low/High -> High/Low -> Close)
-            # using evaluate_live_price, exactly mirroring how live market ticks arrive!
+            # simulate intra-candle price ticks using evaluate_live_price, exactly mirroring how live market ticks arrive!
             if eng.setup is not None and eng.setup.state in (RetracementState.TP_DYNAMIC, RetracementState.TRADE_ACTIVE):
-                is_bull = candle.close >= candle.open
-                intra_ticks = [
-                    (candle.open, candle.timestamp),
-                    (candle.low if is_bull else candle.high, candle.timestamp + timedelta(seconds=1)),
-                    (candle.high if is_bull else candle.low, candle.timestamp + timedelta(seconds=2)),
-                    (candle.close, candle.timestamp + timedelta(seconds=3)),
-                ]
-                for px, tick_ts in intra_ticks:
-                    if eng.setup is None:
-                        break
-                    eng.evaluate_live_price(px, tick_ts, curr_candle_ts=candle.timestamp)
-                    # Instant sync: If trade resolved on intra-candle tick, record and release engine immediately
-                    if eng.setup and eng.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
-                        _check_and_record_layers(eng.setup, eng, tf, ts, tick_ts.isoformat())
-                        eng.archive_completed()
-                        break
+                dur = tf_durations.get(tf, timedelta(minutes=5))
+                c_start = candle.timestamp
+                c_end = c_start + dur
+
+                # Find 1m candles inside this higher TF bar if available
+                sub_m1: list[Candle] = []
+                if m1_timestamps:
+                    s_idx = bisect.bisect_left(m1_timestamps, c_start)
+                    e_idx = bisect.bisect_left(m1_timestamps, c_end)
+                    sub_m1 = m1_candles[s_idx:e_idx]
+
+                if sub_m1:
+                    # High-precision 1M replay: 4 micro-ticks per 1-minute candle
+                    for m1 in sub_m1:
+                        if eng.setup is None:
+                            break
+                        is_bull = m1.close >= m1.open
+                        m1_ticks = [
+                            (m1.open, m1.timestamp),
+                            (m1.low if is_bull else m1.high, m1.timestamp + timedelta(seconds=15)),
+                            (m1.high if is_bull else m1.low, m1.timestamp + timedelta(seconds=30)),
+                            (m1.close, m1.timestamp + timedelta(seconds=45)),
+                        ]
+                        for px, tick_ts in m1_ticks:
+                            if eng.setup is None:
+                                break
+                            eng.evaluate_live_price(px, tick_ts, curr_candle_ts=candle.timestamp)
+                            if eng.setup and eng.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
+                                _check_and_record_layers(eng.setup, eng, tf, ts, tick_ts.isoformat())
+                                eng.archive_completed()
+                                break
+                        if eng.setup is None or eng.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
+                            break
+                else:
+                    is_bull = candle.close >= candle.open
+                    intra_ticks = [
+                        (candle.open, candle.timestamp),
+                        (candle.low if is_bull else candle.high, candle.timestamp + timedelta(seconds=1)),
+                        (candle.high if is_bull else candle.low, candle.timestamp + timedelta(seconds=2)),
+                        (candle.close, candle.timestamp + timedelta(seconds=3)),
+                    ]
+                    for px, tick_ts in intra_ticks:
+                        if eng.setup is None:
+                            break
+                        eng.evaluate_live_price(px, tick_ts, curr_candle_ts=candle.timestamp)
+                        # Instant sync: If trade resolved on intra-candle tick, record and release engine immediately
+                        if eng.setup and eng.setup.state in (RetracementState.COMPLETED, RetracementState.INVALIDATED):
+                            _check_and_record_layers(eng.setup, eng, tf, ts, tick_ts.isoformat())
+                            eng.archive_completed()
+                            break
 
             # 1. Advance engine with this candle
             eng.process_candle(candle)

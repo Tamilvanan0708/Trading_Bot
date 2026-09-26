@@ -30,6 +30,7 @@ from app.data.provider import BrokerAccountProvider, LiveMarketDataProvider
 
 # Timeframe enum -> MT5 constant name
 _MT5_TIMEFRAME_ATTR = {
+    TimeFrame.M1: "TIMEFRAME_M1",
     TimeFrame.M5: "TIMEFRAME_M5",
     TimeFrame.M15: "TIMEFRAME_M15",
     TimeFrame.M30: "TIMEFRAME_M30",
@@ -46,6 +47,8 @@ _DIRECTION_MAP: dict[int, SignalDirection] = {
 }
 
 _TF_DURATION_MINUTES = {
+    TimeFrame.M1: 1,
+    TimeFrame.M5: 5,
     TimeFrame.M15: 15,
     TimeFrame.M30: 30,
     TimeFrame.H1: 60,
