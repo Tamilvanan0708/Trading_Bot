@@ -145,12 +145,60 @@ class MT5BridgeManager:
                 return True
         return False
 
+    def get_open_positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
+        """Fetch all currently open positions directly from MetaTrader 5."""
+        try:
+            import MetaTrader5 as mt5
+            t_info = mt5.terminal_info()
+            if not t_info or not getattr(t_info, "connected", False):
+                return []
+            sym = str(symbol or get_execution_settings().mt5_symbol or "XAUUSD-VIP").strip()
+            positions = mt5.positions_get(symbol=sym)
+            if positions is None:
+                positions = mt5.positions_get()
+            if not positions:
+                return []
+            res = []
+            for p in positions:
+                res.append({
+                    "ticket": int(p.ticket),
+                    "symbol": p.symbol,
+                    "type": "BUY" if p.type == 0 else "SELL",
+                    "volume": float(p.volume),
+                    "price_open": float(p.price_open),
+                    "sl": float(p.sl),
+                    "tp": float(p.tp),
+                    "price_current": float(p.price_current),
+                    "profit": float(p.profit),
+                    "comment": getattr(p, "comment", ""),
+                })
+            return res
+        except Exception as exc:
+            logger.debug("[MT5-BRIDGE] get_open_positions error: %s", exc)
+            return []
+
     def get_ticket_for_paper_trade(self, paper_trade_id: str | None) -> int | None:
         """Lookup native or EA execution ticket for a given paper trade ID."""
         if not paper_trade_id:
             return None
         with self._lock:
-            return self._paper_trade_to_ticket.get(str(paper_trade_id))
+            tkt = self._paper_trade_to_ticket.get(str(paper_trade_id))
+            if tkt:
+                return tkt
+        # Fallback: Query live positions directly from MT5
+        try:
+            import MetaTrader5 as mt5
+            positions = mt5.positions_get()
+            if positions:
+                for pos in positions:
+                    comm = getattr(pos, "comment", "")
+                    if str(paper_trade_id)[:6] in comm or (len(positions) == 1 and "L1" in comm):
+                        with self._lock:
+                            self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
+                        return int(pos.ticket)
+        except Exception:
+            pass
+        return None
 
     def get_account_balance(self) -> float | None:
         """Returns live account balance in USD from MT5 if connected."""
@@ -501,7 +549,25 @@ class MT5BridgeManager:
 
         target_ticket = ticket
         if not target_ticket and paper_trade_id:
-            target_ticket = self._paper_trade_to_ticket.get(str(paper_trade_id))
+            target_ticket = self.get_ticket_for_paper_trade(paper_trade_id)
+
+        # Fallback: Query live positions directly from MT5 if target_ticket is still unknown
+        if not target_ticket:
+            try:
+                import MetaTrader5 as mt5
+                sym = str(symbol or exec_cfg.mt5_symbol or "XAUUSD-VIP").upper()
+                open_pos = mt5.positions_get(symbol=sym)
+                if open_pos:
+                    for pos in open_pos:
+                        comm = getattr(pos, "comment", "")
+                        if (paper_trade_id and str(paper_trade_id)[:6] in comm) or len(open_pos) == 1:
+                            target_ticket = int(pos.ticket)
+                            if paper_trade_id:
+                                with self._lock:
+                                    self._paper_trade_to_ticket[str(paper_trade_id)] = target_ticket
+                            break
+            except Exception as e:
+                logger.debug("[MT5-BRIDGE] Fallback close position search failed: %s", e)
 
         order_id = f"mt5-close-{uuid.uuid4().hex[:8]}"
         order_payload = {
@@ -567,7 +633,25 @@ class MT5BridgeManager:
 
         target_ticket = ticket
         if not target_ticket and paper_trade_id:
-            target_ticket = self._paper_trade_to_ticket.get(str(paper_trade_id))
+            target_ticket = self.get_ticket_for_paper_trade(paper_trade_id)
+
+        # Fallback: Query live positions directly from MT5 if target_ticket is still unknown
+        if not target_ticket:
+            try:
+                import MetaTrader5 as mt5
+                sym = str(symbol or exec_cfg.mt5_symbol or "XAUUSD-VIP").upper()
+                open_pos = mt5.positions_get(symbol=sym)
+                if open_pos:
+                    for pos in open_pos:
+                        comm = getattr(pos, "comment", "")
+                        if "L1" in comm or len(open_pos) == 1:
+                            target_ticket = int(pos.ticket)
+                            if paper_trade_id:
+                                with self._lock:
+                                    self._paper_trade_to_ticket[str(paper_trade_id)] = target_ticket
+                            break
+            except Exception as e:
+                logger.debug("[MT5-BRIDGE] Fallback modify position search failed: %s", e)
 
         order_id = f"mt5-mod-{uuid.uuid4().hex[:8]}"
         order_payload = {

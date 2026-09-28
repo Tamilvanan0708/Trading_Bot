@@ -309,6 +309,62 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         except Exception as catchup_err:  # noqa: BLE001
             logger.warning("[PAPER-SYNC] Catch-up signal outcome sync: %s", catchup_err)
 
+        # 0c. Two-way MT5 Position Reconciliation:
+        # If MT5 has an open position for a paper trade that was prematurely marked CLOSED,
+        # restore it to OPEN so the Dashboard, Trailing SL, and Smart Shield can manage it!
+        try:
+            exec_cfg = get_execution_settings()
+            if exec_cfg.mt5_bridge_enabled:
+                from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                mt5_mgr = get_mt5_bridge_manager()
+                open_mt5_positions = mt5_mgr.get_open_positions()
+                if open_mt5_positions:
+                    for pos in open_mt5_positions:
+                        tkt = pos.get("ticket")
+                        comm = pos.get("comment", "")
+                        matched_pt = None
+                        # Check in-memory mapping first
+                        for pt_id, mapped_tkt in list(mt5_mgr._paper_trade_to_ticket.items()):
+                            if mapped_tkt == tkt:
+                                matched_pt = await repo.get_paper_trade(pt_id)
+                                break
+                        # If not matched, try searching by comment prefix or L1
+                        if not matched_pt and comm:
+                            candidate_pts = (await db.execute(
+                                select(PaperTradeModel).order_by(PaperTradeModel.opened_at.desc()).limit(20)
+                            )).scalars().all()
+                            for cpt in candidate_pts:
+                                if str(cpt.id)[:6] in comm or (cpt.signal_id and any(part in comm for part in cpt.signal_id.split("_") if len(part) > 3)):
+                                    matched_pt = cpt
+                                    mt5_mgr._paper_trade_to_ticket[str(cpt.id)] = tkt
+                                    break
+                        # If still not matched and there is an L1 trade in DB
+                        if not matched_pt:
+                            recent_l1 = (await db.execute(
+                                select(PaperTradeModel).where(
+                                    PaperTradeModel.signal_id.like("%_L1_%")
+                                ).order_by(PaperTradeModel.opened_at.desc()).limit(1)
+                            )).scalars().first()
+                            if recent_l1:
+                                matched_pt = recent_l1
+                                mt5_mgr._paper_trade_to_ticket[str(recent_l1.id)] = tkt
+
+                        if matched_pt and matched_pt.state != "OPEN":
+                            logger.info(
+                                "[MT5-RECONCILE] MT5 Ticket #%s is OPEN but Paper Trade %s was %s. Restoring to OPEN!",
+                                tkt, matched_pt.id, matched_pt.state
+                            )
+                            matched_pt.state = "OPEN"
+                            matched_pt.closed_at = None
+                            matched_pt.exit_price = None
+                            matched_pt.exit_reason = None
+                            if pos.get("sl") and pos.get("sl") > 0:
+                                matched_pt.stop_loss = round(pos.get("sl"), 2)
+                            await db.commit()
+        except Exception as recon_err:
+            logger.warning("[MT5-RECONCILE] Error during MT5 position reconciliation: %s", recon_err)
+
+
         ls = get_live_service()
         try:
             live_price = await ls.get_latest_price("XAUUSD")
@@ -1088,9 +1144,34 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                     PaperTradeModel.state == "OPEN",
                                                 )
                                             )).scalars().first()
+                                        # Fallback: Find L1 trade even if previously marked CLOSED prematurely
+                                        if not l1_trade:
+                                            l1_trade = (await db.execute(
+                                                select(PaperTradeModel).where(
+                                                    PaperTradeModel.signal_id == l1_sig_match,
+                                                ).order_by(PaperTradeModel.opened_at.desc())
+                                            )).scalars().first()
+                                            if not l1_trade:
+                                                l1_trade = (await db.execute(
+                                                    select(PaperTradeModel).where(
+                                                        PaperTradeModel.signal_id.like(f"FIB_RETR_{tf_key.upper()}_L1_{int(f_state.point_2_price)}%"),
+                                                    ).order_by(PaperTradeModel.opened_at.desc())
+                                                )).scalars().first()
+                                            if l1_trade and l1_trade.state != "OPEN":
+                                                from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                                open_mt5 = get_mt5_bridge_manager().get_open_positions()
+                                                if open_mt5:
+                                                    logger.warning("[SMART-SHIELD] L1 %s was closed in DB but MT5 has open positions! Reopening L1.", l1_trade.id)
+                                                    l1_trade.state = "OPEN"
+                                                    l1_trade.closed_at = None
+                                                    l1_trade.exit_price = None
+                                                    l1_trade.exit_reason = None
                                         if l1_trade:
                                             new_l1_sl = float(f_state.fib_0_618 or 0.0) if exec_cfg.smart_shield_level == "0.618" else float(f_state.fib_0_500 or 0.0)
+                                            should_trail = False
                                             if (f_state.direction == "LONG" and new_l1_sl > (l1_trade.stop_loss or 0.0)) or (f_state.direction == "SHORT" and 0.0 < new_l1_sl < (l1_trade.stop_loss or 999999.0)):
+                                                should_trail = True
+                                            if should_trail or l1_trade.stop_loss != round(new_l1_sl, 2):
                                                 l1_trade.stop_loss = round(new_l1_sl, 2)
                                                 l1_logs = list(l1_trade.state_logs or [])
                                                 l1_logs.append({
@@ -1104,17 +1185,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 await db.commit()
                                                 logger.info("[PAPER-AUTO] Smart Shield (%s): L%s TP hit -> trailed L1 SL to %.2f", exec_cfg.smart_shield_level, l_key[-1], new_l1_sl)
 
-                                                # 1. MT5 Bridge Live SL Modify Dispatch
-                                                try:
-                                                    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                                    get_mt5_bridge_manager().enqueue_modify(
-                                                        paper_trade_id=l1_trade.id,
-                                                        symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
-                                                        new_sl=new_l1_sl,
-                                                        direction=f_state.direction,
-                                                    )
-                                                except Exception as mt5_err:
-                                                    logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5: %s", mt5_err)
+                                            # 1. MT5 Bridge Live SL Modify Dispatch (Always dispatch to ensure broker sync)
+                                            try:
+                                                from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                                get_mt5_bridge_manager().enqueue_modify(
+                                                    paper_trade_id=l1_trade.id,
+                                                    symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                                    new_sl=new_l1_sl,
+                                                    direction=f_state.direction,
+                                                )
+                                            except Exception as mt5_err:
+                                                logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5: %s", mt5_err)
 
                                                 # 2. Telegram Alert: Smart Shield Trailing SL
                                                 try:
@@ -1829,7 +1910,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 t.state_logs = logs
                                 logger.info("[PAPER-AUTO] Trend trade %s hit TP1 (%.2f) -> Stop Loss moved to Breakeven (%.2f)", t.id, t.take_profit_1, t.stop_loss)
 
-                    if final_tp and price_px <= final_tp:
+                    # For SHORT trades, closing requires BUY at Ask price (price_px + spread).
+                    # Use 0.25 pts spread buffer to prevent false TP before broker Ask price can fill.
+                    spread_buf = 0.25
+                    if final_tp and (price_px + spread_buf) <= final_tp:
                         t.state = "CLOSED"
                         t.exit_price = final_tp
                         t.exit_reason = "TP_HIT"
@@ -1970,6 +2054,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             )
                                         )).scalars().first()
 
+                                # Fallback: Find L1 trade even if previously marked CLOSED prematurely
+                                if not l1_trade:
+                                    l1_trade = (await db.execute(
+                                        select(PaperTradeModel).where(
+                                            PaperTradeModel.signal_id == l1_sig_match,
+                                        ).order_by(PaperTradeModel.opened_at.desc())
+                                    )).scalars().first()
+                                    if not l1_trade:
+                                        parts = (t.signal_id or "").split("_")
+                                        if len(parts) >= 5:
+                                            p2_seg = parts[4]
+                                            l1_trade = (await db.execute(
+                                                select(PaperTradeModel).where(
+                                                    PaperTradeModel.signal_id.like(f"FIB_RETR_{trade_tf}_L1_{p2_seg}%"),
+                                                ).order_by(PaperTradeModel.opened_at.desc())
+                                            )).scalars().first()
+                                    if l1_trade and l1_trade.state != "OPEN":
+                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                        open_mt5 = get_mt5_bridge_manager().get_open_positions()
+                                        if open_mt5:
+                                            logger.warning("[PAPER-FAST-MONITOR] L1 %s was closed in DB but MT5 has open positions! Reopening L1.", l1_trade.id)
+                                            l1_trade.state = "OPEN"
+                                            l1_trade.closed_at = None
+                                            l1_trade.exit_price = None
+                                            l1_trade.exit_reason = None
+
                                 if l1_trade:
                                     if exec_cfg.smart_shield_level == "0.618":
                                         target_level = float(t.take_profit_1 or t.exit_price or 0.0)
@@ -1994,7 +2104,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     elif l1_trade.direction == "SHORT" and 0.0 < target_level < (l1_trade.stop_loss or 999999.0):
                                         should_trail = True
 
-                                    if should_trail:
+                                    if should_trail or l1_trade.stop_loss != round(target_level, 2):
                                         l1_trade.stop_loss = round(target_level, 2)
                                         l1_logs = list(l1_trade.state_logs or [])
                                         l1_logs.append({
@@ -2013,17 +2123,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             l1_trade.stop_loss,
                                         )
 
-                                        # 1. MT5 Bridge Live SL Modify Dispatch
-                                        try:
-                                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                            get_mt5_bridge_manager().enqueue_modify(
-                                                paper_trade_id=l1_trade.id,
-                                                symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
-                                                new_sl=l1_trade.stop_loss,
-                                                direction=l1_trade.direction,
-                                            )
-                                        except Exception as mt5_err:
-                                            logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5 from fast monitor: %s", mt5_err)
+                                    # 1. MT5 Bridge Live SL Modify Dispatch (Always dispatch to ensure broker sync)
+                                    try:
+                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                        get_mt5_bridge_manager().enqueue_modify(
+                                            paper_trade_id=l1_trade.id,
+                                            symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                            new_sl=round(target_level, 2),
+                                            direction=l1_trade.direction,
+                                        )
+                                    except Exception as mt5_err:
+                                        logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5 from fast monitor: %s", mt5_err)
 
                                         # 2. Telegram Alert: Smart Shield Trailing SL
                                         try:

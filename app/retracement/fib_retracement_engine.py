@@ -1670,7 +1670,12 @@ class DualRetracementEngine:
             # 2c. Global Take Profit Check (locked_tp / 1.000)
             tp_hit = False
             if setup.locked_tp is not None:
-                tp_hit = (live_price >= setup.locked_tp) if setup.direction == "LONG" else (live_price <= setup.locked_tp)
+                if setup.direction == "LONG":
+                    tp_hit = live_price >= setup.locked_tp
+                else:
+                    # For SHORT trades, closing requires BUY at Ask price = live_price + spread.
+                    # Use conservative 0.25 pts spread buffer to prevent false TP before broker can fill.
+                    tp_hit = (live_price + 0.25) <= setup.locked_tp
 
             if tp_hit:
                 setup.state = RetracementState.COMPLETED
@@ -1696,12 +1701,16 @@ class DualRetracementEngine:
                 if layer.get("state") != "FILLED" or layer.get("tp") is None:
                     continue
                 l_tp = layer["tp"]
-                l_tp_hit = (live_price >= l_tp) if setup.direction == "LONG" else (live_price <= l_tp)
+                if setup.direction == "LONG":
+                    l_tp_hit = live_price >= l_tp
+                else:
+                    l_tp_hit = (live_price + 0.25) <= l_tp
                 if l_tp_hit:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = l_tp
                     # Smart Shield trigger: Move L1 SL to 0.500 buffer or 0.618 Entry Breakeven
-                    if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers and setup.layers["L1"].get("state") == "FILLED":
+                    # Trigger even if L1 state is FILLED or unexpectedly marked, to ensure L1 is always shielded
+                    if layer.get("layer") in ("L2", "L3") and "L1" in setup.layers:
                         exec_cfg = get_execution_settings()
                         if getattr(exec_cfg, "smart_shield_enabled", True):
                             shield_lvl = self.smart_shield_level or getattr(exec_cfg, "smart_shield_level", "0.500")
