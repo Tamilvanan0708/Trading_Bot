@@ -1667,15 +1667,22 @@ class DualRetracementEngine:
                         metadata={"layer": layer.get("layer"), "shield": True, "live_tick": True},
                     ))
 
+            # Resolve live spread buffer dynamically from MT5 broker (falls back to 0.15 pts)
+            spread_buf = 0.15
+            try:
+                from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                spread_buf = get_mt5_bridge_manager().get_live_spread()
+            except Exception:
+                pass
+
             # 2c. Global Take Profit Check (locked_tp / 1.000)
             tp_hit = False
             if setup.locked_tp is not None:
                 if setup.direction == "LONG":
                     tp_hit = live_price >= setup.locked_tp
                 else:
-                    # For SHORT trades, closing requires BUY at Ask price = live_price + spread.
-                    # Use conservative 0.25 pts spread buffer to prevent false TP before broker can fill.
-                    tp_hit = (live_price + 0.25) <= setup.locked_tp
+                    # For SHORT trades, closing requires BUY at Ask price = live_price + dynamic spread.
+                    tp_hit = (live_price + spread_buf) <= setup.locked_tp
 
             if tp_hit:
                 setup.state = RetracementState.COMPLETED
@@ -1704,7 +1711,7 @@ class DualRetracementEngine:
                 if setup.direction == "LONG":
                     l_tp_hit = live_price >= l_tp
                 else:
-                    l_tp_hit = (live_price + 0.25) <= l_tp
+                    l_tp_hit = (live_price + spread_buf) <= l_tp
                 if l_tp_hit:
                     layer["state"] = "TP_HIT"
                     layer["exit_price"] = l_tp

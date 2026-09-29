@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from app.config.execution_settings import get_execution_settings
@@ -185,7 +186,14 @@ class MT5BridgeManager:
             tkt = self._paper_trade_to_ticket.get(str(paper_trade_id))
             if tkt:
                 return tkt
-        # Fallback: Query live positions directly from MT5
+            for rec in reversed(self._execution_history):
+                oid = str(rec.get("order_id", ""))
+                if str(paper_trade_id)[:8] in oid and rec.get("ticket"):
+                    t_val = int(rec["ticket"])
+                    self._paper_trade_to_ticket[str(paper_trade_id)] = t_val
+                    return t_val
+
+        # Fallback 1: Query live positions directly from MT5
         try:
             import MetaTrader5 as mt5
             positions = mt5.positions_get()
@@ -196,8 +204,64 @@ class MT5BridgeManager:
                         with self._lock:
                             self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
                         return int(pos.ticket)
+            # Fallback 2: Query recent history deals in case trade was already closed
+            now_ts = time.time()
+            deals = mt5.history_deals_get(now_ts - (7 * 86400), now_ts)
+            if deals:
+                for d in reversed(deals):
+                    comm = getattr(d, "comment", "")
+                    if str(paper_trade_id)[:6] in comm and getattr(d, "position_id", 0) > 0:
+                        pos_id = int(d.position_id)
+                        with self._lock:
+                            self._paper_trade_to_ticket[str(paper_trade_id)] = pos_id
+                        return pos_id
         except Exception:
             pass
+        return None
+
+    def get_live_spread(self, symbol: str | None = None) -> float:
+        """Returns live broker spread in points (Ask - Bid) for the given symbol, or 0.15 fallback."""
+        try:
+            import MetaTrader5 as mt5
+            t_info = mt5.terminal_info()
+            if not t_info or not getattr(t_info, "connected", False):
+                return 0.15
+            sym = str(symbol or get_execution_settings().mt5_symbol or "XAUUSD-VIP").strip()
+            tick = mt5.symbol_info_tick(sym)
+            if tick and tick.ask and tick.bid:
+                spr = round(abs(tick.ask - tick.bid), 2)
+                if 0.0 < spr < 5.0:
+                    return spr
+        except Exception:
+            pass
+        return 0.15
+
+    def get_closed_deal_info(self, ticket: int) -> dict[str, Any] | None:
+        """Query MT5 deal history to see if a position/ticket was closed, returning exit details."""
+        if not ticket:
+            return None
+        try:
+            import MetaTrader5 as mt5
+            t_info = mt5.terminal_info()
+            if not t_info or not getattr(t_info, "connected", False):
+                return None
+            deals = mt5.history_deals_get(position=ticket)
+            if deals is None:
+                deals = mt5.history_deals_get(ticket=ticket)
+            if deals:
+                close_deals = [d for d in deals if getattr(d, "entry", 0) in (1, 3)]
+                target_deal = close_deals[-1] if close_deals else (deals[-1] if len(deals) > 1 else None)
+                if target_deal:
+                    tot_profit = sum(float(getattr(d, "profit", 0.0)) for d in deals)
+                    return {
+                        "ticket": ticket,
+                        "close_price": float(target_deal.price),
+                        "close_time": datetime.fromtimestamp(target_deal.time, tz=timezone.utc),
+                        "profit": round(tot_profit, 2),
+                        "comment": getattr(target_deal, "comment", ""),
+                    }
+        except Exception as e:
+            logger.debug("[MT5-BRIDGE] get_closed_deal_info error for ticket #%s: %s", ticket, e)
         return None
 
     def get_account_balance(self) -> float | None:

@@ -364,6 +364,62 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         except Exception as recon_err:
             logger.warning("[MT5-RECONCILE] Error during MT5 position reconciliation: %s", recon_err)
 
+        # 0d. Two-way MT5 Closed Position Synchronization:
+        # If a paper trade is currently marked OPEN in DB, but its corresponding MT5 position
+        # is already CLOSED in MT5 (e.g. broker hit TP/SL or user closed in MT5 app),
+        # automatically synchronize and close the paper trade so it reflects the actual MT5 profit & state!
+        try:
+            exec_cfg = get_execution_settings()
+            if exec_cfg.mt5_bridge_enabled:
+                from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                mt5_mgr = get_mt5_bridge_manager()
+                if mt5_mgr.is_connected():
+                    open_mt5_tickets = {pos.get("ticket") for pos in mt5_mgr.get_open_positions() if pos.get("ticket")}
+                    db_open_trades = (await db.execute(
+                        select(PaperTradeModel).where(PaperTradeModel.state == "OPEN")
+                    )).scalars().all()
+
+                    for ot in db_open_trades:
+                        tkt = mt5_mgr.get_ticket_for_paper_trade(ot.id)
+                        # If trade has a known ticket and that ticket is NOT open on MT5 anymore
+                        if tkt and tkt not in open_mt5_tickets:
+                            deal_info = mt5_mgr.get_closed_deal_info(tkt)
+                            if deal_info:
+                                close_px = float(deal_info.get("close_price") or ot.current_price or ot.entry_price or 0.0)
+                                profit = deal_info.get("profit")
+                                close_dt = deal_info.get("close_time") or datetime.now(timezone.utc)
+                                ot.state = "CLOSED"
+                                ot.exit_price = close_px
+                                ot.closed_at = close_dt
+                                ot.realized_pnl = profit if profit is not None else 0.0
+                                if profit is not None:
+                                    ot.exit_reason = "TP_HIT" if profit >= 0 else "SL_HIT"
+                                else:
+                                    ot.exit_reason = "CLOSED"
+                                if ot.entry_price and close_px:
+                                    pts = round(abs(close_px - ot.entry_price), 2)
+                                    sl_d = max(0.1, abs(ot.entry_price - (ot.stop_loss or 0.0)))
+                                    ot.realized_r = round(pts / sl_d, 2) if ot.exit_reason == "TP_HIT" else -1.0
+                                logger.info(
+                                    "[MT5-RECONCILE] Ticket #%d was closed on MT5 @ %.2f (PnL: $%.2f). Synchronized Paper Trade %s to CLOSED (%s).",
+                                    tkt, close_px, profit or 0.0, ot.id, ot.exit_reason
+                                )
+                                # Update parent signal outcome
+                                if ot.signal_id:
+                                    sig = await repo.get_signal_by_id(ot.signal_id)
+                                    if sig:
+                                        sig.outcome = ot.exit_reason
+                                        sig.final_r = ot.realized_r
+                                        sig.outcome_updated_at = close_dt
+                                        if ot.exit_reason == "TP_HIT":
+                                            sig.tp1_hit = True
+                                        elif ot.exit_reason == "SL_HIT":
+                                            sig.sl_hit = True
+                                await db.commit()
+        except Exception as close_sync_err:
+            logger.warning("[MT5-RECONCILE] Error during MT5 closed position synchronization: %s", close_sync_err)
+
+
 
         ls = get_live_service()
         try:
@@ -1911,8 +1967,13 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 logger.info("[PAPER-AUTO] Trend trade %s hit TP1 (%.2f) -> Stop Loss moved to Breakeven (%.2f)", t.id, t.take_profit_1, t.stop_loss)
 
                     # For SHORT trades, closing requires BUY at Ask price (price_px + spread).
-                    # Use 0.25 pts spread buffer to prevent false TP before broker Ask price can fill.
-                    spread_buf = 0.25
+                    # Use dynamic MT5 broker spread buffer (falls back to 0.15 pts) to match broker fill.
+                    spread_buf = 0.15
+                    try:
+                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                        spread_buf = get_mt5_bridge_manager().get_live_spread()
+                    except Exception:
+                        pass
                     if final_tp and (price_px + spread_buf) <= final_tp:
                         t.state = "CLOSED"
                         t.exit_price = final_tp
