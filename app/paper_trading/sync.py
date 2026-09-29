@@ -241,6 +241,21 @@ def _build_hybrid_shield_msg(
     )
 
 
+async def _get_compounded_paper_balance(db: AsyncSession, base_balance: float) -> float:
+    """Compute live compounded paper trading balance (base_balance + net realized PnL from closed trades)."""
+    try:
+        res = await db.execute(
+            select(func.coalesce(func.sum(PaperTradeModel.realized_pnl), 0.0)).where(
+                PaperTradeModel.state == "CLOSED"
+            )
+        )
+        closed_pnl = float(res.scalar() or 0.0)
+        return max(10.0, round(base_balance + closed_pnl, 2))
+    except Exception as e:
+        logger.warning("[COMPOUNDING] Error calculating compounded balance: %s", e)
+        return max(10.0, base_balance)
+
+
 async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> None:
     """Scan in-memory 5M strategy engine states, run AI validation, and open/update paper trades.
     Thread-safe and guarded by _sync_lock with 10s debounce.
@@ -1001,6 +1016,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         logger.warning("[ADMISSION] Gate evaluation failed for %s: %s", sig_id, adm_err)
 
                                     exec_cfg = get_execution_settings()
+                                    compounded_bal = await _get_compounded_paper_balance(db, exec_cfg.account_balance)
                                     trade_lot = calculate_lot_size(
                                         entry_px, sl_px,
                                         sizing_mode=exec_cfg.sizing_mode,
@@ -1008,7 +1024,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         fixed_lot_size=exec_cfg.fixed_lot_size,
                                         risk_mode=exec_cfg.risk_mode,
                                         risk_percent=exec_cfg.risk_percent,
-                                        account_balance=exec_cfg.account_balance,
+                                        account_balance=compounded_bal,
                                         account_currency=exec_cfg.account_currency,
                                     )
 
@@ -1609,6 +1625,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     continue
 
                                 exec_cfg = get_execution_settings()
+                                compounded_bal = await _get_compounded_paper_balance(db, exec_cfg.account_balance)
                                 trade_lot = calculate_lot_size(
                                     entry_px, sl_px,
                                     sizing_mode=exec_cfg.sizing_mode,
@@ -1616,7 +1633,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     fixed_lot_size=exec_cfg.fixed_lot_size,
                                     risk_mode=exec_cfg.risk_mode,
                                     risk_percent=exec_cfg.risk_percent,
-                                    account_balance=exec_cfg.account_balance,
+                                    account_balance=compounded_bal,
                                     account_currency=exec_cfg.account_currency,
                                 )
 
@@ -1751,6 +1768,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 ai_short = "APPROVED (95% Conf)"
                                 ai_verdict = f"APPROVED (conf=95%) — Rule 8 breakout confirmed on {tf_key.upper()} with 9/21 EMA alignment"
                                 exec_cfg = get_execution_settings()
+                                compounded_bal = await _get_compounded_paper_balance(db, exec_cfg.account_balance)
                                 trade_lot = calculate_lot_size(
                                     entry_px, sl_px,
                                     sizing_mode=exec_cfg.sizing_mode,
@@ -1758,7 +1776,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     fixed_lot_size=exec_cfg.fixed_lot_size,
                                     risk_mode=exec_cfg.risk_mode,
                                     risk_percent=exec_cfg.risk_percent,
-                                    account_balance=exec_cfg.account_balance,
+                                    account_balance=compounded_bal,
                                     account_currency=exec_cfg.account_currency,
                                 )
 

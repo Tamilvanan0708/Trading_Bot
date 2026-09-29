@@ -174,7 +174,8 @@ async def get_performance(db: AsyncSession = Depends(get_db_session)):
     avg_loss = round(gross_loss / len(losses), 2) if losses else 0.0
     realized_pnl = round(sum(t.realized_pnl or 0.0 for t in closed), 2)
 
-    initial_balance = get_settings().ACCOUNT_BALANCE
+    from app.config.execution_settings import get_execution_settings
+    initial_balance = get_execution_settings().account_balance
 
     return {
         "paper_account_balance": round(initial_balance + realized_pnl, 2),
