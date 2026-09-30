@@ -347,25 +347,41 @@ class RetracementMultiTFMonitor:
                 slot.last_processed_ts = new_candles[-1].timestamp
 
         # Dynamic target tracking & early entry on forming candle extremes without waiting for candle close
-        if forming_candle is not None and slot.engine.setup and slot.engine.setup.state == RetracementState.TP_DYNAMIC:
+        if forming_candle is not None and slot.engine.setup:
             setup = slot.engine.setup
-            if setup.direction == "SHORT":
-                if hasattr(forming_candle, "low") and forming_candle.low < (setup.current_high_price or float("inf")):
-                    setup.current_high_price = forming_candle.low
-                    setup.current_high_timestamp = getattr(forming_candle, "timestamp", datetime.now(timezone.utc))
-                    slot.engine._apply_bearish_fib(setup, setup.point_2_price, forming_candle.low)
-                if hasattr(forming_candle, "high") and setup.entry_price is not None and forming_candle.high >= setup.entry_price:
-                    slot.engine.evaluate_live_price(forming_candle.high, timestamp=getattr(forming_candle, "timestamp", None))
-            elif setup.direction == "LONG":
-                if hasattr(forming_candle, "high") and forming_candle.high > (setup.current_high_price or 0.0):
-                    setup.current_high_price = forming_candle.high
-                    setup.current_high_timestamp = getattr(forming_candle, "timestamp", datetime.now(timezone.utc))
-                    slot.engine._apply_bullish_fib(setup, setup.point_2_price, forming_candle.high)
-                if hasattr(forming_candle, "low") and setup.entry_price is not None and forming_candle.low <= setup.entry_price:
-                    slot.engine.evaluate_live_price(forming_candle.low, timestamp=getattr(forming_candle, "timestamp", None))
-            archived = slot.engine.archive_completed()
-            if archived is not None:
-                completed.append(archived)
+            if setup.state == RetracementState.TP_DYNAMIC:
+                if setup.direction == "SHORT":
+                    if hasattr(forming_candle, "low") and forming_candle.low < (setup.current_high_price or float("inf")):
+                        setup.current_high_price = forming_candle.low
+                        setup.current_high_timestamp = getattr(forming_candle, "timestamp", datetime.now(timezone.utc))
+                        slot.engine._apply_bearish_fib(setup, setup.point_2_price, forming_candle.low)
+                    if hasattr(forming_candle, "high") and setup.entry_price is not None and forming_candle.high >= setup.entry_price:
+                        slot.engine.evaluate_live_price(forming_candle.high, timestamp=getattr(forming_candle, "timestamp", None))
+                elif setup.direction == "LONG":
+                    if hasattr(forming_candle, "high") and forming_candle.high > (setup.current_high_price or 0.0):
+                        setup.current_high_price = forming_candle.high
+                        setup.current_high_timestamp = getattr(forming_candle, "timestamp", datetime.now(timezone.utc))
+                        slot.engine._apply_bullish_fib(setup, setup.point_2_price, forming_candle.high)
+                    if hasattr(forming_candle, "low") and setup.entry_price is not None and forming_candle.low <= setup.entry_price:
+                        slot.engine.evaluate_live_price(forming_candle.low, timestamp=getattr(forming_candle, "timestamp", None))
+                archived = slot.engine.archive_completed()
+                if archived is not None:
+                    completed.append(archived)
+            elif setup.state == RetracementState.TRADE_ACTIVE:
+                # Active trade: Evaluate candle wicks so deeper layers (L2, L3) fill immediately on pullbacks!
+                if setup.direction == "SHORT":
+                    if hasattr(forming_candle, "high") and forming_candle.high is not None:
+                        slot.engine.evaluate_live_price(forming_candle.high, timestamp=getattr(forming_candle, "timestamp", None))
+                    if hasattr(forming_candle, "low") and forming_candle.low is not None:
+                        slot.engine.evaluate_live_price(forming_candle.low, timestamp=getattr(forming_candle, "timestamp", None))
+                elif setup.direction == "LONG":
+                    if hasattr(forming_candle, "low") and forming_candle.low is not None:
+                        slot.engine.evaluate_live_price(forming_candle.low, timestamp=getattr(forming_candle, "timestamp", None))
+                    if hasattr(forming_candle, "high") and forming_candle.high is not None:
+                        slot.engine.evaluate_live_price(forming_candle.high, timestamp=getattr(forming_candle, "timestamp", None))
+                archived = slot.engine.archive_completed()
+                if archived is not None:
+                    completed.append(archived)
 
         # Instant Tick Touch Execution: Only evaluate real-time live price when an actual live tick is provided
         if live_price is not None and live_price > 0:

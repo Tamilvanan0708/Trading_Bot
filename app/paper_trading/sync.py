@@ -353,11 +353,12 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     matched_pt = cpt
                                     mt5_mgr._paper_trade_to_ticket[str(cpt.id)] = tkt
                                     break
-                        # If still not matched and there is an L1 trade in DB
+                        # If still not matched and there is an OPEN L1 trade in DB
                         if not matched_pt:
                             recent_l1 = (await db.execute(
                                 select(PaperTradeModel).where(
-                                    PaperTradeModel.signal_id.like("%_L1_%")
+                                    PaperTradeModel.signal_id.like("%_L1_%"),
+                                    PaperTradeModel.state == "OPEN"
                                 ).order_by(PaperTradeModel.opened_at.desc()).limit(1)
                             )).scalars().first()
                             if recent_l1:
@@ -388,7 +389,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
             if exec_cfg.mt5_bridge_enabled:
                 from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                 mt5_mgr = get_mt5_bridge_manager()
-                if mt5_mgr.is_connected():
+                is_live = (callable(getattr(mt5_mgr, "is_connected", None)) and mt5_mgr.is_connected()) or getattr(mt5_mgr, "is_online", False)
+                if is_live:
                     open_mt5_tickets = {pos.get("ticket") for pos in mt5_mgr.get_open_positions() if pos.get("ticket")}
                     db_open_trades = (await db.execute(
                         select(PaperTradeModel).where(PaperTradeModel.state == "OPEN")
@@ -1333,6 +1335,62 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[PAPER-SYNC] Fib sync error: %s", exc)
+
+            # Direct Price Fallback Watchdog for Open Fib Trades:
+            # If an open trade's Stop Loss or Take Profit has been breached by live_price,
+            # ensure it closes immediately, even if the engine slot was reset or overwritten!
+            if live_price and live_price > 1000.0:
+                try:
+                    open_fib_trades = (await db.execute(
+                        select(PaperTradeModel).where(
+                            PaperTradeModel.state == "OPEN",
+                            PaperTradeModel.signal_id.like("FIB_RETR_%"),
+                        )
+                    )).scalars().all()
+                    for oft in open_fib_trades:
+                        entry_px = float(oft.actual_entry or oft.target_entry or oft.entry_price or 0.0)
+                        sl_px = float(oft.stop_loss or 0.0)
+                        tp_px = float(oft.take_profit_1 or oft.take_profit_2 or 0.0)
+                        dir_chk = (oft.direction or "LONG").upper()
+
+                        sl_hit = (live_price <= sl_px) if (dir_chk == "LONG" and sl_px > 0) else ((live_price >= sl_px) if (dir_chk == "SHORT" and sl_px > 0) else False)
+                        tp_hit = (live_price >= tp_px) if (dir_chk == "LONG" and tp_px > 0) else ((live_price <= tp_px) if (dir_chk == "SHORT" and tp_px > 0) else False)
+
+                        if sl_hit or tp_hit:
+                            exit_px = tp_px if tp_hit else (sl_px if sl_px > 0 else live_price)
+                            pts = round((exit_px - entry_px) if dir_chk == "LONG" else (entry_px - exit_px), 2)
+                            oft.state = "CLOSED"
+                            oft.exit_price = exit_px
+                            if tp_hit:
+                                oft.exit_reason = "TP_HIT"
+                            elif pts > 0.5:
+                                oft.exit_reason = "TRAILING_SL_HIT"
+                            elif abs(pts) <= 0.5:
+                                oft.exit_reason = "BREAKEVEN_HIT"
+                            else:
+                                oft.exit_reason = "SL_HIT"
+                            oft.closed_at = datetime.now(timezone.utc)
+                            oft.realized_pnl = round(pts * (oft.lot_size or 0.01) * 100.0, 2)
+                            oft.realized_r = round(pts / max(0.1, abs(entry_px - sl_px)), 2) if sl_px else 0.0
+                            await db.commit()
+                            logger.info(
+                                "[PAPER-WATCHDOG] Closed Fib trade %s (%s) @ %.2f reason=%s pnl=$%.2f",
+                                oft.signal_id, oft.layer or "L1", exit_px, oft.exit_reason, oft.realized_pnl,
+                            )
+                            # Dispatch MT5 bridge close
+                            if exec_cfg.mt5_bridge_enabled:
+                                try:
+                                    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                    get_mt5_bridge_manager().enqueue_close(
+                                        paper_trade_id=oft.id,
+                                        symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                        reason=oft.exit_reason,
+                                        direction=dir_chk,
+                                    )
+                                except Exception as mt5_err:
+                                    logger.warning("[MT5-BRIDGE] Watchdog close dispatch failed: %s", mt5_err)
+                except Exception as watchdog_err:
+                    logger.warning("[PAPER-WATCHDOG] Error in price watchdog: %s", watchdog_err)
 
         # 2. SMC With Fib: Multi-Timeframe (5M, 15M, 30M, 1H, 4H) Single Active Trade Sync
         if exec_cfg.strategy_smc_fib:

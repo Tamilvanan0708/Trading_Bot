@@ -85,6 +85,10 @@ class MT5BridgeManager:
             pass
         return (time.time() - self._heartbeat.get("last_seen", 0.0)) <= 15.0
 
+    def is_connected(self) -> bool:
+        """True if EA reported heartbeat or native MT5 package is connected to terminal."""
+        return self.is_online
+
     def get_status(self) -> dict[str, Any]:
         """Returns comprehensive bridge status for frontend settings UI."""
         with self._lock:
@@ -573,6 +577,19 @@ class MT5BridgeManager:
             close_type = mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY
             close_price = tick.bid if is_buy else tick.ask
 
+            sym_info = mt5.symbol_info(symbol)
+            filling = mt5.ORDER_FILLING_IOC
+            if sym_info and hasattr(sym_info, "filling_mode"):
+                fm = sym_info.filling_mode
+                if fm & 2:
+                    filling = mt5.ORDER_FILLING_IOC
+                elif fm & 1:
+                    filling = mt5.ORDER_FILLING_FOK
+                else:
+                    filling = mt5.ORDER_FILLING_RETURN
+
+            magic_num = int(get_execution_settings().mt5_magic_number or 777888)
+
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "position": ticket,
@@ -580,11 +597,11 @@ class MT5BridgeManager:
                 "volume": lot,
                 "type": close_type,
                 "price": close_price,
-                "deviation": 20,
-                "magic": 123456,
+                "deviation": 25,
+                "magic": magic_num,
                 "comment": "Close Fib Retr",
                 "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
+                "type_filling": filling,
             }
             res = mt5.order_send(request)
             if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
