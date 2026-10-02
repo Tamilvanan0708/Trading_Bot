@@ -312,7 +312,8 @@ class MT5BridgeManager:
 
         order_id = str(order_data.get("id") or f"mt5-{uuid.uuid4().hex[:8]}")
         raw_lot = float(order_data.get("lot_size") or order_data.get("lots") or 0.01)
-        clamped_lot = max(0.01, min(0.50, round(raw_lot, 2)))  # Solution A+B clamp
+        max_cap = float(getattr(exec_cfg, "max_lot_cap", 5.0) or 5.0)
+        clamped_lot = max(0.01, min(max_cap, round(raw_lot, 2)))
 
         entry_px = float(order_data.get("entry_price") or order_data.get("target_entry") or 0.0)
         sl_px = float(order_data.get("stop_loss") or 0.0)

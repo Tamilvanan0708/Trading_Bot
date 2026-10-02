@@ -1106,14 +1106,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         })
 
                                         trade_logs = list(new_trade.state_logs or [])
-                                        # Idea 3: Synchronize actual_entry with real MT5 fill price
+                                        # Synchronize actual_entry and lot_size with real MT5 execution
                                         if mt5_res and mt5_res.get("status") == "filled_native":
                                             fill_px = float(mt5_res.get("price") or entry_px)
                                             new_trade.actual_entry = fill_px
+                                            if mt5_res.get("payload", {}).get("lot_size"):
+                                                new_trade.lot_size = float(mt5_res["payload"]["lot_size"])
                                             trade_logs.append({
                                                 "event": "MT5_FILLED",
                                                 "ticket": mt5_res.get("ticket"),
                                                 "price": fill_px,
+                                                "lot_size": new_trade.lot_size,
                                                 "comment": trade_comment,
                                                 "time": datetime.now(timezone.utc).isoformat(),
                                             })
