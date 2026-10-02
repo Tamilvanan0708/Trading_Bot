@@ -54,6 +54,12 @@ class ExecutionSettings(BaseModel):
         le=10.0,
         description="Fixed lot size when sizing_mode is 'fixed'"
     )
+    max_lot_cap: float = Field(
+        default=0.50,
+        ge=0.01,
+        le=10.0,
+        description="Maximum lot safety cap when sizing_mode is 'broker_risk'"
+    )
     fib_retracement_timeframes: list[str] = Field(
         default=["5m", "15m", "30m", "1h"],
         description="Active timeframes for Fib Retracement strategy (4h excluded)"
