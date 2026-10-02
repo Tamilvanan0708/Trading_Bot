@@ -60,6 +60,10 @@ class ExecutionSettings(BaseModel):
         le=10.0,
         description="Maximum lot safety cap when sizing_mode is 'broker_risk'"
     )
+    balance_baseline_offset: float = Field(
+        default=0.0,
+        description="Historical realized PnL offset deducted from compounding balance so user can reset balance baseline without deleting historical trade records"
+    )
     fib_retracement_timeframes: list[str] = Field(
         default=["5m", "15m", "30m", "1h"],
         description="Active timeframes for Fib Retracement strategy (4h excluded)"

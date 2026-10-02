@@ -175,10 +175,13 @@ async def get_performance(db: AsyncSession = Depends(get_db_session)):
     realized_pnl = round(sum(t.realized_pnl or 0.0 for t in closed), 2)
 
     from app.config.execution_settings import get_execution_settings
-    initial_balance = get_execution_settings().account_balance
+    exec_cfg = get_execution_settings()
+    initial_balance = exec_cfg.account_balance
+    offset = float(getattr(exec_cfg, "balance_baseline_offset", 0.0) or 0.0)
+    effective_pnl = round(realized_pnl - offset, 2)
 
     return {
-        "paper_account_balance": round(initial_balance + realized_pnl, 2),
+        "paper_account_balance": round(initial_balance + effective_pnl, 2),
         "active_open_trades_count": len(active),
         "closed_trades_count": total_trades,
         "winning_trades": len(wins),
@@ -187,7 +190,7 @@ async def get_performance(db: AsyncSession = Depends(get_db_session)):
         "profit_factor": profit_factor,
         "avg_win_usd": avg_win,
         "avg_loss_usd": avg_loss,
-        "realized_pnl_usd": realized_pnl,
+        "realized_pnl_usd": effective_pnl,
         "recent_backtest_runs_count": len(runs),
         "latest_backtest": {
             "id": runs[0].id,
@@ -208,11 +211,13 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
     active = await repo.list_active_paper_trades()
     closed = await repo.list_closed_paper_trades(limit=500)
     total_pnl = sum(t.realized_pnl or 0.0 for t in closed)
+    offset = float(getattr(exec_cfg, "balance_baseline_offset", 0.0) or 0.0)
+    effective_pnl = round(total_pnl - offset, 2)
     initial_balance = exec_cfg.account_balance
     account_currency = exec_cfg.account_currency
     account_leverage = exec_cfg.account_leverage
-    balance = round(initial_balance + total_pnl, 2)
-    net_profit = round(total_pnl, 2)
+    balance = round(initial_balance + effective_pnl, 2)
+    net_profit = effective_pnl
     total_trades = len(closed)
     wins = [t for t in closed if (t.realized_pnl or 0.0) > 0]
     losses = [t for t in closed if (t.realized_pnl or 0.0) <= 0]
@@ -259,7 +264,7 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
         "avg_win_usd": avg_win,
         "avg_loss_usd": avg_loss,
         "expectancy_usd": expectancy,
-        "realized_pnl_usd": total_pnl,
+        "realized_pnl_usd": net_profit,
         "unrealized_pnl_usd": unrealized_pnl,
         "active_positions": len(active),
     }
@@ -267,21 +272,29 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
 
 @router.post("/paper-trades/reset")
 async def reset_paper_trades(db: AsyncSession = Depends(get_db_session)):
-    """Completely resets all paper trading records, clearing old trade history for a fresh start."""
-    from sqlalchemy import delete
-    from app.database.models import PaperTradeModel, SignalModel
-    from app.config.execution_settings import get_execution_settings
+    """Resets paper trading balance baseline to initial balance (10,000) WITHOUT deleting trade history."""
+    from sqlalchemy import select, func
+    from app.database.models import PaperTradeModel
+    from app.config.execution_settings import get_execution_settings, update_execution_settings
 
-    # Delete all paper trades
-    await db.execute(delete(PaperTradeModel))
-    await db.commit()
+    # Compute current total realized PnL from closed trades
+    res = await db.execute(
+        select(func.coalesce(func.sum(PaperTradeModel.realized_pnl), 0.0)).where(
+            PaperTradeModel.state == "CLOSED"
+        )
+    )
+    current_closed_pnl = float(res.scalar() or 0.0)
+
+    # Set offset = current_closed_pnl so effective PnL resets to 0.0 and balance resets to initial_balance
+    update_execution_settings({"balance_baseline_offset": current_closed_pnl})
 
     exec_cfg = get_execution_settings()
     return {
         "status": "success",
-        "message": f"Paper trading reset successfully. Fresh balance: {'₹' if exec_cfg.account_currency == 'cent' else '$'}{exec_cfg.account_balance:,.2f}",
+        "message": f"Paper trading balance baseline reset to {'₹' if exec_cfg.account_currency == 'cent' else '$'}{exec_cfg.account_balance:,.2f} without deleting trade history.",
         "account_balance": exec_cfg.account_balance,
         "account_currency": exec_cfg.account_currency,
+        "balance_baseline_offset": current_closed_pnl,
     }
 
 

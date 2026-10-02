@@ -4187,19 +4187,19 @@ Routes["/paper"] = (mount) => {
       const resetBtn = mount.querySelector("#btn-reset-paper");
       if (resetBtn) {
         resetBtn.addEventListener("click", async () => {
-          if (!confirm(`Are you sure you want to reset Paper Trading?\nAll trade history will be deleted and your account will restart fresh at ${currSym}${UI.fmt(initialBal, 2)} (${isCent ? 'Cent Account' : 'Standard Account'}).`)) return;
+          if (!confirm(`Reset Paper Trading Balance to ${currSym}${UI.fmt(initialBal, 2)}?\n\nNOTE: All past trade history and logs will be PRESERVED. Only the active balance baseline will restart at ${currSym}${UI.fmt(initialBal, 2)} so future trades size from ₹500 risk.`)) return;
           resetBtn.disabled = true;
           resetBtn.innerHTML = "⏳ Resetting...";
           try {
             const res = await (API.resetPaperTrades ? API.resetPaperTrades() : API.post("/paper-trades/reset"));
-            UI.toast("Account Reset", res.message || "Paper trading reset successfully!", "green");
+            UI.toast("Balance Reset", res.message || "Balance reset to baseline successfully!", "green");
             setTimeout(() => {
               location.reload();
             }, 600);
           } catch (err) {
-            UI.toast("Reset Error", err.message || "Failed to reset paper trades.", "red");
+            UI.toast("Reset Error", err.message || "Failed to reset paper balance.", "red");
             resetBtn.disabled = false;
-            resetBtn.innerHTML = "🔄 Reset Account";
+            resetBtn.innerHTML = "🔄 Reset Balance";
           }
         });
       }
@@ -4262,7 +4262,7 @@ Routes["/paper"] = (mount) => {
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Realized Net PnL</span><span>📈</span></div>
           <div class="kpi-val" id="paper-metric-rpnl" style="${rpnl >= 0 ? 'color:var(--green-bright)' : 'color:var(--red-bright)'}">${rpnlSign}${currSym}${Math.abs(rpnl).toFixed(2)}</div>
-          <div class="kpi-sub"><span class="badge ${rpnl >= 0 ? 'badge-green' : 'badge-red'}">${returnSign}${returnPct}% Return</span> All closed trades</div>
+          <div class="kpi-sub"><span class="badge ${rpnl >= 0 ? 'badge-green' : 'badge-red'}">${returnSign}${returnPct}% Return</span> Active session</div>
         </div>
         <div class="sig-kpi-card">
           <div class="kpi-label"><span>Win Rate / Closed</span><span>🎯</span></div>
@@ -4316,7 +4316,7 @@ Routes["/paper"] = (mount) => {
           <input class="input" id="paper-search" placeholder="Search price, layer, TF…" style="min-width:150px">
           <button class="btn btn-sm" id="btn-export-paper-csv" title="Export paper trades to CSV">📥 Export CSV</button>
           <button class="btn btn-sm" id="btn-repair-paper" style="border-color:#388e3c;color:#81c784" title="Repair false SL losses by applying Smart Shield trailing">🔧 Repair SL</button>
-          <button class="btn btn-sm" id="btn-reset-paper" style="border-color:#e53935;color:#ef9a9a;background:rgba(229,57,53,0.1);font-weight:700" title="Completely clear paper trade history and start fresh with ₹10,000 Cent Account">🔄 Reset Account</button>
+          <button class="btn btn-sm" id="btn-reset-paper" style="border-color:#e53935;color:#ef9a9a;background:rgba(229,57,53,0.1);font-weight:700" title="Preserve history and reset active balance baseline to ₹10,000">🔄 Reset Balance</button>
         </div>
       </div>
 

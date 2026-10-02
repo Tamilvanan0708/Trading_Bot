@@ -242,7 +242,7 @@ def _build_hybrid_shield_msg(
 
 
 async def _get_compounded_paper_balance(db: AsyncSession, base_balance: float) -> float:
-    """Compute live compounded paper trading balance (base_balance + net realized PnL from closed trades)."""
+    """Compute live compounded paper trading balance (base_balance + net realized PnL from closed trades - baseline offset)."""
     try:
         res = await db.execute(
             select(func.coalesce(func.sum(PaperTradeModel.realized_pnl), 0.0)).where(
@@ -250,7 +250,10 @@ async def _get_compounded_paper_balance(db: AsyncSession, base_balance: float) -
             )
         )
         closed_pnl = float(res.scalar() or 0.0)
-        return max(10.0, round(base_balance + closed_pnl, 2))
+        exec_cfg = get_execution_settings()
+        offset = float(getattr(exec_cfg, "balance_baseline_offset", 0.0) or 0.0)
+        effective_pnl = closed_pnl - offset
+        return max(10.0, round(base_balance + effective_pnl, 2))
     except Exception as e:
         logger.warning("[COMPOUNDING] Error calculating compounded balance: %s", e)
         return max(10.0, base_balance)
