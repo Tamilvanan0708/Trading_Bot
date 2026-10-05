@@ -273,17 +273,9 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
 @router.post("/paper-trades/reset")
 async def reset_paper_trades(db: AsyncSession = Depends(get_db_session)):
     """Resets paper trading balance baseline to initial balance (10,000) WITHOUT deleting trade history."""
-    from sqlalchemy import select, func
-    from app.database.models import PaperTradeModel
-    from app.config.execution_settings import get_execution_settings, save_execution_settings
-
-    # Compute current total realized PnL from closed trades
-    res = await db.execute(
-        select(func.coalesce(func.sum(PaperTradeModel.realized_pnl), 0.0)).where(
-            PaperTradeModel.state == "CLOSED"
-        )
-    )
-    current_closed_pnl = float(res.scalar() or 0.0)
+    repo = Repository(db)
+    closed = await repo.list_closed_paper_trades(limit=500)
+    current_closed_pnl = round(sum(t.realized_pnl or 0.0 for t in closed), 2)
 
     # Set offset = current_closed_pnl so effective PnL resets to 0.0 and balance resets to initial_balance
     exec_cfg = get_execution_settings()

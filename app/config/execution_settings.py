@@ -273,18 +273,14 @@ def calculate_margin_required(
 
 
 async def get_total_closed_paper_pnl() -> float:
-    """Compute total realized PnL from closed paper trades in database."""
+    """Compute total realized PnL from closed paper trades in database matching repo.list_closed_paper_trades."""
     try:
         from app.database.connection import async_session_factory
-        from sqlalchemy import select, func
-        from app.database.models import PaperTradeModel
+        from app.database.repository import Repository
         async with async_session_factory() as session:
-            res = await session.execute(
-                select(func.coalesce(func.sum(PaperTradeModel.realized_pnl), 0.0)).where(
-                    PaperTradeModel.state == "CLOSED"
-                )
-            )
-            return float(res.scalar() or 0.0)
+            repo = Repository(session)
+            closed = await repo.list_closed_paper_trades(limit=500)
+            return round(sum(t.realized_pnl or 0.0 for t in closed), 2)
     except Exception as e:
         import logging
         logging.getLogger("app.config.execution_settings").warning("Error querying closed paper pnl: %s", e)
@@ -301,9 +297,13 @@ def get_total_closed_paper_pnl_sync() -> float:
             return 0.0
         with sqlite3.connect(str(db_path)) as conn:
             cur = conn.cursor()
-            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0.0) FROM paper_trades WHERE state = 'CLOSED'")
-            row = cur.fetchone()
-            return float(row[0]) if row and row[0] is not None else 0.0
+            cur.execute("""
+                SELECT realized_pnl FROM paper_trades 
+                WHERE state IN ('CLOSED', 'INVALIDATED', 'STOP_LOSS_HIT', 'TP3_HIT')
+                ORDER BY created_at DESC LIMIT 500
+            """)
+            rows = cur.fetchall()
+            return round(sum(float(r[0] or 0.0) for r in rows), 2)
     except Exception:
         return 0.0
 

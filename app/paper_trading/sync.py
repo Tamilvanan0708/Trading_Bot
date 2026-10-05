@@ -244,12 +244,9 @@ def _build_hybrid_shield_msg(
 async def _get_compounded_paper_balance(db: AsyncSession, base_balance: float) -> float:
     """Compute live compounded paper trading balance (base_balance + net realized PnL from closed trades - baseline offset)."""
     try:
-        res = await db.execute(
-            select(func.coalesce(func.sum(PaperTradeModel.realized_pnl), 0.0)).where(
-                PaperTradeModel.state == "CLOSED"
-            )
-        )
-        closed_pnl = float(res.scalar() or 0.0)
+        repo = Repository(db)
+        closed = await repo.list_closed_paper_trades(limit=500)
+        closed_pnl = round(sum(t.realized_pnl or 0.0 for t in closed), 2)
         exec_cfg = get_execution_settings()
         offset = float(getattr(exec_cfg, "balance_baseline_offset", 0.0) or 0.0)
         effective_pnl = closed_pnl - offset
