@@ -790,18 +790,54 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             tf_active_anchor = active_setup_by_tf.get(tf_key)
                             if tf_active_anchor and tf_active_anchor != current_anchor and not current_anchor.startswith(tf_active_anchor + "_"):
                                 # Verify if that previous trade is still genuinely OPEN in DB before deferring
-                                is_still_open = (await db.execute(
-                                    select(PaperTradeModel.id).where(
+                                prev_trade = (await db.execute(
+                                    select(PaperTradeModel).where(
                                         PaperTradeModel.state == "OPEN",
                                         PaperTradeModel.signal_id.like(f"FIB_RETR_{tf_key.upper()}_%_{tf_active_anchor}"),
                                     )
                                 )).scalars().first()
-                                if is_still_open:
-                                    logger.info(
-                                        "[PAPER-AUTO] Deferring %s: %s slot still busy with anchor %s",
-                                        sig_id, tf_key.upper(), tf_active_anchor,
-                                    )
-                                    continue
+                                if prev_trade:
+                                    # Check if the previous trade is stale (> 30 mins old) and has no live MT5 position
+                                    _p_opened = prev_trade.opened_at
+                                    _p_age = 0
+                                    if _p_opened:
+                                        _p_tz = _p_opened if _p_opened.tzinfo else _p_opened.replace(tzinfo=timezone.utc)
+                                        _p_age = abs((datetime.now(timezone.utc) - _p_tz).total_seconds())
+
+                                    # Check if MT5 has any position for this stale trade
+                                    _has_mt5_pos = False
+                                    try:
+                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                        _tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(prev_trade.id)
+                                        if _tkt:
+                                            _has_mt5_pos = True
+                                    except Exception:
+                                        pass
+
+                                    if _p_age > 1800 and not _has_mt5_pos:
+                                        # Stale orphan from previous swing cycle: close it to free the slot!
+                                        prev_trade.state = "CLOSED"
+                                        prev_trade.exit_price = float(live_price or prev_trade.target_entry or 0.0)
+                                        prev_trade.exit_reason = "CYCLE_ROLLOVER"
+                                        prev_trade.closed_at = datetime.now(timezone.utc)
+                                        _pts = round(
+                                            (prev_trade.exit_price - (prev_trade.actual_entry or prev_trade.target_entry or 0.0))
+                                            if prev_trade.direction == "LONG"
+                                            else ((prev_trade.actual_entry or prev_trade.target_entry or 0.0) - prev_trade.exit_price), 2
+                                        )
+                                        prev_trade.realized_pnl = round(_pts * (prev_trade.lot_size or 0.01) * 100.0, 2)
+                                        await db.commit()
+                                        logger.info(
+                                            "[PAPER-AUTO] Rolled over stale trade %s (age %ds) to unblock %s for %s",
+                                            prev_trade.signal_id, int(_p_age), tf_key.upper(), sig_id,
+                                        )
+                                        active_setup_by_tf.pop(tf_key, None)
+                                    else:
+                                        logger.info(
+                                            "[PAPER-AUTO] Deferring %s: %s slot still busy with anchor %s (age %ds)",
+                                            sig_id, tf_key.upper(), tf_active_anchor, int(_p_age),
+                                        )
+                                        continue
                                 else:
                                     active_setup_by_tf.pop(tf_key, None)
 
