@@ -404,25 +404,30 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         # If trade has a known ticket and that ticket is NOT open on MT5 anymore
                         if tkt and tkt not in open_mt5_tickets:
                             deal_info = mt5_mgr.get_closed_deal_info(tkt)
-                            if deal_info:
-                                close_px = float(deal_info.get("close_price") or ot.current_price or ot.entry_price or 0.0)
-                                profit = deal_info.get("profit")
-                                close_dt = deal_info.get("close_time") or datetime.now(timezone.utc)
+                            if isinstance(deal_info, dict):
+                                try:
+                                    close_px = float(deal_info.get("close_price") or ot.current_price or ot.entry_price or 0.0)
+                                except (TypeError, ValueError):
+                                    close_px = float(ot.entry_price or 0.0)
+                                raw_profit = deal_info.get("profit")
+                                try:
+                                    profit = float(raw_profit) if raw_profit is not None else 0.0
+                                except (TypeError, ValueError):
+                                    profit = 0.0
+                                raw_dt = deal_info.get("close_time")
+                                close_dt = raw_dt if isinstance(raw_dt, datetime) else datetime.now(timezone.utc)
                                 ot.state = "CLOSED"
                                 ot.exit_price = close_px
                                 ot.closed_at = close_dt
-                                ot.realized_pnl = profit if profit is not None else 0.0
-                                if profit is not None:
-                                    ot.exit_reason = "TP_HIT" if profit >= 0 else "SL_HIT"
-                                else:
-                                    ot.exit_reason = "CLOSED"
+                                ot.realized_pnl = profit
+                                ot.exit_reason = "TP_HIT" if profit >= 0 else "SL_HIT"
                                 if ot.entry_price and close_px:
                                     pts = round(abs(close_px - ot.entry_price), 2)
                                     sl_d = max(0.1, abs(ot.entry_price - (ot.stop_loss or 0.0)))
                                     ot.realized_r = round(pts / sl_d, 2) if ot.exit_reason == "TP_HIT" else -1.0
                                 logger.info(
-                                    "[MT5-RECONCILE] Ticket #%d was closed on MT5 @ %.2f (PnL: $%.2f). Synchronized Paper Trade %s to CLOSED (%s).",
-                                    tkt, close_px, profit or 0.0, ot.id, ot.exit_reason
+                                    "[MT5-RECONCILE] Ticket #%s was closed on MT5 @ %.2f (PnL: $%.2f). Synchronized Paper Trade %s to CLOSED (%s).",
+                                    tkt, close_px, profit, ot.id, ot.exit_reason
                                 )
                                 # Update parent signal outcome
                                 if ot.signal_id:
@@ -569,22 +574,43 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             _lc_matches = True
 
                     if not _lc_matches:
-                        # Old setup does NOT belong to this trade! Hold active trade for genuine TP/SL.
-                        continue
+                        # Fallback for Stale Orphaned Trades:
+                        # If the engine setup has been None for > 30 minutes, or the trade has been open
+                        # for > 1 hour with no active setup in the engine and no matching live MT5 position,
+                        # resolve the orphaned trade at the current live price (or entry) with ENGINE_RESET_ORPHAN
+                        # so that it does not indefinitely lock the timeframe slot or block the auto-updater!
+                        _is_stale_orphan = False
+                        if _ot.opened_at:
+                            _ot_tz = _ot.opened_at if _ot.opened_at.tzinfo else _ot.opened_at.replace(tzinfo=timezone.utc)
+                            _age_sec = abs((datetime.now(timezone.utc) - _ot_tz).total_seconds())
+                            if _age_sec > 1800:  # > 30 minutes with no engine setup
+                                _is_stale_orphan = True
 
-                    _outcome = getattr(_lc, "outcome", None) if _lc else None
-                    _locked_tp = getattr(_lc, "locked_tp", None) if _lc else None
-                    _sl_price = getattr(_lc, "sl_price", None) if _lc else None
-                    _direction = _ot.direction or (getattr(_lc, "direction", None) if _lc else None)
-                    _entry_px = float(_ot.actual_entry or _ot.target_entry or 0.0)
-                    if _outcome == "SL_HIT" and _sl_price:
-                        _exit_px = float(_sl_price)
-                        _exit_reason = "SL_HIT"
-                    elif _outcome == "TP_HIT" and _locked_tp:
-                        _exit_px = float(_locked_tp)
-                        _exit_reason = "TP_HIT"
+                        if not _is_stale_orphan:
+                            # Old setup does NOT belong to this trade and not stale! Hold active trade for genuine TP/SL.
+                            continue
+
+                        # Auto-sweep stale orphan using current price or entry
+                        _exit_px = float(live_price or _ot.actual_entry or _ot.target_entry or 0.0)
+                        _exit_reason = "ENGINE_RESET_ORPHAN"
+                        _outcome = "ENGINE_RESET_ORPHAN"
+                        _direction = _ot.direction or "LONG"
+                        _entry_px = float(_ot.actual_entry or _ot.target_entry or 0.0)
                     else:
-                        continue  # Never force-close on unconfirmed outcome
+                        _outcome = getattr(_lc, "outcome", None) if _lc else None
+                        _locked_tp = getattr(_lc, "locked_tp", None) if _lc else None
+                        _sl_price = getattr(_lc, "sl_price", None) if _lc else None
+                        _direction = _ot.direction or (getattr(_lc, "direction", None) if _lc else None)
+                        _entry_px = float(_ot.actual_entry or _ot.target_entry or 0.0)
+                        if _outcome == "SL_HIT" and _sl_price:
+                            _exit_px = float(_sl_price)
+                            _exit_reason = "SL_HIT"
+                        elif _outcome == "TP_HIT" and _locked_tp:
+                            _exit_px = float(_locked_tp)
+                            _exit_reason = "TP_HIT"
+                        else:
+                            continue  # Never force-close on unconfirmed outcome
+
                     _pts = round(
                         (_exit_px - _entry_px) if _direction == "LONG" else (_entry_px - _exit_px), 2
                     ) if _entry_px else 0.0
@@ -2304,18 +2330,18 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     except Exception as mt5_err:
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch L1 modify to MT5 from fast monitor: %s", mt5_err)
 
-                                        # 2. Telegram Alert: Smart Shield Trailing SL
-                                        try:
-                                            shield_msg = _build_hybrid_shield_msg(
-                                                strategy_name="Fib Retracement (L1 Protected)",
-                                                symbol_tf=f"XAU/USD ({trade_tf})",
-                                                trigger_layer=trig_layer,
-                                                new_sl=l1_trade.stop_loss,
-                                                paper_trade_id=l1_trade.id,
-                                            )
-                                            _dispatch_tg_alert(tg.send_raw_alert(shield_msg))
-                                        except Exception as tg_err:
-                                            logger.warning("[PAPER-TG] Failed to send shield alert from fast monitor: %s", tg_err)
+                                    # 2. Telegram Alert: Smart Shield Trailing SL
+                                    try:
+                                        shield_msg = _build_hybrid_shield_msg(
+                                            strategy_name="Fib Retracement (L1 Protected)",
+                                            symbol_tf=f"XAU/USD ({trade_tf})",
+                                            trigger_layer=trig_layer,
+                                            new_sl=l1_trade.stop_loss,
+                                            paper_trade_id=l1_trade.id,
+                                        )
+                                        _dispatch_tg_alert(tg.send_raw_alert(shield_msg))
+                                    except Exception as tg_err:
+                                        logger.warning("[PAPER-TG] Failed to send shield alert from fast monitor: %s", tg_err)
                     except Exception as shield_err:
                         logger.warning("[PAPER-FAST-MONITOR] Smart Shield check failed: %s", shield_err)
 

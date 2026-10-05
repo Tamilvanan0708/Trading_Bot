@@ -66,8 +66,36 @@ def get_latest_commit_message() -> str:
 
 
 def has_open_trades() -> bool:
-    """Trade Safety Guard: Checks if any trades are OPEN before restarting."""
-    # 1. Probe FastAPI /paper-trades endpoint
+    """Trade Safety Guard: Checks if any trades are OPEN before restarting.
+    
+    If MT5 is initialized and connected, MT5 positions are authoritative:
+    If MT5 has 0 open positions, paper trade DB records that are stale (>30m)
+    do NOT block updates.
+    """
+    # 1. Check MetaTrader 5 live positions on Windows (Authoritative if connected)
+    mt5_active = False
+    mt5_positions_count = 0
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            term_info = mt5.terminal_info()
+            if term_info and getattr(term_info, "connected", False):
+                mt5_active = True
+                positions = mt5.positions_get(symbol="XAUUSD-VIP")
+                if positions is None or len(positions) == 0:
+                    positions = mt5.positions_get()
+                mt5_positions_count = len(positions) if positions else 0
+                if mt5_positions_count > 0:
+                    logger.info("[AUTO-UPDATER] MT5 has %d live position(s) open. Holding update.", mt5_positions_count)
+                    return True
+    except Exception as exc:
+        logger.debug("[AUTO-UPDATER] MT5 check exception: %s", exc)
+
+    # If MT5 is actively connected and reports 0 positions, safe to update!
+    if mt5_active and mt5_positions_count == 0:
+        return False
+
+    # 2. Probe FastAPI /paper-trades endpoint
     try:
         import httpx
         with httpx.Client(timeout=4.0) as client:
@@ -79,18 +107,6 @@ def has_open_trades() -> bool:
                     if str(t.get("state", "")).upper() == "OPEN":
                         return True
                 return False
-    except Exception:
-        pass
-
-    # 2. Check MetaTrader 5 live positions on Windows
-    try:
-        import MetaTrader5 as mt5
-        if mt5.initialize():
-            positions = mt5.positions_get(symbol="XAUUSD-VIP")
-            if positions is None or len(positions) == 0:
-                positions = mt5.positions_get()
-            if positions and len(positions) > 0:
-                return True
     except Exception:
         pass
 
