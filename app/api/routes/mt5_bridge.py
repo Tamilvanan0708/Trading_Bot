@@ -118,3 +118,18 @@ async def download_mql5_ea():
         filename="XAU_AI_Bridge.mq5",
         media_type="text/plain",
     )
+
+
+@router.get("/trigger-update")
+@router.post("/trigger-update")
+async def trigger_force_update():
+    """Drops data/force_update.flag to instruct auto_updater to immediately pull & restart."""
+    flag_path = os.path.abspath("data/force_update.flag")
+    os.makedirs(os.path.dirname(flag_path), exist_ok=True)
+    with open(flag_path, "w", encoding="utf-8") as f:
+        f.write("FORCE")
+    return {
+        "status": "SUCCESS",
+        "message": "Force update flag set! Auto-updater will pull latest code and perform seamless hot-restart on next check.",
+    }
+

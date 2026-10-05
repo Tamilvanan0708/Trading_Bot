@@ -233,20 +233,25 @@ async def send_tg_notice(message: str) -> None:
         logger.warning("[AUTO-UPDATER] Failed to send Telegram update alert: %s", exc)
 
 
-async def execute_safe_update(remote_hash: str) -> None:
+async def execute_safe_update(remote_hash: str, is_hot_restart: bool = False) -> None:
     """Performs git pull, restarts server, verifies health, and notifies Telegram."""
     msg_summary = get_latest_commit_message()
-    logger.info("[AUTO-UPDATER] Commencing update to %s: %s", remote_hash, msg_summary)
+    logger.info("[AUTO-UPDATER] Commencing update to %s (hot_restart=%s): %s", remote_hash, is_hot_restart, msg_summary)
 
     # 1. Notify Telegram that update is beginning
+    guard_line = (
+        "🛡 *Trade Guard:* Seamless Hot-Restart (Active MT5 positions protected by Broker SL/TP)"
+        if is_hot_restart else
+        "🛡 *Trade Guard:* 0 Open Trades (Safe to restart)"
+    )
     init_msg = (
         f"🔄 *SYSTEM UPDATE INITIATED*\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📦 *Source:* GitHub `main`\n"
         f"🏷 *Commit:* `#{remote_hash}`\n"
         f"💬 *Summary:* {msg_summary}\n"
-        f"🛡 *Trade Guard:* 0 Open Trades (Safe to restart)\n"
-        f"⚙️ *Action:* Pulling changes & restarting bot...\n"
+        f"{guard_line}\n"
+        f"⚙️ *Action:* Pulling changes & restarting bot (~3s)...\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
     await send_tg_notice(init_msg)
@@ -317,10 +322,11 @@ async def main_loop() -> None:
     logger.info("=======================================================")
     logger.info("  XAU Terminal - Auto Updater Watcher Service Started   ")
     logger.info("  Polling GitHub 'main' every %d seconds               ", CHECK_INTERVAL_SEC)
-    logger.info("  Trade Safety Guard: ACTIVE                          ")
+    logger.info("  Trade Safety Guard: ACTIVE (5m Max Postpone / Hot-Restart)")
     logger.info("=======================================================")
 
     postponed_notice_sent = False
+    pending_since_ts: float | None = None
 
     while True:
         try:
@@ -331,26 +337,50 @@ async def main_loop() -> None:
                 logger.debug("[AUTO-UPDATER] Could not reach GitHub origin/main; will retry.")
             elif local_h != remote_h:
                 logger.info("[AUTO-UPDATER] Update available! Local: %s | Remote: %s", local_h, remote_h)
+                if pending_since_ts is None:
+                    pending_since_ts = time.time()
+
+                # Check for manual force update flag (data/force_update.flag)
+                force_flag = REPO_ROOT / "data" / "force_update.flag"
+                is_forced = force_flag.exists()
+                if is_forced:
+                    try:
+                        force_flag.unlink()
+                    except Exception:
+                        pass
+                    logger.info("[AUTO-UPDATER] Force update flag detected! Proceeding immediately.")
 
                 # Check Trade Safety Guard
-                if has_open_trades():
-                    logger.warning("[AUTO-UPDATER] Trade Safety Guard: Open trade detected! Postponing update until trade exits.")
+                has_trades = has_open_trades()
+                elapsed = time.time() - pending_since_ts
+                is_timeout = elapsed >= 300  # 5 minutes elapsed
+
+                if has_trades and not is_forced and not is_timeout:
+                    logger.warning(
+                        "[AUTO-UPDATER] Trade Safety Guard: Open trade detected (pending %ds). Waiting up to 5m for quiet window.",
+                        int(elapsed),
+                    )
                     if not postponed_notice_sent:
                         await send_tg_notice(
                             f"⏳ *UPDATE POSTPONED (Trade in Progress)*\n"
                             f"━━━━━━━━━━━━━━━━━━━━\n"
                             f"Pushed commit `#{remote_h}` detected.\n"
-                            f"Update is held because a live trade is currently active.\n"
-                            f"Bot will automatically update as soon as trade closes.\n"
+                            f"Waiting up to 5m for open trade to exit.\n"
+                            f"If trade is still running after 5m, seamless hot-restart (~3s) will apply updates safely.\n"
                             f"━━━━━━━━━━━━━━━━━━━━"
                         )
                         postponed_notice_sent = True
                 else:
+                    is_hot = has_trades and (is_forced or is_timeout)
+                    if is_hot:
+                        logger.info("[AUTO-UPDATER] Executing seamless hot-restart with broker SL protection.")
                     postponed_notice_sent = False
-                    await execute_safe_update(remote_h)
+                    pending_since_ts = None
+                    await execute_safe_update(remote_h, is_hot_restart=is_hot)
             else:
                 logger.debug("[AUTO-UPDATER] Code is up-to-date at commit %s", local_h)
                 postponed_notice_sent = False
+                pending_since_ts = None
 
         except Exception as exc:
             logger.error("[AUTO-UPDATER] Loop exception: %s", exc)

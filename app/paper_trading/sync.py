@@ -210,10 +210,18 @@ def _build_hybrid_close_msg(
             f"💼 *MT5 Balance:* {balance_str}\n"
             f"━━━━━━━━━━━━━━━━━━━━"
         )
-    elif is_profit:
         realized_usd = round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
         growth_line = f"📈 *Account Growth:* +₹{abs(realized_pnl):,.2f} INR" if is_cent else f"📈 *Account Growth:* +${abs(realized_pnl):,.2f} USD"
-        title_badge = "🎯 *TAKE PROFIT HIT" if exit_reason == "TP_HIT" else "🎯 *TRAILING STOP HIT"
+        if exit_reason == "TP_HIT":
+            title_badge = "🎯 *TAKE PROFIT HIT"
+        elif exit_reason in ("TRAILING_SL_HIT", "TRAILING_STOP"):
+            title_badge = "🎯 *TRAILING STOP HIT"
+        elif exit_reason == "MANUAL_CLOSE":
+            title_badge = "✋ *MANUAL EXIT"
+        elif "ORPHAN" in str(exit_reason):
+            title_badge = "🔄 *SLOT ROLLOVER EXIT"
+        else:
+            title_badge = "🎯 *TARGET HIT"
         return (
             f"{title_badge} (+{abs(pts):.2f} PTS)*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -399,17 +407,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 mt5_mgr._paper_trade_to_ticket[str(recent_l1.id)] = tkt
 
                         if matched_pt and matched_pt.state == "CLOSED":
-                            logger.info(
-                                "[MT5-RECONCILE] Paper Trade %s is CLOSED (%s) but MT5 Ticket #%s is still open in MT5. Enqueuing MT5 close to synchronize broker.",
-                                matched_pt.id, matched_pt.exit_reason, tkt
-                            )
-                            mt5_mgr.enqueue_close(
-                                ticket=tkt,
-                                paper_trade_id=matched_pt.id,
-                                symbol=pos.get("symbol", exec_cfg.mt5_symbol or "XAUUSD-VIP"),
-                                reason=matched_pt.exit_reason or "ENGINE_CLOSED",
-                                direction=pos.get("type", "BUY"),
-                            )
+                            # If paper trade was closed by internal scan/orphan timeout, NEVER close live MT5 position!
+                            # Restore paper trade to OPEN to honor the real live broker trade!
+                            if matched_pt.exit_reason and "ORPHAN" in str(matched_pt.exit_reason):
+                                logger.info(
+                                    "[MT5-RECONCILE] Ticket #%s is still active in MT5 while Paper Trade %s was closed as %s. Restoring to OPEN!",
+                                    tkt, matched_pt.id, matched_pt.exit_reason,
+                                )
+                                matched_pt.state = "OPEN"
+                                matched_pt.closed_at = None
+                                matched_pt.exit_price = None
+                                matched_pt.exit_reason = None
+                                if pos.get("sl") and pos.get("sl") > 0:
+                                    matched_pt.stop_loss = round(pos.get("sl"), 2)
+                                await db.commit()
+                            else:
+                                logger.info(
+                                    "[MT5-RECONCILE] Paper Trade %s is CLOSED (%s) but MT5 Ticket #%s is still open in MT5. Enqueuing MT5 close to synchronize broker.",
+                                    matched_pt.id, matched_pt.exit_reason, tkt,
+                                )
+                                mt5_mgr.enqueue_close(
+                                    ticket=tkt,
+                                    paper_trade_id=matched_pt.id,
+                                    symbol=pos.get("symbol", exec_cfg.mt5_symbol or "XAUUSD-VIP"),
+                                    reason=matched_pt.exit_reason or "ENGINE_CLOSED",
+                                    direction=pos.get("type", "BUY"),
+                                )
                         elif matched_pt and matched_pt.state in ("PENDING", "SIGNAL_GENERATED"):
                             matched_pt.state = "OPEN"
                             matched_pt.closed_at = None
@@ -597,6 +620,16 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         if abs((datetime.now(timezone.utc) - _ot_tz).total_seconds()) < 900:
                             continue
 
+                    # Safety Guard 2: NEVER sweep trades with an active open broker position on MT5!
+                    if exec_cfg.mt5_bridge_enabled:
+                        try:
+                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                            open_tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(_ot.id)
+                            if open_tkt and str(open_tkt) not in ("0", "None", ""):
+                                continue
+                        except Exception:
+                            pass
+
                     # Determine exit price and reason from last_completed ONLY if it matches THIS setup!
                     _lc = getattr(_engine, "last_completed", None)
                     if _lc is None and getattr(_slot, "last_completed", None) is not None:
@@ -615,15 +648,21 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                     if not _lc_matches:
                         # Fallback for Stale Orphaned Trades:
-                        # If the engine setup has been None for > 30 minutes, or the trade has been open
-                        # for > 1 hour with no active setup in the engine and no matching live MT5 position,
-                        # resolve the orphaned trade at the current live price (or entry) with ENGINE_RESET_ORPHAN
-                        # so that it does not indefinitely lock the timeframe slot or block the auto-updater!
+                        # Timeframe-aware minimum age before considering a trade stale without an engine setup:
+                        # 5M: 1 hour (3600s), 15M: 4 hours (14400s), 30M: 8 hours (28800s), 1H+: 24 hours (86400s)
+                        _tf_min_age = 3600
+                        if _ot_tf == "15m":
+                            _tf_min_age = 14400
+                        elif _ot_tf == "30m":
+                            _tf_min_age = 28800
+                        elif _ot_tf in ("1h", "2h", "4h"):
+                            _tf_min_age = 86400
+
                         _is_stale_orphan = False
                         if _ot.opened_at:
                             _ot_tz = _ot.opened_at if _ot.opened_at.tzinfo else _ot.opened_at.replace(tzinfo=timezone.utc)
                             _age_sec = abs((datetime.now(timezone.utc) - _ot_tz).total_seconds())
-                            if _age_sec > 1800:  # > 30 minutes with no engine setup
+                            if _age_sec > _tf_min_age:
                                 _is_stale_orphan = True
 
                         if not _is_stale_orphan:
