@@ -607,9 +607,27 @@ async def get_runtime_execution_settings():
 @router.post("/settings/execution")
 async def update_runtime_execution_settings(payload: dict):
     """Save user-configured execution & risk sizing settings."""
-    from app.config.execution_settings import ExecutionSettings, save_execution_settings
+    from app.config.execution_settings import (
+        ExecutionSettings,
+        get_execution_settings,
+        save_execution_settings,
+        get_total_closed_paper_pnl,
+    )
     try:
-        new_settings = ExecutionSettings(**payload)
+        old_settings = get_execution_settings()
+        merged = old_settings.model_dump()
+        merged.update(payload)
+
+        sync_baseline = bool(payload.get("sync_paper_baseline") or payload.get("reset_baseline"))
+        new_balance = payload.get("account_balance")
+
+        if sync_baseline or (new_balance is not None and abs(float(new_balance) - old_settings.account_balance) > 0.001):
+            closed_pnl = await get_total_closed_paper_pnl()
+            merged["balance_baseline_offset"] = closed_pnl
+        elif "balance_baseline_offset" not in payload:
+            merged["balance_baseline_offset"] = old_settings.balance_baseline_offset
+
+        new_settings = ExecutionSettings(**merged)
         saved = save_execution_settings(new_settings)
         return {"status": "success", "settings": saved.model_dump()}
     except Exception as exc:

@@ -177,8 +177,26 @@ def create_app() -> FastAPI:
 
     @app.post("/settings/execution", tags=["Execution Settings"])
     async def save_root_execution_settings(payload: dict):
-        from app.config.execution_settings import ExecutionSettings, save_execution_settings
-        new_settings = ExecutionSettings(**payload)
+        from app.config.execution_settings import (
+            ExecutionSettings,
+            get_execution_settings,
+            save_execution_settings,
+            get_total_closed_paper_pnl,
+        )
+        old_settings = get_execution_settings()
+        merged = old_settings.model_dump()
+        merged.update(payload)
+
+        sync_baseline = bool(payload.get("sync_paper_baseline") or payload.get("reset_baseline"))
+        new_balance = payload.get("account_balance")
+
+        if sync_baseline or (new_balance is not None and abs(float(new_balance) - old_settings.account_balance) > 0.001):
+            closed_pnl = await get_total_closed_paper_pnl()
+            merged["balance_baseline_offset"] = closed_pnl
+        elif "balance_baseline_offset" not in payload:
+            merged["balance_baseline_offset"] = old_settings.balance_baseline_offset
+
+        new_settings = ExecutionSettings(**merged)
         saved = save_execution_settings(new_settings)
         return {"status": "success", "settings": saved.model_dump()}
 

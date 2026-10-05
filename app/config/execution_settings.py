@@ -271,3 +271,39 @@ def calculate_margin_required(
     margin = notional / lev
     return round(margin, 2)
 
+
+async def get_total_closed_paper_pnl() -> float:
+    """Compute total realized PnL from closed paper trades in database."""
+    try:
+        from app.database.connection import async_session_factory
+        from sqlalchemy import select, func
+        from app.database.models import PaperTradeModel
+        async with async_session_factory() as session:
+            res = await session.execute(
+                select(func.coalesce(func.sum(PaperTradeModel.realized_pnl), 0.0)).where(
+                    PaperTradeModel.state == "CLOSED"
+                )
+            )
+            return float(res.scalar() or 0.0)
+    except Exception as e:
+        import logging
+        logging.getLogger("app.config.execution_settings").warning("Error querying closed paper pnl: %s", e)
+        return get_total_closed_paper_pnl_sync()
+
+
+def get_total_closed_paper_pnl_sync() -> float:
+    """Synchronous fallback to get total realized PnL from closed paper trades."""
+    try:
+        import sqlite3
+        from pathlib import Path
+        db_path = Path("data/xauusd_agent.db")
+        if not db_path.exists():
+            return 0.0
+        with sqlite3.connect(str(db_path)) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COALESCE(SUM(realized_pnl), 0.0) FROM paper_trades WHERE state = 'CLOSED'")
+            row = cur.fetchone()
+            return float(row[0]) if row and row[0] is not None else 0.0
+    except Exception:
+        return 0.0
+

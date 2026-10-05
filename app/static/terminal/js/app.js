@@ -4183,6 +4183,42 @@ Routes["/paper"] = (mount) => {
         });
       }
 
+      // Wire sync MT5 balance in Paper Trading tab
+      const syncPaperMt5Btn = mount.querySelector("#btn-sync-paper-mt5");
+      if (syncPaperMt5Btn) {
+        syncPaperMt5Btn.addEventListener("click", async () => {
+          syncPaperMt5Btn.disabled = true;
+          syncPaperMt5Btn.innerHTML = "⏳ Syncing...";
+          try {
+            const mt5Data = API.getMT5Status ? await API.getMT5Status() : null;
+            if (mt5Data && mt5Data.connected_account && mt5Data.connected_account.balance != null) {
+              const acct = mt5Data.connected_account;
+              const isCentAcct = (acct.currency === "USC" || acct.currency === "CENT" || (acct.server && acct.server.toLowerCase().includes("cent")));
+              const cur = isCentAcct ? "cent" : "usd";
+              const bal = Number(acct.balance);
+              await API.saveExecutionSettings({
+                account_balance: bal,
+                account_currency: cur,
+                account_leverage: acct.leverage || 500,
+                sync_paper_baseline: true,
+              });
+              UI.toast("MT5 Synced", `Paper Trading balance synced to MT5: ${isCentAcct ? '₹' : '$'}${bal.toFixed(2)}`, "green");
+              setTimeout(() => {
+                location.reload();
+              }, 600);
+            } else {
+              UI.toast("MT5 Offline", "Could not get balance: MT5 EA is not connected.", "yellow");
+              syncPaperMt5Btn.disabled = false;
+              syncPaperMt5Btn.innerHTML = "🔄 Auto-Sync MT5";
+            }
+          } catch (err) {
+            UI.toast("Sync Error", err.message || "Failed to sync MT5 balance.", "red");
+            syncPaperMt5Btn.disabled = false;
+            syncPaperMt5Btn.innerHTML = "🔄 Auto-Sync MT5";
+          }
+        });
+      }
+
       // Wire reset paper trades
       const resetBtn = mount.querySelector("#btn-reset-paper");
       if (resetBtn) {
@@ -4316,7 +4352,8 @@ Routes["/paper"] = (mount) => {
           <input class="input" id="paper-search" placeholder="Search price, layer, TF…" style="min-width:150px">
           <button class="btn btn-sm" id="btn-export-paper-csv" title="Export paper trades to CSV">📥 Export CSV</button>
           <button class="btn btn-sm" id="btn-repair-paper" style="border-color:#388e3c;color:#81c784" title="Repair false SL losses by applying Smart Shield trailing">🔧 Repair SL</button>
-          <button class="btn btn-sm" id="btn-reset-paper" style="border-color:#e53935;color:#ef9a9a;background:rgba(229,57,53,0.1);font-weight:700" title="Preserve history and reset active balance baseline to ₹10,000">🔄 Reset Balance</button>
+          <button class="btn btn-sm" id="btn-sync-paper-mt5" style="border-color:#42a5f5;color:#90caf9;background:rgba(66,165,245,0.1);font-weight:700" title="Sync live balance from MT5 and reset baseline to MT5 balance">🔄 Auto-Sync MT5</button>
+          <button class="btn btn-sm" id="btn-reset-paper" style="border-color:#e53935;color:#ef9a9a;background:rgba(229,57,53,0.1);font-weight:700" title="Preserve history and reset active balance baseline to initial capital">🔄 Reset Balance</button>
         </div>
       </div>
 
@@ -6891,7 +6928,11 @@ Routes["/settings"] = async (mount) => {
           if (curEl) curEl.value = isCentAcct ? "cent" : "usd";
           
           const balEl = mount.querySelector("#set-account-balance");
-          if (balEl) balEl.value = Number(acct.balance).toFixed(2);
+          if (balEl) {
+            balEl.value = Number(acct.balance).toFixed(2);
+            balEl.style.borderColor = "#00e676";
+            balEl.style.boxShadow = "0 0 10px rgba(0,230,118,0.3)";
+          }
           
           const levEl = mount.querySelector("#set-account-leverage");
           if (levEl && acct.leverage) levEl.value = String(acct.leverage);
@@ -6907,7 +6948,7 @@ Routes["/settings"] = async (mount) => {
 
           updateLotPreview();
           if (typeof UI !== "undefined" && UI.toast) {
-            UI.toast("MT5 Synced", `Synced with MT5 Account #${acct.login} (Bal: ${acct.balance} ${acct.currency || 'USD'})`, "green");
+            UI.toast("MT5 Synced", `Synced MT5 Balance: ${acct.balance} ${acct.currency || 'USD'}. Click SAVE below to apply to Paper Trading.`, "green");
           }
         } else {
           if (typeof UI !== "undefined" && UI.toast) {
@@ -7097,6 +7138,7 @@ Routes["/settings"] = async (mount) => {
           mt5_symbol: mt5Sym,
           mt5_magic_number: 777888,
           mt5_allowed_strategy: "Fib Retracement",
+          sync_paper_baseline: true,
         };
 
         await API.saveExecutionSettings(payload);
@@ -7108,7 +7150,7 @@ Routes["/settings"] = async (mount) => {
         window.__btLeverage = leverage;
 
         // Visual Green Animation for user feedback
-        saveBtn.innerHTML = "✅ SAVED!";
+        saveBtn.innerHTML = "✅ SAVED & SYNCED!";
         saveBtn.style.background = "#00e676";
         saveBtn.style.color = "#0a0e17";
         saveBtn.style.borderColor = "#00e676";
@@ -7124,7 +7166,7 @@ Routes["/settings"] = async (mount) => {
         }
 
         if (typeof UI !== "undefined" && UI.toast) {
-          UI.toast("Settings Saved", "Execution settings saved successfully!", "green");
+          UI.toast("Settings Saved", "Settings & Paper Trading balance synchronized successfully!", "green");
         }
 
         // Return button back to normal after 2.5 seconds
