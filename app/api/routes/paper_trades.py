@@ -421,45 +421,59 @@ async def manual_close_paper_trade(
 
     # Hybrid Telegram Alert Dispatch
     try:
-        from app.paper_trading.sync import _build_hybrid_close_msg, _dispatch_tg_alert
+        from app.paper_trading.sync import (
+            _build_hybrid_close_msg,
+            _dispatch_tg_alert,
+            _should_send_close_alert,
+            _record_close_alert_sent,
+        )
         from app.notifications.telegram_service import TelegramService
 
-        strat_name = "Manual Close"
-        sig = (trade.signal_id or "").upper()
-        if "FIB_RETR" in sig:
-            strat_name = "Fib Retracement"
-            for tag in ("L1", "L2", "L3"):
-                if f"_{tag}_" in sig or sig.endswith(f"_{tag}"):
-                    strat_name = f"Fib Retracement ({tag})"
-                    break
-        elif "SMC" in sig:
-            strat_name = "SMC With Fib (0.680)"
-        elif "TREND" in sig:
-            strat_name = "Fib Go With Trend"
+        tkt = None
+        try:
+            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(trade.id)
+        except Exception:
+            pass
 
-        tf_str = "5M"
-        if trade.signal_id:
-            for p in trade.signal_id.split("_"):
-                if p.upper() in ("5M", "15M", "30M", "1H", "2H", "4H"):
-                    tf_str = p.upper()
-                    break
+        if _should_send_close_alert(trade.id, tkt, trade.state_logs):
+            _record_close_alert_sent(trade, tkt)
+            strat_name = "Manual Close"
+            sig = (trade.signal_id or "").upper()
+            if "FIB_RETR" in sig:
+                strat_name = "Fib Retracement"
+                for tag in ("L1", "L2", "L3"):
+                    if f"_{tag}_" in sig or sig.endswith(f"_{tag}"):
+                        strat_name = f"Fib Retracement ({tag})"
+                        break
+            elif "SMC" in sig:
+                strat_name = "SMC With Fib (0.680)"
+            elif "TREND" in sig:
+                strat_name = "Fib Go With Trend"
 
-        tg_msg = _build_hybrid_close_msg(
-            strategy_name=f"{strat_name} (Manual Exit)",
-            symbol_tf=f"XAU/USD ({tf_str})",
-            direction=trade.direction,
-            entry_px=entry,
-            exit_px=trade.exit_price,
-            pts=pts,
-            realized_pnl=trade.realized_pnl,
-            exit_reason="MANUAL_CLOSE",
-            lot_size=lots,
-            opened_at=trade.opened_at or trade.created_at,
-            closed_at=trade.closed_at,
-            paper_trade_id=trade.id,
-        )
-        tg = TelegramService()
-        _dispatch_tg_alert(tg.send_raw_alert(tg_msg))
+            tf_str = "5M"
+            if trade.signal_id:
+                for p in trade.signal_id.split("_"):
+                    if p.upper() in ("5M", "15M", "30M", "1H", "2H", "4H"):
+                        tf_str = p.upper()
+                        break
+
+            tg_msg = _build_hybrid_close_msg(
+                strategy_name=f"{strat_name} (Manual Exit)",
+                symbol_tf=f"XAU/USD ({tf_str})",
+                direction=trade.direction,
+                entry_px=entry,
+                exit_px=trade.exit_price,
+                pts=pts,
+                realized_pnl=trade.realized_pnl,
+                exit_reason="MANUAL_CLOSE",
+                lot_size=lots,
+                opened_at=trade.opened_at or trade.created_at,
+                closed_at=trade.closed_at,
+                paper_trade_id=trade.id,
+            )
+            tg = TelegramService()
+            _dispatch_tg_alert(tg.send_raw_alert(tg_msg))
     except Exception as tg_err:
         logger.warning("[MANUAL-CLOSE] Failed to dispatch Telegram alert: %s", tg_err)
 

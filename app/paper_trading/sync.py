@@ -32,6 +32,38 @@ _sync_lock = asyncio.Lock()
 _in_flight_signals: set[str] = set()
 _last_paper_sync_ts: float = 0.0
 _bg_tg_tasks: set[asyncio.Task] = set()
+_sent_close_alert_keys: set[str] = set()
+
+
+def _should_send_close_alert(trade_id: str | None, ticket: Any = None, state_logs: list | None = None) -> bool:
+    """Return True if this trade/ticket has NOT yet dispatched a close alert."""
+    if trade_id and str(trade_id) in _sent_close_alert_keys:
+        return False
+    if ticket and str(ticket) in _sent_close_alert_keys and str(ticket) not in ("0", "None", ""):
+        return False
+    if state_logs and isinstance(state_logs, list):
+        for log in state_logs:
+            if isinstance(log, dict) and log.get("event") == "TG_CLOSE_ALERT_SENT":
+                return False
+    return True
+
+
+def _record_close_alert_sent(trade: Any, ticket: Any = None) -> None:
+    """Mark in-memory and in trade state_logs that a close alert has been dispatched."""
+    if hasattr(trade, "id") and trade.id:
+        _sent_close_alert_keys.add(str(trade.id))
+    elif isinstance(trade, str) and trade:
+        _sent_close_alert_keys.add(str(trade))
+    if ticket and str(ticket) not in ("0", "None", ""):
+        _sent_close_alert_keys.add(str(ticket))
+    if hasattr(trade, "state_logs"):
+        logs = list(trade.state_logs or [])
+        logs.append({
+            "event": "TG_CLOSE_ALERT_SENT",
+            "ticket": str(ticket) if ticket else None,
+            "time": datetime.now(timezone.utc).isoformat(),
+        })
+        trade.state_logs = logs
 
 
 def _dispatch_tg_alert(coro) -> asyncio.Task:
@@ -365,11 +397,19 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 matched_pt = recent_l1
                                 mt5_mgr._paper_trade_to_ticket[str(recent_l1.id)] = tkt
 
-                        if matched_pt and matched_pt.state != "OPEN":
+                        if matched_pt and matched_pt.state == "CLOSED":
                             logger.info(
-                                "[MT5-RECONCILE] MT5 Ticket #%s is OPEN but Paper Trade %s was %s. Restoring to OPEN!",
-                                tkt, matched_pt.id, matched_pt.state
+                                "[MT5-RECONCILE] Paper Trade %s is CLOSED (%s) but MT5 Ticket #%s is still open in MT5. Enqueuing MT5 close to synchronize broker.",
+                                matched_pt.id, matched_pt.exit_reason, tkt
                             )
+                            mt5_mgr.enqueue_close(
+                                ticket=tkt,
+                                paper_trade_id=matched_pt.id,
+                                symbol=pos.get("symbol", exec_cfg.mt5_symbol or "XAUUSD-VIP"),
+                                reason=matched_pt.exit_reason or "ENGINE_CLOSED",
+                                direction=pos.get("type", "BUY"),
+                            )
+                        elif matched_pt and matched_pt.state in ("PENDING", "SIGNAL_GENERATED"):
                             matched_pt.state = "OPEN"
                             matched_pt.closed_at = None
                             matched_pt.exit_price = None
@@ -440,27 +480,29 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 await db.commit()
 
                                 # Telegram Alert: Hybrid Close (TP / SL / BE)
-                                try:
-                                    pts = round(abs(close_px - (ot.entry_price or 0.0)), 2)
-                                    strat_lbl = str(ot.strategy_name or "Fib Retracement")
-                                    tf_lbl = str(ot.timeframe or "5m").upper()
-                                    close_msg = _build_hybrid_close_msg(
-                                        strategy_name=strat_lbl,
-                                        symbol_tf=f"XAU/USD ({tf_lbl})",
-                                        direction=ot.direction or "BUY",
-                                        entry_px=ot.entry_price or 0.0,
-                                        exit_px=close_px,
-                                        pts=pts,
-                                        realized_pnl=ot.realized_pnl or 0.0,
-                                        exit_reason=ot.exit_reason or "CLOSED",
-                                        lot_size=ot.lot_size or 0.01,
-                                        opened_at=ot.opened_at,
-                                        closed_at=ot.closed_at,
-                                        paper_trade_id=ot.id,
-                                    )
-                                    _dispatch_tg_alert(tg.send_raw_alert(close_msg))
-                                except Exception as tg_err:
-                                    logger.warning("[MT5-RECONCILE] Failed to send Telegram alert for ticket #%d: %s", tkt, tg_err)
+                                if _should_send_close_alert(ot.id, tkt, ot.state_logs):
+                                    _record_close_alert_sent(ot, tkt)
+                                    try:
+                                        pts = round(abs(close_px - (ot.entry_price or 0.0)), 2)
+                                        strat_lbl = str(ot.strategy_name or "Fib Retracement")
+                                        tf_lbl = str(ot.timeframe or "5m").upper()
+                                        close_msg = _build_hybrid_close_msg(
+                                            strategy_name=strat_lbl,
+                                            symbol_tf=f"XAU/USD ({tf_lbl})",
+                                            direction=ot.direction or "BUY",
+                                            entry_px=ot.entry_price or 0.0,
+                                            exit_px=close_px,
+                                            pts=pts,
+                                            realized_pnl=ot.realized_pnl or 0.0,
+                                            exit_reason=ot.exit_reason or "CLOSED",
+                                            lot_size=ot.lot_size or 0.01,
+                                            opened_at=ot.opened_at,
+                                            closed_at=ot.closed_at,
+                                            paper_trade_id=ot.id,
+                                        )
+                                        _dispatch_tg_alert(tg.send_raw_alert(close_msg))
+                                    except Exception as tg_err:
+                                        logger.warning("[MT5-RECONCILE] Failed to send Telegram alert for ticket #%s: %s", tkt, tg_err)
         except Exception as close_sync_err:
             logger.warning("[MT5-RECONCILE] Error during MT5 closed position synchronization: %s", close_sync_err)
 
@@ -643,25 +685,34 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 logger.warning("[MT5-BRIDGE] Orphan close dispatch failed: %s", _mt5_err)
 
                         # 2. Dispatch Hybrid Telegram Alert for Orphan Closure
-                        try:
-                            layer_name = _parts[3] if len(_parts) > 3 else "L1"
-                            orphan_msg = _build_hybrid_close_msg(
-                                strategy_name=f"Fib Retracement ({layer_name})",
-                                symbol_tf=f"XAU/USD ({_ot_tf.upper()})",
-                                direction=_direction or "LONG",
-                                entry_px=_entry_px,
-                                exit_px=_exit_px,
-                                pts=_pts,
-                                realized_pnl=_ot.realized_pnl,
-                                exit_reason=_exit_reason,
-                                lot_size=_ot.lot_size or 0.01,
-                                opened_at=_ot.opened_at,
-                                closed_at=_ot.closed_at,
-                                paper_trade_id=_ot.id,
-                            )
-                            _dispatch_tg_alert(tg.send_raw_alert(orphan_msg))
-                        except Exception as tg_err:
-                            logger.warning("[PAPER-TG] Failed to send orphan close alert: %s", tg_err)
+                        tkt = None
+                        if exec_cfg.mt5_bridge_enabled:
+                            try:
+                                from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(_ot.id)
+                            except Exception:
+                                pass
+                        if _should_send_close_alert(_ot.id, tkt, _ot.state_logs):
+                            _record_close_alert_sent(_ot, tkt)
+                            try:
+                                layer_name = _parts[3] if len(_parts) > 3 else "L1"
+                                orphan_msg = _build_hybrid_close_msg(
+                                    strategy_name=f"Fib Retracement ({layer_name})",
+                                    symbol_tf=f"XAU/USD ({_ot_tf.upper()})",
+                                    direction=_direction or "LONG",
+                                    entry_px=_entry_px,
+                                    exit_px=_exit_px,
+                                    pts=_pts,
+                                    realized_pnl=_ot.realized_pnl,
+                                    exit_reason=_exit_reason,
+                                    lot_size=_ot.lot_size or 0.01,
+                                    opened_at=_ot.opened_at,
+                                    closed_at=_ot.closed_at,
+                                    paper_trade_id=_ot.id,
+                                )
+                                _dispatch_tg_alert(tg.send_raw_alert(orphan_msg))
+                            except Exception as tg_err:
+                                logger.warning("[PAPER-TG] Failed to send orphan close alert: %s", tg_err)
                     except Exception as _commit_err:
                         logger.warning("[PAPER-ORPHAN] DB commit failed for orphan close %s: %s", _ot.signal_id, _commit_err)
                         await db.rollback()
@@ -1272,24 +1323,33 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch close to MT5: %s", mt5_err)
 
                                     # 2. Telegram Alert: Hybrid TP Hit
-                                    try:
-                                        tp_msg = _build_hybrid_close_msg(
-                                            strategy_name=f"Fib Retracement ({l_key})",
-                                            symbol_tf=f"XAU/USD ({tf_key.upper()})",
-                                            direction=f_state.direction,
-                                            entry_px=entry_px,
-                                            exit_px=tp_px,
-                                            pts=pts,
-                                            realized_pnl=existing.realized_pnl,
-                                            exit_reason="TP_HIT",
-                                            lot_size=existing.lot_size or 0.01,
-                                            opened_at=existing.opened_at,
-                                            closed_at=existing.closed_at,
-                                            paper_trade_id=existing.id,
-                                        )
-                                        _dispatch_tg_alert(tg.send_raw_alert(tp_msg))
-                                    except Exception as tg_err:
-                                        logger.warning("[PAPER-TG] Failed to send TP hit alert: %s", tg_err)
+                                    tkt = None
+                                    if exec_cfg.mt5_bridge_enabled:
+                                        try:
+                                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(existing.id)
+                                        except Exception:
+                                            pass
+                                    if _should_send_close_alert(existing.id, tkt, existing.state_logs):
+                                        _record_close_alert_sent(existing, tkt)
+                                        try:
+                                            tp_msg = _build_hybrid_close_msg(
+                                                strategy_name=f"Fib Retracement ({l_key})",
+                                                symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                                direction=f_state.direction,
+                                                entry_px=entry_px,
+                                                exit_px=tp_px,
+                                                pts=pts,
+                                                realized_pnl=existing.realized_pnl,
+                                                exit_reason="TP_HIT",
+                                                lot_size=existing.lot_size or 0.01,
+                                                opened_at=existing.opened_at,
+                                                closed_at=existing.closed_at,
+                                                paper_trade_id=existing.id,
+                                            )
+                                            _dispatch_tg_alert(tg.send_raw_alert(tp_msg))
+                                        except Exception as tg_err:
+                                            logger.warning("[PAPER-TG] Failed to send TP hit alert: %s", tg_err)
 
                                     # 3. Smart Shield Immediate Trigger: When L2 or L3 hits TP, trail L1 SL
                                     if exec_cfg.smart_shield_enabled and l_key in ("L2", "L3"):
@@ -1307,28 +1367,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                     PaperTradeModel.state == "OPEN",
                                                 )
                                             )).scalars().first()
-                                        # Fallback: Find L1 trade even if previously marked CLOSED prematurely
-                                        if not l1_trade:
-                                            l1_trade = (await db.execute(
-                                                select(PaperTradeModel).where(
-                                                    PaperTradeModel.signal_id == l1_sig_match,
-                                                ).order_by(PaperTradeModel.opened_at.desc())
-                                            )).scalars().first()
-                                            if not l1_trade:
-                                                l1_trade = (await db.execute(
-                                                    select(PaperTradeModel).where(
-                                                        PaperTradeModel.signal_id.like(f"FIB_RETR_{tf_key.upper()}_L1_{int(f_state.point_2_price)}%"),
-                                                    ).order_by(PaperTradeModel.opened_at.desc())
-                                                )).scalars().first()
-                                            if l1_trade and l1_trade.state != "OPEN":
-                                                from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                                open_mt5 = get_mt5_bridge_manager().get_open_positions()
-                                                if open_mt5:
-                                                    logger.warning("[SMART-SHIELD] L1 %s was closed in DB but MT5 has open positions! Reopening L1.", l1_trade.id)
-                                                    l1_trade.state = "OPEN"
-                                                    l1_trade.closed_at = None
-                                                    l1_trade.exit_price = None
-                                                    l1_trade.exit_reason = None
                                         if l1_trade:
                                             new_l1_sl = float(f_state.fib_0_618 or 0.0) if exec_cfg.smart_shield_level == "0.618" else float(f_state.fib_0_500 or 0.0)
                                             should_trail = False
@@ -1403,24 +1441,33 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch close to MT5: %s", mt5_err)
 
                                     # 2. Telegram Alert: Hybrid SL Hit / Breakeven Hit
-                                    try:
-                                        sl_msg = _build_hybrid_close_msg(
-                                            strategy_name=f"Fib Retracement ({l_key})",
-                                            symbol_tf=f"XAU/USD ({tf_key.upper()})",
-                                            direction=f_state.direction,
-                                            entry_px=entry_px,
-                                            exit_px=exit_px,
-                                            pts=pts,
-                                            realized_pnl=existing.realized_pnl,
-                                            exit_reason=existing.exit_reason or "SL_HIT",
-                                            lot_size=existing.lot_size or 0.01,
-                                            opened_at=existing.opened_at,
-                                            closed_at=existing.closed_at,
-                                            paper_trade_id=existing.id,
-                                        )
-                                        _dispatch_tg_alert(tg.send_raw_alert(sl_msg))
-                                    except Exception as tg_err:
-                                        logger.warning("[PAPER-TG] Failed to send SL hit alert: %s", tg_err)
+                                    tkt = None
+                                    if exec_cfg.mt5_bridge_enabled:
+                                        try:
+                                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(existing.id)
+                                        except Exception:
+                                            pass
+                                    if _should_send_close_alert(existing.id, tkt, existing.state_logs):
+                                        _record_close_alert_sent(existing, tkt)
+                                        try:
+                                            sl_msg = _build_hybrid_close_msg(
+                                                strategy_name=f"Fib Retracement ({l_key})",
+                                                symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                                direction=f_state.direction,
+                                                entry_px=entry_px,
+                                                exit_px=exit_px,
+                                                pts=pts,
+                                                realized_pnl=existing.realized_pnl,
+                                                exit_reason=existing.exit_reason or "SL_HIT",
+                                                lot_size=existing.lot_size or 0.01,
+                                                opened_at=existing.opened_at,
+                                                closed_at=existing.closed_at,
+                                                paper_trade_id=existing.id,
+                                            )
+                                            _dispatch_tg_alert(tg.send_raw_alert(sl_msg))
+                                        except Exception as tg_err:
+                                            logger.warning("[PAPER-TG] Failed to send SL hit alert: %s", tg_err)
 
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[PAPER-SYNC] Fib sync error: %s", exc)
@@ -1646,24 +1693,32 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             logger.info("[PAPER-AUTO] Engine %s closed SMC trade %s @ %.2f (+$%.2f)", smc_outcome, sig_id, exit_px, tf_open_trade.realized_pnl)
 
                             # Telegram Alert: SMC TP / SL Hit
+                            tkt = None
                             try:
-                                smc_close_msg = _build_hybrid_close_msg(
-                                    strategy_name="SMC With Fib (0.680)",
-                                    symbol_tf=f"XAU/USD ({tf_key.upper()})",
-                                    direction=dir_str,
-                                    entry_px=entry_chk,
-                                    exit_px=exit_px,
-                                    pts=pts,
-                                    realized_pnl=tf_open_trade.realized_pnl,
-                                    exit_reason=exit_reason,
-                                    lot_size=tf_open_trade.lot_size or 0.01,
-                                    opened_at=tf_open_trade.opened_at,
-                                    closed_at=tf_open_trade.closed_at,
-                                    paper_trade_id=tf_open_trade.id,
-                                )
-                                _dispatch_tg_alert(tg.send_raw_alert(smc_close_msg))
-                            except Exception as tg_err:
-                                logger.warning("[PAPER-TG] Failed to send SMC close alert: %s", tg_err)
+                                from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(tf_open_trade.id)
+                            except Exception:
+                                pass
+                            if _should_send_close_alert(tf_open_trade.id, tkt, tf_open_trade.state_logs):
+                                _record_close_alert_sent(tf_open_trade, tkt)
+                                try:
+                                    smc_close_msg = _build_hybrid_close_msg(
+                                        strategy_name="SMC With Fib (0.680)",
+                                        symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                        direction=dir_str,
+                                        entry_px=entry_chk,
+                                        exit_px=exit_px,
+                                        pts=pts,
+                                        realized_pnl=tf_open_trade.realized_pnl,
+                                        exit_reason=exit_reason,
+                                        lot_size=tf_open_trade.lot_size or 0.01,
+                                        opened_at=tf_open_trade.opened_at,
+                                        closed_at=tf_open_trade.closed_at,
+                                        paper_trade_id=tf_open_trade.id,
+                                    )
+                                    _dispatch_tg_alert(tg.send_raw_alert(smc_close_msg))
+                                except Exception as tg_err:
+                                    logger.warning("[PAPER-TG] Failed to send SMC close alert: %s", tg_err)
 
                             existing_open_smc_by_tf.pop(tf_key, None)  # Allow next setup to open on this TF
 
@@ -2193,55 +2248,64 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         except Exception as sig_sync_err:
                             logger.warning("[PAPER-SYNC] Failed to update signal on close: %s", sig_sync_err)
 
-                    try:
-                        if is_trend:
-                            strat_name = "Fib Go With Trend (Breakout)"
-                        elif "FIB_RETR" in (t.signal_id or ""):
-                            strat_base = "Fib Retracement"
-                            layer_tag = ""
-                            for tag in ("L1", "L2", "L3"):
-                                if f"_{tag}_" in (t.signal_id or "") or (t.signal_id or "").endswith(f"_{tag}"):
-                                    layer_tag = f" ({tag})"
-                                    break
-                            if not layer_tag and t.state_logs and isinstance(t.state_logs, list):
-                                for log_entry in t.state_logs:
-                                    if isinstance(log_entry, dict) and log_entry.get("layer"):
-                                        layer_tag = f" ({log_entry['layer']})"
+                    tkt = None
+                    if exec_cfg.mt5_bridge_enabled:
+                        try:
+                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(t.id)
+                        except Exception:
+                            pass
+                    if _should_send_close_alert(t.id, tkt, t.state_logs):
+                        _record_close_alert_sent(t, tkt)
+                        try:
+                            if is_trend:
+                                strat_name = "Fib Go With Trend (Breakout)"
+                            elif "FIB_RETR" in (t.signal_id or ""):
+                                strat_base = "Fib Retracement"
+                                layer_tag = ""
+                                for tag in ("L1", "L2", "L3"):
+                                    if f"_{tag}_" in (t.signal_id or "") or (t.signal_id or "").endswith(f"_{tag}"):
+                                        layer_tag = f" ({tag})"
                                         break
-                            strat_name = f"{strat_base}{layer_tag}"
-                        else:
-                            strat_name = "SMC With Fib"
+                                if not layer_tag and t.state_logs and isinstance(t.state_logs, list):
+                                    for log_entry in t.state_logs:
+                                        if isinstance(log_entry, dict) and log_entry.get("layer"):
+                                            layer_tag = f" ({log_entry['layer']})"
+                                            break
+                                strat_name = f"{strat_base}{layer_tag}"
+                            else:
+                                strat_name = "SMC With Fib"
 
-                        trade_tf = "5M"
-                        if t.signal_id:
-                            parts = t.signal_id.split("_")
-                            for p in parts:
-                                if p.upper() in ("5M", "15M", "30M", "1H", "2H", "4H"):
-                                    trade_tf = p.upper()
-                                    break
-                        if trade_tf == "5M" and t.state_logs and isinstance(t.state_logs, list):
-                            for l_entry in t.state_logs:
-                                if isinstance(l_entry, dict) and l_entry.get("timeframe"):
-                                    trade_tf = str(l_entry["timeframe"]).upper()
-                                    break
+                            trade_tf = "5M"
+                            if t.signal_id:
+                                parts = t.signal_id.split("_")
+                                for p in parts:
+                                    if p.upper() in ("5M", "15M", "30M", "1H", "2H", "4H"):
+                                        trade_tf = p.upper()
+                                        break
+                            if trade_tf == "5M" and t.state_logs and isinstance(t.state_logs, list):
+                                for l_entry in t.state_logs:
+                                    if isinstance(l_entry, dict) and l_entry.get("timeframe"):
+                                        trade_tf = str(l_entry["timeframe"]).upper()
+                                        break
 
-                        msg = _build_hybrid_close_msg(
-                            strategy_name=strat_name,
-                            symbol_tf=f"XAU/USD ({trade_tf})",
-                            direction=t.direction,
-                            entry_px=entry,
-                            exit_px=t.exit_price or entry,
-                            pts=pts,
-                            realized_pnl=t.realized_pnl or 0.0,
-                            exit_reason=t.exit_reason or "CLOSED",
-                            lot_size=t.lot_size or 0.01,
-                            opened_at=t.opened_at,
-                            closed_at=t.closed_at,
-                            paper_trade_id=t.id,
-                        )
-                        _dispatch_tg_alert(tg.send_raw_alert(msg))
-                    except Exception as tg_err:  # noqa: BLE001
-                        logger.warning("[PAPER-TG] Failed to send close alert: %s", tg_err)
+                            msg = _build_hybrid_close_msg(
+                                strategy_name=strat_name,
+                                symbol_tf=f"XAU/USD ({trade_tf})",
+                                direction=t.direction,
+                                entry_px=entry,
+                                exit_px=t.exit_price or entry,
+                                pts=pts,
+                                realized_pnl=t.realized_pnl or 0.0,
+                                exit_reason=t.exit_reason or "CLOSED",
+                                lot_size=t.lot_size or 0.01,
+                                opened_at=t.opened_at,
+                                closed_at=t.closed_at,
+                                paper_trade_id=t.id,
+                            )
+                            _dispatch_tg_alert(tg.send_raw_alert(msg))
+                        except Exception as tg_err:  # noqa: BLE001
+                            logger.warning("[PAPER-TG] Failed to send close alert: %s", tg_err)
 
                     # Smart Shield Trigger for Fast Live Price Monitor
                     # When L2 or L3 hits TP, trail the companion L1 trade's Stop Loss to 0.500 (or 0.618)
@@ -2281,32 +2345,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 PaperTradeModel.state == "OPEN",
                                             )
                                         )).scalars().first()
-
-                                # Fallback: Find L1 trade even if previously marked CLOSED prematurely
-                                if not l1_trade:
-                                    l1_trade = (await db.execute(
-                                        select(PaperTradeModel).where(
-                                            PaperTradeModel.signal_id == l1_sig_match,
-                                        ).order_by(PaperTradeModel.opened_at.desc())
-                                    )).scalars().first()
-                                    if not l1_trade:
-                                        parts = (t.signal_id or "").split("_")
-                                        if len(parts) >= 5:
-                                            p2_seg = parts[4]
-                                            l1_trade = (await db.execute(
-                                                select(PaperTradeModel).where(
-                                                    PaperTradeModel.signal_id.like(f"FIB_RETR_{trade_tf}_L1_{p2_seg}%"),
-                                                ).order_by(PaperTradeModel.opened_at.desc())
-                                            )).scalars().first()
-                                    if l1_trade and l1_trade.state != "OPEN":
-                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                        open_mt5 = get_mt5_bridge_manager().get_open_positions()
-                                        if open_mt5:
-                                            logger.warning("[PAPER-FAST-MONITOR] L1 %s was closed in DB but MT5 has open positions! Reopening L1.", l1_trade.id)
-                                            l1_trade.state = "OPEN"
-                                            l1_trade.closed_at = None
-                                            l1_trade.exit_price = None
-                                            l1_trade.exit_reason = None
 
                                 if l1_trade:
                                     if exec_cfg.smart_shield_level == "0.618":
