@@ -284,13 +284,16 @@ async def execute_safe_update(remote_hash: str, is_hot_restart: bool = False) ->
 
     logger.info("[AUTO-UPDATER] git pull succeeded. Output:\n%s", pull_out)
 
-    # 3. Stop old server and start new one
+    # 3. Stop old server
     kill_existing_server()
-    time.sleep(2)
-    start_server()
+    # Give RUN_SERVER_ALWAYS.bat a chance to auto-restart the server in its visible window (5s delay)
+    logger.info("[AUTO-UPDATER] Checking if RUN_SERVER_ALWAYS.bat restarts server...")
+    is_healthy = wait_for_health(timeout_sec=8)
+    if not is_healthy:
+        logger.info("[AUTO-UPDATER] RUN_SERVER_ALWAYS.bat not active; spawning background server process directly...")
+        start_server()
+        is_healthy = wait_for_health(timeout_sec=45)
 
-    # 4. Wait for /health
-    is_healthy = wait_for_health(timeout_sec=50)
     downtime_sec = round(time.time() - t0, 1)
 
     if is_healthy:
