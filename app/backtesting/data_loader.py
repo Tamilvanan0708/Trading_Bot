@@ -290,10 +290,19 @@ async def fetch_historical_candles(
                     c_end = c_end.replace(tzinfo=timezone.utc)
 
                 # Check if candidate file contains the requested range
-                covers_start = c_start <= start_dt
-                covers_end = (c_end >= end_dt) or (c_end.date() >= end_dt.date())
+                entries = raw.get("candles", [])
+                if not entries:
+                    continue
+                first_ts = datetime.fromisoformat(str(entries[0]["timestamp"]))
+                last_ts = datetime.fromisoformat(str(entries[-1]["timestamp"]))
+                if first_ts.tzinfo is None:
+                    first_ts = first_ts.replace(tzinfo=timezone.utc)
+                if last_ts.tzinfo is None:
+                    last_ts = last_ts.replace(tzinfo=timezone.utc)
+
+                covers_start = first_ts <= start_dt
+                covers_end = (last_ts >= end_dt) or (last_ts.date() >= end_dt.date())
                 if covers_start and covers_end:
-                    entries = raw.get("candles", [])
                     sliced_entries = []
                     for r in entries:
                         ts = datetime.fromisoformat(str(r["timestamp"]))
@@ -303,7 +312,7 @@ async def fetch_historical_candles(
                             sliced_entries.append(r)
 
                     sliced_candles = _parse_candles(sliced_entries)
-                    if sliced_candles:
+                    if len(sliced_candles) >= 10:
                         logger.info(
                             "[DATA-LOADER] Sliced %d candles from master cache %s for %s [%s] (%s to %s)",
                             len(sliced_candles), os.path.basename(c_path), symbol, tf_str, start_str, end_str

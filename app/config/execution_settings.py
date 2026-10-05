@@ -140,7 +140,19 @@ class ExecutionSettings(BaseModel):
         default=2.0,
         ge=0.1,
         le=10.0,
-        description="Maximum allowed spread in points. Orders blocked when spread exceeds this value."
+        description="Maximum allowed spread in points for 15M/30M/1H. Orders blocked when spread exceeds this value."
+    )
+    max_spread_points_5m: float = Field(
+        default=0.50,
+        ge=0.1,
+        le=5.0,
+        description="Strict maximum allowed spread in points for 5M scalp trades. Blocks Asian open/rollover spikes."
+    )
+    spread_buffer_points: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=2.0,
+        description="Breathing room buffer added to MT5 Stop Loss to prevent premature spread wick trigger."
     )
     chase_filter_enabled: bool = Field(
         default=True,

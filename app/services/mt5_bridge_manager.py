@@ -435,14 +435,20 @@ class MT5BridgeManager:
             order_type = mt5.ORDER_TYPE_BUY if is_buy else mt5.ORDER_TYPE_SELL
             price = tick.ask if is_buy else tick.bid
 
-            # Direction 4: Live Spread Filter Check
+            # Direction 4: Live Spread Filter Check (with 5M scalp spread gate)
             live_spread = round(abs(tick.ask - tick.bid), 2)
             exec_cfg = get_execution_settings()
+            tf = str(order_payload.get("timeframe", "5M")).upper()
             if getattr(exec_cfg, "spread_filter_enabled", True):
-                max_spread = float(getattr(exec_cfg, "max_spread_points", 2.0))
+                if tf == "5M":
+                    max_spread = float(getattr(exec_cfg, "max_spread_points_5m", 0.50))
+                else:
+                    max_spread = float(getattr(exec_cfg, "max_spread_points", 2.0))
+
                 if live_spread > max_spread:
                     logger.warning(
-                        "[MT5-NATIVE] SPREAD FILTER TRIGGERED: Live spread %.2f pts exceeds maximum allowed %.2f pts for %s. Order %s BLOCKED.",
+                        "[MT5-NATIVE] SPREAD FILTER TRIGGERED (%s): Live spread %.2f pts exceeds maximum allowed %.2f pts for %s. Order %s BLOCKED.",
+                        tf,
                         live_spread,
                         max_spread,
                         symbol,
@@ -489,6 +495,19 @@ class MT5BridgeManager:
             lot = float(order_payload.get("lot_size") or 0.01)
             sl = float(order_payload.get("stop_loss") or 0.0)
             tp = float(order_payload.get("take_profit") or 0.0)
+
+            # Apply Spread Buffer to Stop Loss to prevent broker spread wick spikes
+            spread_buffer = float(getattr(exec_cfg, "spread_buffer_points", 0.35) or 0.0)
+            if sl > 0 and spread_buffer > 0:
+                if is_buy:
+                    sl = round(sl - spread_buffer, 2)
+                else:
+                    sl = round(sl + spread_buffer, 2)
+                logger.info(
+                    "[MT5-NATIVE] Applied spread buffer %.2f pts to SL -> final MT5 SL: %.2f",
+                    spread_buffer,
+                    sl,
+                )
 
             # Check broker filling mode
             sym_info = mt5.symbol_info(symbol)

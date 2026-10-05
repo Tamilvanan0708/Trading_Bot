@@ -436,6 +436,29 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         elif ot.exit_reason == "SL_HIT":
                                             sig.sl_hit = True
                                 await db.commit()
+
+                                # Telegram Alert: Hybrid Close (TP / SL / BE)
+                                try:
+                                    pts = round(abs(close_px - (ot.entry_price or 0.0)), 2)
+                                    strat_lbl = str(ot.strategy_name or "Fib Retracement")
+                                    tf_lbl = str(ot.timeframe or "5m").upper()
+                                    close_msg = _build_hybrid_close_msg(
+                                        strategy_name=strat_lbl,
+                                        symbol_tf=f"XAU/USD ({tf_lbl})",
+                                        direction=ot.direction or "BUY",
+                                        entry_px=ot.entry_price or 0.0,
+                                        exit_px=close_px,
+                                        pts=pts,
+                                        realized_pnl=ot.realized_pnl or 0.0,
+                                        exit_reason=ot.exit_reason or "CLOSED",
+                                        lot_size=ot.lot_size or 0.01,
+                                        opened_at=ot.opened_at,
+                                        closed_at=ot.closed_at,
+                                        paper_trade_id=ot.id,
+                                    )
+                                    _dispatch_tg_alert(tg.send_raw_alert(close_msg))
+                                except Exception as tg_err:
+                                    logger.warning("[MT5-RECONCILE] Failed to send Telegram alert for ticket #%d: %s", tkt, tg_err)
         except Exception as close_sync_err:
             logger.warning("[MT5-RECONCILE] Error during MT5 closed position synchronization: %s", close_sync_err)
 
