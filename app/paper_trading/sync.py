@@ -760,11 +760,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         if exec_cfg.mt5_bridge_enabled:
                             try:
                                 from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(_ot.id)
+                                tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(_ot.id, timeframe=_ot_tf)
                             except Exception:
                                 pass
                         if _should_send_close_alert(_ot.id, tkt, _ot.state_logs):
                             _record_close_alert_sent(_ot, tkt)
+                            try:
+                                await db.commit()
+                            except Exception:
+                                pass
                             try:
                                 layer_name = _parts[3] if len(_parts) > 3 else "L1"
                                 orphan_msg = _build_hybrid_close_msg(
@@ -963,6 +967,22 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             existing = (await db.execute(
                                 select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
                             )).scalars().first()
+
+                            # Anchor Swing Completeness Check:
+                            # If sig_id changed slightly (e.g. timestamp shift), but a trade for the exact same
+                            # timeframe, layer, and swing anchor price (int(point_2_price)) has already run:
+                            p2_int = int(f_state.point_2_price)
+                            anchor_prefix = f"FIB_RETR_{tf_key.upper()}_{l_key}_{p2_int}"
+                            if not existing:
+                                existing = (await db.execute(
+                                    select(PaperTradeModel).where(
+                                        PaperTradeModel.signal_id.like(f"{anchor_prefix}%")
+                                    ).order_by(PaperTradeModel.created_at.desc())
+                                )).scalars().first()
+
+                            # If trade already completed (CLOSED), DO NOT re-open a new trade for this same swing cycle!
+                            if existing and existing.state == "CLOSED":
+                                continue
 
                             entry_px = float(layer.get("entry_price") or 0.0)
                             sl_px = sig_sl
@@ -1413,11 +1433,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     if exec_cfg.mt5_bridge_enabled:
                                         try:
                                             from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(existing.id)
+                                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(existing.id, timeframe=tf_key)
                                         except Exception:
                                             pass
                                     if _should_send_close_alert(existing.id, tkt, existing.state_logs):
                                         _record_close_alert_sent(existing, tkt)
+                                        try:
+                                            await db.commit()
+                                        except Exception:
+                                            pass
                                         try:
                                             tp_msg = _build_hybrid_close_msg(
                                                 strategy_name=f"Fib Retracement ({l_key})",
@@ -1531,11 +1555,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     if exec_cfg.mt5_bridge_enabled:
                                         try:
                                             from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(existing.id)
+                                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(existing.id, timeframe=tf_key)
                                         except Exception:
                                             pass
                                     if _should_send_close_alert(existing.id, tkt, existing.state_logs):
                                         _record_close_alert_sent(existing, tkt)
+                                        try:
+                                            await db.commit()
+                                        except Exception:
+                                            pass
                                         try:
                                             sl_msg = _build_hybrid_close_msg(
                                                 strategy_name=f"Fib Retracement ({l_key})",
@@ -1778,15 +1806,18 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             await db.commit()
                             logger.info("[PAPER-AUTO] Engine %s closed SMC trade %s @ %.2f (+$%.2f)", smc_outcome, sig_id, exit_px, tf_open_trade.realized_pnl)
 
-                            # Telegram Alert: SMC TP / SL Hit
                             tkt = None
                             try:
                                 from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(tf_open_trade.id)
+                                tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(tf_open_trade.id, timeframe=tf_key)
                             except Exception:
                                 pass
                             if _should_send_close_alert(tf_open_trade.id, tkt, tf_open_trade.state_logs):
                                 _record_close_alert_sent(tf_open_trade, tkt)
+                                try:
+                                    await db.commit()
+                                except Exception:
+                                    pass
                                 try:
                                     smc_close_msg = _build_hybrid_close_msg(
                                         strategy_name="SMC With Fib (0.680)",
@@ -2334,15 +2365,33 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         except Exception as sig_sync_err:
                             logger.warning("[PAPER-SYNC] Failed to update signal on close: %s", sig_sync_err)
 
+                    # Determine timeframe for accurate ticket resolution and display
+                    trade_tf = "5M"
+                    if t.signal_id:
+                        parts = t.signal_id.split("_")
+                        for p in parts:
+                            if p.upper() in ("5M", "15M", "30M", "1H", "2H", "4H"):
+                                trade_tf = p.upper()
+                                break
+                    if trade_tf == "5M" and t.state_logs and isinstance(t.state_logs, list):
+                        for l_entry in t.state_logs:
+                            if isinstance(l_entry, dict) and l_entry.get("timeframe"):
+                                trade_tf = str(l_entry["timeframe"]).upper()
+                                break
+
                     tkt = None
                     if exec_cfg.mt5_bridge_enabled:
                         try:
                             from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(t.id)
+                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(t.id, timeframe=trade_tf)
                         except Exception:
                             pass
                     if _should_send_close_alert(t.id, tkt, t.state_logs):
                         _record_close_alert_sent(t, tkt)
+                        try:
+                            await db.commit()
+                        except Exception:
+                            pass
                         try:
                             if is_trend:
                                 strat_name = "Fib Go With Trend (Breakout)"
@@ -2361,19 +2410,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 strat_name = f"{strat_base}{layer_tag}"
                             else:
                                 strat_name = "SMC With Fib"
-
-                            trade_tf = "5M"
-                            if t.signal_id:
-                                parts = t.signal_id.split("_")
-                                for p in parts:
-                                    if p.upper() in ("5M", "15M", "30M", "1H", "2H", "4H"):
-                                        trade_tf = p.upper()
-                                        break
-                            if trade_tf == "5M" and t.state_logs and isinstance(t.state_logs, list):
-                                for l_entry in t.state_logs:
-                                    if isinstance(l_entry, dict) and l_entry.get("timeframe"):
-                                        trade_tf = str(l_entry["timeframe"]).upper()
-                                        break
 
                             msg = _build_hybrid_close_msg(
                                 strategy_name=strat_name,

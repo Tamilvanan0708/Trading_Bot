@@ -356,11 +356,11 @@ async def main_loop() -> None:
                 # Check Trade Safety Guard
                 has_trades = has_open_trades()
                 elapsed = time.time() - pending_since_ts
-                is_timeout = elapsed >= 300  # 5 minutes elapsed
+                is_timeout = elapsed >= 60  # 1 minute max wait before seamless hot-restart
 
                 if has_trades and not is_forced and not is_timeout:
                     logger.warning(
-                        "[AUTO-UPDATER] Trade Safety Guard: Open trade detected (pending %ds). Waiting up to 5m for quiet window.",
+                        "[AUTO-UPDATER] Trade Safety Guard: Open trade detected (pending %ds). Waiting up to 60s for quiet window.",
                         int(elapsed),
                     )
                     if not postponed_notice_sent:
@@ -368,8 +368,8 @@ async def main_loop() -> None:
                             f"⏳ *UPDATE POSTPONED (Trade in Progress)*\n"
                             f"━━━━━━━━━━━━━━━━━━━━\n"
                             f"Pushed commit `#{remote_h}` detected.\n"
-                            f"Waiting up to 5m for open trade to exit.\n"
-                            f"If trade is still running after 5m, seamless hot-restart (~3s) will apply updates safely.\n"
+                            f"Waiting up to 60s for open trade to exit.\n"
+                            f"If trade is still running after 60s, seamless hot-restart (~3s) will apply updates safely.\n"
                             f"━━━━━━━━━━━━━━━━━━━━"
                         )
                         postponed_notice_sent = True

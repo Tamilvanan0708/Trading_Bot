@@ -611,7 +611,22 @@ class MT5BridgeManager:
             if not tick:
                 return False
 
-            is_buy = direction in ("BUY", "LONG")
+            # Fetch actual live position from MT5 to get accurate open volume and position type
+            pos = None
+            try:
+                positions = mt5.positions_get(ticket=ticket)
+                if positions and len(positions) > 0:
+                    pos = positions[0]
+            except Exception:
+                pass
+
+            actual_lot = float(getattr(pos, "volume", lot or 0.01)) if pos else float(lot or 0.01)
+            # MT5 position type: 0 = POSITION_TYPE_BUY, 1 = POSITION_TYPE_SELL
+            if pos is not None:
+                is_buy = getattr(pos, "type", 0) == 0
+            else:
+                is_buy = direction in ("BUY", "LONG")
+
             close_type = mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY
             close_price = tick.bid if is_buy else tick.ask
 
@@ -632,7 +647,7 @@ class MT5BridgeManager:
                 "action": mt5.TRADE_ACTION_DEAL,
                 "position": ticket,
                 "symbol": symbol,
-                "volume": lot,
+                "volume": actual_lot,
                 "type": close_type,
                 "price": close_price,
                 "deviation": 25,
