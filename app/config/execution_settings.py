@@ -117,8 +117,14 @@ class ExecutionSettings(BaseModel):
         description="Filter counter-trend setups against macro trend alignment (default False for pure BOS Fib)"
     )
     cross_tf_dedup_enabled: bool = Field(
-        default=False,
+        default=True,
         description="De-duplicate concurrent trades across different timeframes with close entry & SL"
+    )
+    max_sl_distance_5m: float = Field(
+        default=8.0,
+        ge=2.0,
+        le=30.0,
+        description="Maximum Stop Loss distance in points allowed for 5M scalp trades. Rejects macro swings on 5M."
     )
     fib_engine_mode: Literal["classic", "experimental"] = Field(
         default="classic",

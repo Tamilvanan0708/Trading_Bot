@@ -182,7 +182,7 @@ class MT5BridgeManager:
             logger.debug("[MT5-BRIDGE] get_open_positions error: %s", exc)
             return []
 
-    def get_ticket_for_paper_trade(self, paper_trade_id: str | None) -> int | None:
+    def get_ticket_for_paper_trade(self, paper_trade_id: str | None, timeframe: str | None = None) -> int | None:
         """Lookup native or EA execution ticket for a given paper trade ID."""
         if not paper_trade_id:
             return None
@@ -204,7 +204,18 @@ class MT5BridgeManager:
             if positions:
                 for pos in positions:
                     comm = getattr(pos, "comment", "")
-                    if str(paper_trade_id)[:6] in comm or (len(positions) == 1 and "L1" in comm):
+                    # Match by paper trade ID prefix
+                    if str(paper_trade_id)[:6] in comm:
+                        with self._lock:
+                            self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
+                        return int(pos.ticket)
+                    # Match by timeframe (e.g. XAU_5M_L1 or XAU_15M_L1)
+                    if timeframe and (f"_{timeframe.upper()}_" in comm or f"_{timeframe.upper()}" in comm):
+                        with self._lock:
+                            self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
+                        return int(pos.ticket)
+                    # Fallback if only 1 position
+                    if len(positions) == 1 and "L1" in comm:
                         with self._lock:
                             self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
                         return int(pos.ticket)
@@ -214,11 +225,12 @@ class MT5BridgeManager:
             if deals:
                 for d in reversed(deals):
                     comm = getattr(d, "comment", "")
-                    if str(paper_trade_id)[:6] in comm and getattr(d, "position_id", 0) > 0:
-                        pos_id = int(d.position_id)
-                        with self._lock:
-                            self._paper_trade_to_ticket[str(paper_trade_id)] = pos_id
-                        return pos_id
+                    pos_id = int(getattr(d, "position_id", 0))
+                    if pos_id > 0:
+                        if str(paper_trade_id)[:6] in comm or (timeframe and (f"_{timeframe.upper()}_" in comm or f"_{timeframe.upper()}" in comm)):
+                            with self._lock:
+                                self._paper_trade_to_ticket[str(paper_trade_id)] = pos_id
+                            return pos_id
         except Exception:
             pass
         return None
@@ -334,8 +346,14 @@ class MT5BridgeManager:
             "strategy": "Fib Retracement",
             "layer": str(order_data.get("layer", "L1")),
             "timeframe": str(order_data.get("timeframe", "5M")).upper(),
-            "magic_number": exec_cfg.mt5_magic_number,
-            "comment": str(order_data.get("comment") or f"XAU_{order_data.get('timeframe', '5M')}_{order_data.get('layer', 'L1')}").strip()[:31],
+            "comment": str(
+                order_data.get("comment")
+                or (
+                    f"{str(order_data.get('paper_trade_id'))[:6]}_{order_data.get('timeframe', '5M')}_{order_data.get('layer', 'L1')}"
+                    if order_data.get("paper_trade_id")
+                    else f"XAU_{order_data.get('timeframe', '5M')}_{order_data.get('layer', 'L1')}"
+                )
+            ).strip()[:31],
             "created_at": time.time(),
             "status": "PENDING",
             "paper_trade_id": order_data.get("paper_trade_id"),

@@ -210,6 +210,7 @@ def _build_hybrid_close_msg(
             f"💼 *MT5 Balance:* {balance_str}\n"
             f"━━━━━━━━━━━━━━━━━━━━"
         )
+    elif is_profit:
         realized_usd = round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
         growth_line = f"📈 *Account Growth:* +₹{abs(realized_pnl):,.2f} INR" if is_cent else f"📈 *Account Growth:* +${abs(realized_pnl):,.2f} USD"
         if exit_reason == "TP_HIT":
@@ -240,8 +241,18 @@ def _build_hybrid_close_msg(
     else:
         loss_usd = round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
         dd_line = f"📉 *Account Drawdown:* -₹{abs(realized_pnl):,.2f} INR" if is_cent else f"📉 *Account Drawdown:* -${abs(realized_pnl):,.2f} USD"
+        if exit_reason == "SL_HIT":
+            title_badge = "🛑 *STOP LOSS HIT"
+        elif exit_reason == "MANUAL_CLOSE":
+            title_badge = "✋ *MANUAL EXIT (LOSS)"
+        elif "ORPHAN" in str(exit_reason) or "TIMEOUT" in str(exit_reason):
+            title_badge = "🔄 *SLOT TIMEOUT EXIT"
+        elif "ROLLOVER" in str(exit_reason) or "CYCLE" in str(exit_reason):
+            title_badge = "🔄 *CYCLE ROLLOVER EXIT"
+        else:
+            title_badge = "🛑 *TRADE CLOSED (LOSS)"
         return (
-            f"🛑 *STOP LOSS HIT (-{abs(pts):.2f} PTS)*\n"
+            f"{title_badge} (-{abs(pts):.2f} PTS)*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📊 *Strategy:* {strategy_name}\n"
             f"🪙 *Symbol:* {symbol_tf}\n"
@@ -384,13 +395,27 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             if mapped_tkt == tkt:
                                 matched_pt = await repo.get_paper_trade(pt_id)
                                 break
-                        # If not matched, try searching by comment prefix or L1
+                        # If not matched, try searching by comment prefix, timeframe, or L1
                         if not matched_pt and comm:
+                            comm_tf = None
+                            for _t in ("5M", "15M", "30M", "1H", "4H", "1M"):
+                                if f"_{_t}_" in comm.upper() or comm.upper().endswith(f"_{_t}") or f"_{_t}" in comm.upper():
+                                    comm_tf = _t
+                                    break
                             candidate_pts = (await db.execute(
-                                select(PaperTradeModel).order_by(PaperTradeModel.opened_at.desc()).limit(20)
+                                select(PaperTradeModel).where(PaperTradeModel.state.in_(("OPEN", "CLOSED"))).order_by(PaperTradeModel.opened_at.desc()).limit(20)
                             )).scalars().all()
                             for cpt in candidate_pts:
-                                if str(cpt.id)[:6] in comm or (cpt.signal_id and any(part in comm for part in cpt.signal_id.split("_") if len(part) > 3)):
+                                sig_upper = (cpt.signal_id or "").upper()
+                                if str(cpt.id)[:6] in comm:
+                                    matched_pt = cpt
+                                    mt5_mgr._paper_trade_to_ticket[str(cpt.id)] = tkt
+                                    break
+                                if comm_tf and f"_{comm_tf}_" in sig_upper:
+                                    matched_pt = cpt
+                                    mt5_mgr._paper_trade_to_ticket[str(cpt.id)] = tkt
+                                    break
+                                if cpt.signal_id and any(part in comm for part in cpt.signal_id.split("_") if len(part) > 3):
                                     matched_pt = cpt
                                     mt5_mgr._paper_trade_to_ticket[str(cpt.id)] = tkt
                                     break
@@ -624,7 +649,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     if exec_cfg.mt5_bridge_enabled:
                         try:
                             from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                            open_tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(_ot.id)
+                            open_tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(_ot.id, timeframe=_ot_tf)
                             if open_tkt and str(open_tkt) not in ("0", "None", ""):
                                 continue
                         except Exception:
@@ -647,34 +672,40 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             _lc_matches = True
 
                     if not _lc_matches:
-                        # Fallback for Stale Orphaned Trades:
-                        # Timeframe-aware minimum age before considering a trade stale without an engine setup:
-                        # 5M: 1 hour (3600s), 15M: 4 hours (14400s), 30M: 8 hours (28800s), 1H+: 24 hours (86400s)
-                        _tf_min_age = 3600
-                        if _ot_tf == "15m":
-                            _tf_min_age = 14400
-                        elif _ot_tf == "30m":
-                            _tf_min_age = 28800
-                        elif _ot_tf in ("1h", "2h", "4h"):
-                            _tf_min_age = 86400
+                        # If price has not hit SL or TP, keep the trade OPEN and let it breathe!
+                        _sl_bound = float(_ot.stop_loss or 0.0)
+                        _tp_bound = float(_ot.take_profit_1 or 0.0)
+                        _dir = _ot.direction or "LONG"
+                        _cur_px = float(live_price or 0.0)
 
-                        _is_stale_orphan = False
-                        if _ot.opened_at:
-                            _ot_tz = _ot.opened_at if _ot.opened_at.tzinfo else _ot.opened_at.replace(tzinfo=timezone.utc)
-                            _age_sec = abs((datetime.now(timezone.utc) - _ot_tz).total_seconds())
-                            if _age_sec > _tf_min_age:
-                                _is_stale_orphan = True
-
-                        if not _is_stale_orphan:
-                            # Old setup does NOT belong to this trade and not stale! Hold active trade for genuine TP/SL.
-                            continue
-
-                        # Auto-sweep stale orphan using current price or entry
-                        _exit_px = float(live_price or _ot.actual_entry or _ot.target_entry or 0.0)
-                        _exit_reason = "ENGINE_RESET_ORPHAN"
-                        _outcome = "ENGINE_RESET_ORPHAN"
-                        _direction = _ot.direction or "LONG"
-                        _entry_px = float(_ot.actual_entry or _ot.target_entry or 0.0)
+                        if _cur_px > 0 and _sl_bound > 0 and _tp_bound > 0:
+                            # Check genuine SL or TP breach by live price
+                            if (_dir == "LONG" and _cur_px <= _sl_bound) or (_dir == "SHORT" and _cur_px >= _sl_bound):
+                                _exit_px = _sl_bound
+                                _exit_reason = "SL_HIT"
+                                _outcome = "SL_HIT"
+                                _entry_px = float(_ot.actual_entry or _ot.target_entry or 0.0)
+                                _direction = _dir
+                            elif (_dir == "LONG" and _cur_px >= _tp_bound) or (_dir == "SHORT" and _cur_px <= _tp_bound):
+                                _exit_px = _tp_bound
+                                _exit_reason = "TP_HIT"
+                                _outcome = "TP_HIT"
+                                _entry_px = float(_ot.actual_entry or _ot.target_entry or 0.0)
+                                _direction = _dir
+                            else:
+                                # Price is safely between SL and TP — DO NOT prematurely close!
+                                continue
+                        else:
+                            # Without live price or SL/TP bounds, only sweep if ancient (> 24 hours)
+                            if _ot.opened_at:
+                                _ot_tz = _ot.opened_at if _ot.opened_at.tzinfo else _ot.opened_at.replace(tzinfo=timezone.utc)
+                                if abs((datetime.now(timezone.utc) - _ot_tz).total_seconds()) < 86400:
+                                    continue
+                            _exit_px = float(live_price or _ot.actual_entry or _ot.target_entry or 0.0)
+                            _exit_reason = "CYCLE_ROLLOVER"
+                            _outcome = "CYCLE_ROLLOVER"
+                            _entry_px = float(_ot.actual_entry or _ot.target_entry or 0.0)
+                            _direction = _dir
                     else:
                         _outcome = getattr(_lc, "outcome", None) if _lc else None
                         _locked_tp = getattr(_lc, "locked_tp", None) if _lc else None
@@ -994,10 +1025,23 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             )
                                             continue
 
+                                # --- 5M SCALP GUARD: MAX SL DISTANCE CAP ---
+                                # 5M is intended for quick scalp retracements. If stop loss distance exceeds max allowed points (default 8.0 pts),
+                                # skip opening on 5M — let 15M/1H swing engine handle macro impulse waves.
+                                if tf_key.lower() == "5m":
+                                    sl_dist = abs(entry_px - sl_px)
+                                    max_sl_5m = float(getattr(exec_cfg, "max_sl_distance_5m", 8.0))
+                                    if sl_dist > max_sl_5m:
+                                        logger.info(
+                                            "[PAPER-SCALP-5M] Skipping 5M trade %s: SL distance %.2f pts exceeds max 5M scalp SL of %.2f pts. Macro swings belong to 15M/1H.",
+                                            sig_id, sl_dist, max_sl_5m,
+                                        )
+                                        continue
+
                                 # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
-                                # 1) If cross_tf_dedup_enabled is True: matches entry (≤5.0) / SL (≤2.5) / TP (≤2.5)
-                                # 2) Default: always blocks near-identical duplicate entries (≤0.50 pt diff) across TFs with same direction & SL
-                                is_explicit_dedup = getattr(exec_cfg, "cross_tf_dedup_enabled", False)
+                                # 1) If cross_tf_dedup_enabled is True (default): matches entry (≤5.0) / SL (≤2.5) / TP (≤2.5) / shared swing anchor
+                                # 2) Always blocks duplicate entries or shared swing anchors across TFs with same direction & SL
+                                is_explicit_dedup = getattr(exec_cfg, "cross_tf_dedup_enabled", True)
                                 norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
                                 if is_explicit_dedup:
                                     dup_cond = or_(
@@ -1009,6 +1053,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             func.abs(PaperTradeModel.take_profit_1 - tp_px) <= 2.5,
                                             func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
                                         ),
+                                        # Shared swing anchor (Point 2 high/low) in same direction
+                                        func.abs(PaperTradeModel.stop_loss - sl_px) <= 1.0,
                                     )
                                 else:
                                     dup_cond = and_(
