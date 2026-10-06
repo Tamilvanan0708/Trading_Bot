@@ -141,8 +141,8 @@ def kill_existing_server() -> None:
                     parts = line.split()
                     if len(parts) >= 5:
                         pid = parts[-1]
-                        logger.info("[AUTO-UPDATER] Killing PID %s on port 8000", pid)
-                        run_cmd(f"taskkill /F /PID {pid}")
+                        logger.info("[AUTO-UPDATER] Killing PID %s on port 8000 (tree)", pid)
+                        run_cmd(f"taskkill /F /T /PID {pid}")
         except Exception as exc:
             logger.warning("[AUTO-UPDATER] Error terminating Windows server: %s", exc)
     else:
