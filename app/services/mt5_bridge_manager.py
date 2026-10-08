@@ -204,18 +204,8 @@ class MT5BridgeManager:
             if positions:
                 for pos in positions:
                     comm = getattr(pos, "comment", "")
-                    # Match by paper trade ID prefix
+                    # Match strictly by unique paper trade ID prefix
                     if str(paper_trade_id)[:6] in comm:
-                        with self._lock:
-                            self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
-                        return int(pos.ticket)
-                    # Match by timeframe (e.g. XAU_5M_L1 or XAU_15M_L1)
-                    if timeframe and (f"_{timeframe.upper()}_" in comm or f"_{timeframe.upper()}" in comm):
-                        with self._lock:
-                            self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
-                        return int(pos.ticket)
-                    # Fallback if only 1 position
-                    if len(positions) == 1 and "L1" in comm:
                         with self._lock:
                             self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
                         return int(pos.ticket)
@@ -226,11 +216,10 @@ class MT5BridgeManager:
                 for d in reversed(deals):
                     comm = getattr(d, "comment", "")
                     pos_id = int(getattr(d, "position_id", 0))
-                    if pos_id > 0:
-                        if str(paper_trade_id)[:6] in comm or (timeframe and (f"_{timeframe.upper()}_" in comm or f"_{timeframe.upper()}" in comm)):
-                            with self._lock:
-                                self._paper_trade_to_ticket[str(paper_trade_id)] = pos_id
-                            return pos_id
+                    if pos_id > 0 and str(paper_trade_id)[:6] in comm:
+                        with self._lock:
+                            self._paper_trade_to_ticket[str(paper_trade_id)] = pos_id
+                        return pos_id
         except Exception:
             pass
         return None
@@ -685,20 +674,19 @@ class MT5BridgeManager:
         if not target_ticket and paper_trade_id:
             target_ticket = self.get_ticket_for_paper_trade(paper_trade_id)
 
-        # Fallback: Query live positions directly from MT5 if target_ticket is still unknown
+        # Fallback: Query live positions directly from MT5 strictly matching paper trade ID prefix
         if not target_ticket:
             try:
                 import MetaTrader5 as mt5
                 sym = str(symbol or exec_cfg.mt5_symbol or "XAUUSD-VIP").upper()
                 open_pos = mt5.positions_get(symbol=sym)
-                if open_pos:
+                if open_pos and paper_trade_id:
                     for pos in open_pos:
                         comm = getattr(pos, "comment", "")
-                        if (paper_trade_id and str(paper_trade_id)[:6] in comm) or len(open_pos) == 1:
+                        if str(paper_trade_id)[:6] in comm:
                             target_ticket = int(pos.ticket)
-                            if paper_trade_id:
-                                with self._lock:
-                                    self._paper_trade_to_ticket[str(paper_trade_id)] = target_ticket
+                            with self._lock:
+                                self._paper_trade_to_ticket[str(paper_trade_id)] = target_ticket
                             break
             except Exception as e:
                 logger.debug("[MT5-BRIDGE] Fallback close position search failed: %s", e)

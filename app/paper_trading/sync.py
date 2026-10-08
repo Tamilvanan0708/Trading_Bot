@@ -395,48 +395,36 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             if mapped_tkt == tkt:
                                 matched_pt = await repo.get_paper_trade(pt_id)
                                 break
-                        # If not matched, try searching by comment prefix, timeframe, or L1
+                        # If not matched in-memory, match STRICTLY by unique paper trade ID prefix in comment
                         if not matched_pt and comm:
-                            comm_tf = None
-                            for _t in ("5M", "15M", "30M", "1H", "4H", "1M"):
-                                if f"_{_t}_" in comm.upper() or comm.upper().endswith(f"_{_t}") or f"_{_t}" in comm.upper():
-                                    comm_tf = _t
-                                    break
                             candidate_pts = (await db.execute(
                                 select(PaperTradeModel).where(PaperTradeModel.state.in_(("OPEN", "CLOSED"))).order_by(PaperTradeModel.opened_at.desc()).limit(20)
                             )).scalars().all()
                             for cpt in candidate_pts:
-                                sig_upper = (cpt.signal_id or "").upper()
                                 if str(cpt.id)[:6] in comm:
                                     matched_pt = cpt
                                     mt5_mgr._paper_trade_to_ticket[str(cpt.id)] = tkt
                                     break
-                                if comm_tf and f"_{comm_tf}_" in sig_upper:
-                                    matched_pt = cpt
-                                    mt5_mgr._paper_trade_to_ticket[str(cpt.id)] = tkt
-                                    break
-                                if cpt.signal_id and any(part in comm for part in cpt.signal_id.split("_") if len(part) > 3):
-                                    matched_pt = cpt
-                                    mt5_mgr._paper_trade_to_ticket[str(cpt.id)] = tkt
-                                    break
-                        # If still not matched and there is an OPEN L1 trade in DB
-                        if not matched_pt:
-                            recent_l1 = (await db.execute(
-                                select(PaperTradeModel).where(
-                                    PaperTradeModel.signal_id.like("%_L1_%"),
-                                    PaperTradeModel.state == "OPEN"
-                                ).order_by(PaperTradeModel.opened_at.desc()).limit(1)
-                            )).scalars().first()
-                            if recent_l1:
-                                matched_pt = recent_l1
-                                mt5_mgr._paper_trade_to_ticket[str(recent_l1.id)] = tkt
 
+                        # CRITICAL SAFETY: If position is STILL OPEN in MT5, NEVER prematurely kill it
+                        # unless the corresponding paper trade authoritatively reached true TP_HIT or SL_HIT!
                         if matched_pt and matched_pt.state == "CLOSED":
-                            # If paper trade was closed by internal scan/orphan timeout, NEVER close live MT5 position!
-                            # Restore paper trade to OPEN to honor the real live broker trade!
-                            if matched_pt.exit_reason and "ORPHAN" in str(matched_pt.exit_reason):
+                            if matched_pt.exit_reason in ("TP_HIT", "SL_HIT", "TRAILING_SL_HIT"):
                                 logger.info(
-                                    "[MT5-RECONCILE] Ticket #%s is still active in MT5 while Paper Trade %s was closed as %s. Restoring to OPEN!",
+                                    "[MT5-RECONCILE] Paper Trade %s legitimately hit %s @ %.2f. Synchronizing MT5 close for Ticket #%s.",
+                                    matched_pt.id, matched_pt.exit_reason, matched_pt.exit_price or 0.0, tkt,
+                                )
+                                mt5_mgr.enqueue_close(
+                                    ticket=tkt,
+                                    paper_trade_id=matched_pt.id,
+                                    symbol=pos.get("symbol", exec_cfg.mt5_symbol or "XAUUSD-VIP"),
+                                    reason=matched_pt.exit_reason,
+                                    direction=pos.get("type", "BUY"),
+                                )
+                            else:
+                                # Premature internal reset / scan orphan: RESTORE paper trade to OPEN to protect live broker position!
+                                logger.info(
+                                    "[MT5-RECONCILE] Ticket #%s is active in MT5 while Paper Trade %s was marked %s. Restoring Paper Trade to OPEN!",
                                     tkt, matched_pt.id, matched_pt.exit_reason,
                                 )
                                 matched_pt.state = "OPEN"
@@ -446,18 +434,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 if pos.get("sl") and pos.get("sl") > 0:
                                     matched_pt.stop_loss = round(pos.get("sl"), 2)
                                 await db.commit()
-                            else:
-                                logger.info(
-                                    "[MT5-RECONCILE] Paper Trade %s is CLOSED (%s) but MT5 Ticket #%s is still open in MT5. Enqueuing MT5 close to synchronize broker.",
-                                    matched_pt.id, matched_pt.exit_reason, tkt,
-                                )
-                                mt5_mgr.enqueue_close(
-                                    ticket=tkt,
-                                    paper_trade_id=matched_pt.id,
-                                    symbol=pos.get("symbol", exec_cfg.mt5_symbol or "XAUUSD-VIP"),
-                                    reason=matched_pt.exit_reason or "ENGINE_CLOSED",
-                                    direction=pos.get("type", "BUY"),
-                                )
                         elif matched_pt and matched_pt.state in ("PENDING", "SIGNAL_GENERATED"):
                             matched_pt.state = "OPEN"
                             matched_pt.closed_at = None
@@ -1327,7 +1303,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         tp_distance = round(abs(tp_px - entry_px), 2)
                                         ist_tz = timezone(timedelta(hours=5, minutes=30))
                                         open_time_ist = (new_trade.opened_at or datetime.now(timezone.utc)).astimezone(ist_tz).strftime("%H:%M")
-                                        trade_comment = f"XAU_{tf_key.upper()}_{l_key}_{open_time_ist}"[:31]
+                                        # Include paper_trade_id prefix (6 chars) to ensure 100% deterministic, unambiguous matching
+                                        trade_comment = f"{new_trade.id[:6]}_{tf_key.upper()}_{l_key}_{open_time_ist}"[:31]
 
                                         mt5_res = get_mt5_bridge_manager().enqueue_order({
                                             "id": f"mt5-{new_trade.id[:8]}",
@@ -2198,7 +2175,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 if ot_time.tzinfo is None:
                                     ot_time = ot_time.replace(tzinfo=timezone.utc)
                                 ist_str = ot_time.astimezone(ist_tz).strftime("%H:%M")
-                                trade_comment = f"XAU_{ot_tf}_{layer_name}_{ist_str}"[:31]
+                                trade_comment = f"{ot.id[:6]}_{ot_tf}_{layer_name}_{ist_str}"[:31]
 
                                 sl_d = round(abs(ot_entry - ot_sl), 2) if ot_sl > 0 else 3.0
                                 tp_d = round(abs(ot_tp - ot_entry), 2) if ot_tp > 0 else 3.0
