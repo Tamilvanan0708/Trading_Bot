@@ -1604,7 +1604,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 "[PAPER-WATCHDOG] Closed Fib trade %s (%s) @ %.2f reason=%s pnl=$%.2f",
                                 oft.signal_id, oft.layer or "L1", exit_px, oft.exit_reason, oft.realized_pnl,
                             )
-                            # Dispatch MT5 bridge close
+                            # 1. Dispatch MT5 bridge close
                             if exec_cfg.mt5_bridge_enabled:
                                 try:
                                     from app.services.mt5_bridge_manager import get_mt5_bridge_manager
@@ -1616,6 +1616,84 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     )
                                 except Exception as mt5_err:
                                     logger.warning("[MT5-BRIDGE] Watchdog close dispatch failed: %s", mt5_err)
+
+                            # 2. Synchronize parent SignalModel outcome
+                            if oft.signal_id:
+                                try:
+                                    sig = await repo.get_signal_by_id(oft.signal_id)
+                                    if sig:
+                                        sig.outcome = oft.exit_reason
+                                        sig.final_r = oft.realized_r
+                                        sig.outcome_updated_at = oft.closed_at
+                                        if oft.exit_reason == "TP_HIT":
+                                            sig.tp1_hit = True
+                                        elif oft.exit_reason in ("SL_HIT", "TRAILING_SL_HIT"):
+                                            sig.sl_hit = True
+                                        await db.commit()
+                                except Exception as sig_sync_err:
+                                    logger.warning("[PAPER-SYNC] Watchdog failed to update signal on close: %s", sig_sync_err)
+
+                            # 3. Telegram Alert: Hybrid Close Alert (TP_HIT / SL_HIT / BREAKEVEN)
+                            tkt = None
+                            if exec_cfg.mt5_bridge_enabled:
+                                try:
+                                    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                    tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(oft.id, timeframe=oft.timeframe)
+                                except Exception:
+                                    pass
+                            if _should_send_close_alert(oft.id, tkt, oft.state_logs):
+                                _record_close_alert_sent(oft, tkt)
+                                try:
+                                    await db.commit()
+                                except Exception:
+                                    pass
+                                try:
+                                    strat_lbl = f"Fib Retracement ({oft.layer})"
+                                    close_msg = _build_hybrid_close_msg(
+                                        strategy_name=strat_lbl,
+                                        symbol_tf=f"XAU/USD ({oft.timeframe})",
+                                        direction=dir_chk,
+                                        entry_px=entry_px,
+                                        exit_px=exit_px,
+                                        pts=pts,
+                                        realized_pnl=oft.realized_pnl or 0.0,
+                                        exit_reason=oft.exit_reason or "CLOSED",
+                                        lot_size=oft.lot_size or 0.01,
+                                        opened_at=oft.opened_at,
+                                        closed_at=oft.closed_at,
+                                        paper_trade_id=oft.id,
+                                    )
+                                    _dispatch_tg_alert(tg.send_raw_alert(close_msg))
+                                    logger.info("[PAPER-TG] Dispatched Watchdog close alert for %s (%s)", oft.id, oft.exit_reason)
+                                except Exception as tg_err:
+                                    logger.warning("[PAPER-TG] Failed to send Watchdog close alert: %s", tg_err)
+
+                            # 4. Smart Shield: If L2 or L3 hits TP, trail companion L1 trade's SL
+                            try:
+                                if exec_cfg.smart_shield_enabled and oft.exit_reason == "TP_HIT" and oft.layer in ("L2", "L3"):
+                                    l1_sig_match = oft.signal_id.replace("_L2_", "_L1_").replace("_L3_", "_L1_")
+                                    l1_trade = (await db.execute(
+                                        select(PaperTradeModel).where(
+                                            PaperTradeModel.signal_id == l1_sig_match,
+                                            PaperTradeModel.state == "OPEN",
+                                        )
+                                    )).scalars().first()
+                                    if l1_trade:
+                                        be_sl = float(l1_trade.actual_entry or l1_trade.target_entry or 0.0)
+                                        if be_sl > 0:
+                                            l1_trade.stop_loss = round(be_sl, 2)
+                                            l1_logs = list(l1_trade.state_logs or [])
+                                            l1_logs.append({
+                                                "event": "SMART_SHIELD_SL_TRAILED",
+                                                "trigger_layer": oft.layer,
+                                                "new_sl": round(be_sl, 2),
+                                                "time": datetime.now(timezone.utc).isoformat(),
+                                            })
+                                            l1_trade.state_logs = l1_logs
+                                            await db.commit()
+                                            logger.info("[SMART-SHIELD] Watchdog trailed L1 trade %s SL to %.2f after %s TP", l1_trade.id, be_sl, oft.layer)
+                            except Exception as shield_err:
+                                logger.warning("[SMART-SHIELD] Watchdog shield trigger failed: %s", shield_err)
                 except Exception as watchdog_err:
                     logger.warning("[PAPER-WATCHDOG] Error in price watchdog: %s", watchdog_err)
 
@@ -1677,6 +1755,38 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 ot.realized_r = round(pts_stale / max(0.1, abs(entry_chk - (ot.stop_loss or 0.0))), 2)
                                 await db.commit()
                                 logger.info("[PAPER-AUTO] Closed stale SMC trade %s (TF %s, reason: %s) @ %.2f", ot.signal_id, ot_tf, ot.exit_reason, close_px)
+                                if sl_hit or tp_hit:
+                                    tkt = None
+                                    if exec_cfg.mt5_bridge_enabled:
+                                        try:
+                                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                            tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(ot.id, timeframe=ot_tf.upper())
+                                        except Exception:
+                                            pass
+                                    if _should_send_close_alert(ot.id, tkt, ot.state_logs):
+                                        _record_close_alert_sent(ot, tkt)
+                                        try:
+                                            await db.commit()
+                                        except Exception:
+                                            pass
+                                        try:
+                                            smc_msg = _build_hybrid_close_msg(
+                                                strategy_name="SMC With Fib (0.680)",
+                                                symbol_tf=f"XAU/USD ({ot_tf.upper()})",
+                                                direction=dir_chk,
+                                                entry_px=entry_chk,
+                                                exit_px=close_px,
+                                                pts=pts_stale,
+                                                realized_pnl=ot.realized_pnl or 0.0,
+                                                exit_reason=ot.exit_reason or "CLOSED",
+                                                lot_size=ot.lot_size or 0.01,
+                                                opened_at=ot.opened_at,
+                                                closed_at=ot.closed_at,
+                                                paper_trade_id=ot.id,
+                                            )
+                                            _dispatch_tg_alert(tg.send_raw_alert(smc_msg))
+                                        except Exception as tg_err:
+                                            logger.warning("[PAPER-TG] Failed to send SMC Watchdog close alert: %s", tg_err)
                     else:
                         # Extra duplicate trade on the same timeframe -> close older
                         entry_chk = ot.actual_entry or ot.target_entry or 0.0

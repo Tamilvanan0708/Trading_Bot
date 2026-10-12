@@ -165,6 +165,18 @@ class PaperTradeModel(Base):
                 return "Fib Retracement"
         return "Fib Retracement"
 
+    @property
+    def layer(self) -> str:
+        if self.state_logs and isinstance(self.state_logs, list):
+            for l in self.state_logs:
+                if isinstance(l, dict) and l.get("layer"):
+                    return str(l["layer"])
+        if self.signal_id:
+            for lk in ("L1", "L2", "L3"):
+                if f"_{lk}_" in self.signal_id or self.signal_id.endswith(f"_{lk}"):
+                    return lk
+        return "L1"
+
 
 class BacktestRunModel(Base):
     __tablename__ = "backtest_runs"
