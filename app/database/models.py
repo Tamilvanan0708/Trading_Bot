@@ -118,6 +118,53 @@ class PaperTradeModel(Base):
 
     signal = relationship("SignalModel", back_populates="paper_trades")
 
+    @property
+    def entry(self) -> float:
+        return float(self.actual_entry or self.target_entry or 0.0)
+
+    @entry.setter
+    def entry(self, value: float) -> None:
+        self.actual_entry = float(value)
+
+    @property
+    def entry_price(self) -> float:
+        return float(self.actual_entry or self.target_entry or 0.0)
+
+    @entry_price.setter
+    def entry_price(self, value: float) -> None:
+        self.actual_entry = float(value)
+
+    @property
+    def current_price(self) -> float:
+        return float(self.actual_entry or self.target_entry or 0.0)
+
+    @property
+    def timeframe(self) -> str:
+        if self.state_logs and isinstance(self.state_logs, list):
+            for l in self.state_logs:
+                if isinstance(l, dict) and l.get("timeframe"):
+                    return str(l["timeframe"]).upper()
+        if self.signal_id:
+            for tf in ("15M", "30M", "1H", "2H", "4H", "5M"):
+                if f"_{tf}_" in self.signal_id.upper() or self.signal_id.upper().startswith(f"{tf}_"):
+                    return tf
+        return "5M"
+
+    @property
+    def strategy_name(self) -> str:
+        if self.state_logs and isinstance(self.state_logs, list):
+            for l in self.state_logs:
+                if isinstance(l, dict) and l.get("strategy"):
+                    return str(l["strategy"])
+        if self.signal_id:
+            if "SMC" in self.signal_id.upper():
+                return "SMC With Fib"
+            if "TREND" in self.signal_id.upper():
+                return "Fib Go With Trend"
+            if "FIB" in self.signal_id.upper():
+                return "Fib Retracement"
+        return "Fib Retracement"
+
 
 class BacktestRunModel(Base):
     __tablename__ = "backtest_runs"
