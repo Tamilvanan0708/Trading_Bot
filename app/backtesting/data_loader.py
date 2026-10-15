@@ -8,7 +8,7 @@ for any user-specified date range with automatic pagination and local disk cachi
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import glob
 import json
 import os
@@ -323,11 +323,10 @@ async def fetch_historical_candles(
                 logger.debug("[DATA-LOADER] Skipping candidate %s: %s", c_path, slice_err)
                 continue
 
-    # 3. Check bundled master datasets (offline fallback for Render US cloud)
     bundled_candles = _load_bundled_master_dataset(tf_str)
     if bundled_candles:
         sliced_bundled = [c for c in bundled_candles if start_dt <= c.timestamp <= end_dt]
-        if sliced_bundled and len(sliced_bundled) >= 50:
+        if sliced_bundled and len(sliced_bundled) >= 50 and (sliced_bundled[-1].timestamp >= end_dt - timedelta(days=2)):
             logger.info(
                 "[DATA-LOADER] Sliced %d candles from bundled dataset for %s [%s]",
                 len(sliced_bundled), symbol, tf_str

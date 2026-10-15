@@ -946,9 +946,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                             # Anchor Swing Completeness Check:
                             # If sig_id changed slightly (e.g. timestamp shift), but a trade for the exact same
-                            # timeframe, layer, and swing anchor price (int(point_2_price)) has already run:
-                            p2_int = int(f_state.point_2_price)
-                            anchor_prefix = f"FIB_RETR_{tf_key.upper()}_{l_key}_{p2_int}"
+                            # timeframe, layer, and active swing cycle (current_anchor) has already run:
+                            anchor_prefix = f"FIB_RETR_{tf_key.upper()}_{l_key}_{current_anchor}"
                             if not existing:
                                 existing = (await db.execute(
                                     select(PaperTradeModel).where(
@@ -956,7 +955,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     ).order_by(PaperTradeModel.created_at.desc())
                                 )).scalars().first()
 
-                            # If trade already completed (CLOSED), DO NOT re-open a new trade for this same swing cycle!
+                            # If trade already completed (CLOSED) for this exact swing, DO NOT re-open for this same swing cycle!
                             if existing and existing.state == "CLOSED":
                                 continue
 
@@ -1022,11 +1021,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             continue
 
                                 # --- 5M SCALP GUARD: MAX SL DISTANCE CAP ---
-                                # 5M is intended for quick scalp retracements. If stop loss distance exceeds max allowed points (default 8.0 pts),
+                                # 5M is intended for quick scalp retracements. If stop loss distance exceeds max allowed points (default 15.0 pts),
                                 # skip opening on 5M — let 15M/1H swing engine handle macro impulse waves.
                                 if tf_key.lower() == "5m":
                                     sl_dist = abs(entry_px - sl_px)
-                                    max_sl_5m = float(getattr(exec_cfg, "max_sl_distance_5m", 8.0))
+                                    max_sl_5m = float(getattr(exec_cfg, "max_sl_distance_5m", 15.0))
                                     if sl_dist > max_sl_5m:
                                         logger.info(
                                             "[PAPER-SCALP-5M] Skipping 5M trade %s: SL distance %.2f pts exceeds max 5M scalp SL of %.2f pts. Macro swings belong to 15M/1H.",
@@ -1035,59 +1034,50 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         continue
 
                                 # --- CROSS-TIMEFRAME DE-DUPLICATION FILTER ---
-                                # 1) If cross_tf_dedup_enabled is True (default): matches entry (≤5.0) / SL (≤2.5) / TP (≤2.5) / shared swing anchor
-                                # 2) Always blocks duplicate entries or shared swing anchors across TFs with same direction & SL
-                                is_explicit_dedup = getattr(exec_cfg, "cross_tf_dedup_enabled", True)
-                                norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
+                                # When enabled, prevents identical trades across TFs that share identical SL & TP target zones
+                                is_explicit_dedup = getattr(exec_cfg, "cross_tf_dedup_enabled", False)
                                 if is_explicit_dedup:
+                                    norm_dirs = ["LONG", "BUY"] if f_state.direction in ("LONG", "BUY") else ["SHORT", "SELL"]
                                     dup_cond = or_(
                                         and_(
-                                            func.abs(PaperTradeModel.target_entry - entry_px) <= 5.0,
+                                            func.abs(PaperTradeModel.target_entry - entry_px) <= 2.5,
                                             func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
                                         ),
                                         and_(
                                             func.abs(PaperTradeModel.take_profit_1 - tp_px) <= 2.5,
                                             func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
                                         ),
-                                        # Shared swing anchor (Point 2 high/low) in same direction
-                                        func.abs(PaperTradeModel.stop_loss - sl_px) <= 1.0,
                                     )
-                                else:
-                                    dup_cond = and_(
-                                        func.abs(PaperTradeModel.target_entry - entry_px) <= 0.50,
-                                        func.abs(PaperTradeModel.stop_loss - sl_px) <= 2.5,
+                                    dup_query = await db.execute(
+                                        select(PaperTradeModel).where(
+                                            PaperTradeModel.state == "OPEN",
+                                            PaperTradeModel.direction.in_(norm_dirs),
+                                            ~PaperTradeModel.signal_id.like(f"%_{tf_key.upper()}_%"),
+                                            dup_cond,
+                                        )
                                     )
+                                    existing_dup = dup_query.scalars().first()
+                                    if existing_dup:
+                                        logger.info(
+                                            "[PAPER-XDEDUP] Skipping duplicate trade on %s because active %s trade already exists at $%.2f (ID: %s, SL: $%.2f, TP: $%.2f) — sig %s",
+                                            tf_key.upper(),
+                                            existing_dup.direction,
+                                            existing_dup.target_entry,
+                                            existing_dup.id[:8],
+                                            existing_dup.stop_loss,
+                                            existing_dup.take_profit_1,
+                                            sig_id,
+                                        )
+                                        continue
 
-                                dup_query = await db.execute(
-                                    select(PaperTradeModel).where(
-                                        PaperTradeModel.state == "OPEN",
-                                        PaperTradeModel.direction.in_(norm_dirs),
-                                        ~PaperTradeModel.signal_id.like(f"%_{tf_key.upper()}_%"),
-                                        dup_cond,
-                                    )
-                                )
-                                existing_dup = dup_query.scalars().first()
-                                if existing_dup:
-                                    logger.info(
-                                        "[PAPER-XDEDUP] Skipping duplicate trade on %s because active %s trade already exists at $%.2f (ID: %s, SL: $%.2f, TP: $%.2f) — sig %s",
-                                        tf_key.upper(),
-                                        existing_dup.direction,
-                                        existing_dup.target_entry,
-                                        existing_dup.id[:8],
-                                        existing_dup.stop_loss,
-                                        existing_dup.take_profit_1,
-                                        sig_id,
-                                    )
-                                    continue
-
-                                # --- MINIMUM IMPULSE RANGE FILTER (DISABLED PER USER REQUEST) ---
-                                # Rejects micro sideways consolidation noise when enabled
-                                if getattr(exec_cfg, "min_impulse_filter_enabled", False):
+                                # --- MINIMUM IMPULSE RANGE & TARGET FILTER ---
+                                # Rejects micro sideways consolidation noise (e.g. $1-$2 chop on Gold)
+                                if getattr(exec_cfg, "min_impulse_filter_enabled", True):
                                     p1 = float(f_state.point_1_price or 0.0)
                                     p2 = float(f_state.point_2_price or 0.0)
                                     peak = float(f_state.current_high_price or 0.0)
                                     setup_span = abs(peak - p2) if peak > 0 and p2 > 0 else abs(p1 - p2)
-                                    min_req_pts = 4.0 if tf_key in ("1m", "3m", "5m") else (6.0 if tf_key == "15m" else (8.0 if tf_key == "30m" else 12.0))
+                                    min_req_pts = 3.5 if tf_key in ("1m", "3m", "5m") else (6.0 if tf_key == "15m" else (8.0 if tf_key == "30m" else 12.0))
                                     if setup_span > 0 and setup_span < min_req_pts and entry_px > 500.0:
                                         logger.info(
                                             "[PAPER-AUTO] Min Impulse Filter: Setup range $%.2f is below min required $%.2f on %s — skipping noisy trade.",
@@ -1096,6 +1086,16 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             tf_key.upper(),
                                         )
                                         continue
+
+                                # Minimum Target Filter: On Gold, target must be at least 2.0 pts to prevent 0.39 pt micro trades
+                                tp_dist = abs(tp_px - entry_px)
+                                if tp_dist < 2.0 and entry_px > 500.0:
+                                    logger.info(
+                                        "[PAPER-AUTO] Min Target Filter: Target distance %.2f pts is below 2.0 pts minimum threshold on %s — skipping micro target.",
+                                        tp_dist,
+                                        tf_key.upper(),
+                                    )
+                                    continue
 
                                 # --- MACRO TREND ALIGNMENT FILTER (EMA) ---
                                 # Optional filter: only checks if explicitly enabled by user

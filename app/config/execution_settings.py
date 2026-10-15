@@ -109,7 +109,7 @@ class ExecutionSettings(BaseModel):
         description="Strictly allowed strategy for MT5 execution (only Fib Retracement)"
     )
     min_impulse_filter_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Filter out micro sideways chop when setup impulse range is below threshold"
     )
     trend_filter_enabled: bool = Field(
@@ -117,11 +117,11 @@ class ExecutionSettings(BaseModel):
         description="Filter counter-trend setups against macro trend alignment (default False for pure BOS Fib)"
     )
     cross_tf_dedup_enabled: bool = Field(
-        default=True,
+        default=False,
         description="De-duplicate concurrent trades across different timeframes with close entry & SL"
     )
     max_sl_distance_5m: float = Field(
-        default=8.0,
+        default=15.0,
         ge=2.0,
         le=30.0,
         description="Maximum Stop Loss distance in points allowed for 5M scalp trades. Rejects macro swings on 5M."
@@ -149,7 +149,7 @@ class ExecutionSettings(BaseModel):
         description="Maximum allowed spread in points for 15M/30M/1H. Orders blocked when spread exceeds this value."
     )
     max_spread_points_5m: float = Field(
-        default=0.50,
+        default=1.50,
         ge=0.1,
         le=5.0,
         description="Strict maximum allowed spread in points for 5M scalp trades. Blocks Asian open/rollover spikes."
