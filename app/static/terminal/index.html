@@ -7,6 +7,7 @@
 <title>XAU AI — Signal Intelligence Terminal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="/terminal/static/css/terminal.css">
+<link rel="stylesheet" href="/terminal/static/css/breakout.css">
 <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
@@ -30,6 +31,7 @@
       <a href="#/paper" data-route="/paper" class="nav-item"><span class="nav-ico">💼</span><span class="nav-label">Paper Trading</span></a>
       
       <div class="nav-section-label">MY STRATEGIES</div>
+      <a href="#/breakout-strategy" data-route="/breakout-strategy" class="nav-item"><span class="nav-ico">📈</span><span class="nav-label">Breakout Strategy</span></a>
       <a href="#/fib-retracement" data-route="/fib-retracement" class="nav-item"><span class="nav-ico">🎯</span><span class="nav-label">Fib Retracement</span></a>
       <a href="#/smc-fib" data-route="/smc-fib" class="nav-item"><span class="nav-ico">💎</span><span class="nav-label">SMC with Fib</span></a>
 
@@ -110,5 +112,11 @@
 <script src="/terminal/static/js/ui.js"></script>
 <script src="/terminal/static/js/charts.js"></script>
 <script src="/terminal/static/js/app.js"></script>
+<!-- Breakout Strategy Agent Modules -->
+<script src="/terminal/static/js/breakout/mockData.js"></script>
+<script src="/terminal/static/js/breakout/SignalsModule.js"></script>
+<script src="/terminal/static/js/breakout/BacktestModule.js"></script>
+<script src="/terminal/static/js/breakout/BreakoutStrategy.js"></script>
+<script src="/terminal/static/js/breakout/breakoutRoutes.js"></script>
 </body>
 </html>

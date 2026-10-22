@@ -391,3 +391,6 @@ class MT5MarketDataProvider(LiveMarketDataProvider, BrokerAccountProvider):
         if info is None:
             raise DataProviderError("MT5 account info unavailable.")
         return float(info.balance)
+
+
+MT5DataProvider = MT5MarketDataProvider
