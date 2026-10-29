@@ -181,28 +181,7 @@ window.BacktestModule = (function () {
             ${renderMetricsHtml(m)}
           </div>
 
-          <!-- Equity Curve Section -->
-          <div style="background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);padding:16px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-              <div style="display:flex;align-items:center;gap:8px;">
-                <span style="font-weight:700;font-size:13px;color:var(--text-bright);">Authentic Equity Growth Curve</span>
-                <span class="badge badge-dim" style="font-size:10px;">Simulated against real historical market data</span>
-              </div>
-              <div style="display:flex;align-items:center;gap:12px;font-size:11px;">
-                <span style="display:inline-flex;align-items:center;gap:4px;">
-                  <span style="width:10px;height:2px;background:#4d9fff;display:inline-block;"></span>
-                  <span style="color:var(--text-dim)">Portfolio Balance</span>
-                </span>
-                <span style="font-family:var(--font-num);font-weight:700;color:var(--text-bright);" id="bt-final-cap-label">
-                  End: $${Number(bt.finalCapital || 100000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-            </div>
 
-            <div class="equity-chart-box" id="equity-chart-container">
-              ${renderEquityCurveSvg(bt.equityCurve)}
-            </div>
-          </div>
 
           <!-- Trade Log Snapshot -->
           <div style="margin-top:var(--sp-4);">
