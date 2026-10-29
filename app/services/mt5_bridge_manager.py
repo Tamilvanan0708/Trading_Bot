@@ -73,16 +73,31 @@ class MT5BridgeManager:
                 "pending_count": len(self._pending_ids),
             }
 
-    @property
-    def is_online(self) -> bool:
-        """True if EA reported heartbeat or native MT5 package is connected to terminal."""
+    # ------------------------------------------------------------------
+    # Native MT5 Connection Lifecycle
+    # ------------------------------------------------------------------
+
+    def _ensure_native_mt5(self) -> Any:
+        """Returns initialized MetaTrader5 package or None."""
         try:
             import MetaTrader5 as mt5
             t_info = mt5.terminal_info()
             if t_info is not None and getattr(t_info, "connected", False):
-                return True
-        except Exception:
-            pass
+                return mt5
+            # Terminal not yet initialized in this process - try initializing
+            if mt5.initialize():
+                logger.info("[MT5-NATIVE] Successfully initialized native MT5 connection to running terminal.")
+                return mt5
+        except Exception as e:
+            logger.debug("[MT5-NATIVE] _ensure_native_mt5 skipped: %s", e)
+        return None
+
+    @property
+    def is_online(self) -> bool:
+        """True if EA reported heartbeat or native MT5 package is connected to terminal."""
+        mt5 = self._ensure_native_mt5()
+        if mt5 is not None:
+            return True
         return (time.time() - self._heartbeat.get("last_seen", 0.0)) <= 15.0
 
     def is_connected(self) -> bool:
@@ -99,22 +114,27 @@ class MT5BridgeManager:
 
             # Attempt live account info directly from native Python MT5
             acct_data = None
-            try:
-                import MetaTrader5 as mt5
-                ai = mt5.account_info()
-                if ai is not None:
-                    acct_data = {
-                        "login": ai.login,
-                        "server": ai.server,
-                        "balance": round(float(ai.balance), 2),
-                        "equity": round(float(ai.equity), 2),
-                        "leverage": int(ai.leverage),
-                        "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
-                        "name": getattr(ai, "name", "VT Markets"),
-                        "currency": getattr(ai, "currency", "USD"),
-                    }
-            except Exception:
-                pass
+            algo_trading_enabled = None
+            mt5 = self._ensure_native_mt5()
+            if mt5 is not None:
+                try:
+                    t_info = mt5.terminal_info()
+                    if t_info:
+                        algo_trading_enabled = getattr(t_info, "trade_allowed", True)
+                    ai = mt5.account_info()
+                    if ai is not None:
+                        acct_data = {
+                            "login": ai.login,
+                            "server": ai.server,
+                            "balance": round(float(ai.balance), 2),
+                            "equity": round(float(ai.equity), 2),
+                            "leverage": int(ai.leverage),
+                            "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                            "name": getattr(ai, "name", "VT Markets"),
+                            "currency": getattr(ai, "currency", "USD"),
+                        }
+                except Exception:
+                    pass
 
             if acct_data is None and online:
                 acct_data = {
@@ -129,10 +149,11 @@ class MT5BridgeManager:
             return {
                 "bridge_enabled": exec_cfg.mt5_bridge_enabled,
                 "is_online": online,
+                "algo_trading_enabled": algo_trading_enabled,
                 "seconds_since_heartbeat": sec_ago if last_seen > 0 else (0.1 if acct_data else None),
                 "target_symbol": exec_cfg.mt5_symbol,
                 "magic_number": exec_cfg.mt5_magic_number,
-                "allowed_strategy": exec_cfg.mt5_allowed_strategy,  # "Fib Retracement"
+                "allowed_strategy": exec_cfg.mt5_allowed_strategy,
                 "connected_account": acct_data,
                 "pending_orders_count": len(self._pending_ids),
                 "recent_executions": self._execution_history[-10:],
@@ -152,11 +173,10 @@ class MT5BridgeManager:
 
     def get_open_positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
         """Fetch all currently open positions directly from MetaTrader 5."""
+        mt5 = self._ensure_native_mt5()
+        if mt5 is None:
+            return []
         try:
-            import MetaTrader5 as mt5
-            t_info = mt5.terminal_info()
-            if not t_info or not getattr(t_info, "connected", False):
-                return []
             sym = str(symbol or get_execution_settings().mt5_symbol or "XAUUSD-VIP").strip()
             positions = mt5.positions_get(symbol=sym)
             if positions is None:
@@ -198,86 +218,99 @@ class MT5BridgeManager:
                     return t_val
 
         # Fallback 1: Query live positions directly from MT5
-        try:
-            import MetaTrader5 as mt5
-            positions = mt5.positions_get()
-            if positions:
-                for pos in positions:
-                    comm = getattr(pos, "comment", "")
-                    # Match strictly by unique paper trade ID prefix
-                    if str(paper_trade_id)[:6] in comm:
-                        with self._lock:
-                            self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
-                        return int(pos.ticket)
-            # Fallback 2: Query recent history deals in case trade was already closed
-            now_ts = time.time()
-            deals = mt5.history_deals_get(now_ts - (7 * 86400), now_ts)
-            if deals:
-                for d in reversed(deals):
-                    comm = getattr(d, "comment", "")
-                    pos_id = int(getattr(d, "position_id", 0))
-                    if pos_id > 0 and str(paper_trade_id)[:6] in comm:
-                        with self._lock:
-                            self._paper_trade_to_ticket[str(paper_trade_id)] = pos_id
-                        return pos_id
-        except Exception:
-            pass
+        mt5 = self._ensure_native_mt5()
+        if mt5 is not None:
+            try:
+                positions = mt5.positions_get()
+                if positions:
+                    for pos in positions:
+                        comm = getattr(pos, "comment", "")
+                        # Match strictly by unique paper trade ID prefix
+                        if str(paper_trade_id)[:6] in comm:
+                            with self._lock:
+                                self._paper_trade_to_ticket[str(paper_trade_id)] = int(pos.ticket)
+                            return int(pos.ticket)
+                # Fallback 2: Query recent history deals in case trade was already closed
+                now_ts = time.time()
+                deals = mt5.history_deals_get(now_ts - (7 * 86400), now_ts)
+                if deals:
+                    for d in reversed(deals):
+                        comm = getattr(d, "comment", "")
+                        pos_id = int(getattr(d, "position_id", 0))
+                        if pos_id > 0 and str(paper_trade_id)[:6] in comm:
+                            with self._lock:
+                                self._paper_trade_to_ticket[str(paper_trade_id)] = pos_id
+                            return pos_id
+            except Exception:
+                pass
         return None
 
     def get_live_spread(self, symbol: str | None = None) -> float:
         """Returns live broker spread in points (Ask - Bid) for the given symbol, or 0.15 fallback."""
-        try:
-            import MetaTrader5 as mt5
-            t_info = mt5.terminal_info()
-            if not t_info or not getattr(t_info, "connected", False):
-                return 0.15
-            sym = str(symbol or get_execution_settings().mt5_symbol or "XAUUSD-VIP").strip()
-            tick = mt5.symbol_info_tick(sym)
-            if tick and tick.ask and tick.bid:
-                spr = round(abs(tick.ask - tick.bid), 2)
-                if 0.0 < spr < 5.0:
-                    return spr
-        except Exception:
-            pass
+        mt5 = self._ensure_native_mt5()
+        if mt5 is not None:
+            try:
+                sym = str(symbol or get_execution_settings().mt5_symbol or "XAUUSD-VIP").strip()
+                tick = mt5.symbol_info_tick(sym)
+                if tick and tick.ask and tick.bid:
+                    spr = round(abs(tick.ask - tick.bid), 2)
+                    if 0.0 < spr < 5.0:
+                        return spr
+            except Exception:
+                pass
         return 0.15
 
     def get_closed_deal_info(self, ticket: int) -> dict[str, Any] | None:
         """Query MT5 deal history to see if a position/ticket was closed, returning exit details."""
         if not ticket:
             return None
-        try:
-            import MetaTrader5 as mt5
-            t_info = mt5.terminal_info()
-            if not t_info or not getattr(t_info, "connected", False):
-                return None
-            deals = mt5.history_deals_get(position=ticket)
-            if deals is None:
-                deals = mt5.history_deals_get(ticket=ticket)
-            if deals:
-                close_deals = [d for d in deals if getattr(d, "entry", 0) in (1, 3)]
-                target_deal = close_deals[-1] if close_deals else (deals[-1] if len(deals) > 1 else None)
-                if target_deal:
-                    tot_profit = sum(float(getattr(d, "profit", 0.0)) for d in deals)
-                    return {
-                        "ticket": ticket,
-                        "close_price": float(target_deal.price),
-                        "close_time": datetime.fromtimestamp(target_deal.time, tz=timezone.utc),
-                        "profit": round(tot_profit, 2),
-                        "comment": getattr(target_deal, "comment", ""),
-                    }
-        except Exception as e:
-            logger.debug("[MT5-BRIDGE] get_closed_deal_info error for ticket #%s: %s", ticket, e)
+        mt5 = self._ensure_native_mt5()
+        if mt5 is not None:
+            try:
+                deals = mt5.history_deals_get(position=ticket)
+                if deals is None:
+                    deals = mt5.history_deals_get(ticket=ticket)
+                if deals:
+                    close_deals = [d for d in deals if getattr(d, "entry", 0) in (1, 3)]
+                    target_deal = close_deals[-1] if close_deals else (deals[-1] if len(deals) > 1 else None)
+                    if target_deal:
+                        tot_profit = sum(float(getattr(d, "profit", 0.0)) for d in deals)
+                        return {
+                            "ticket": ticket,
+                            "close_price": float(target_deal.price),
+                            "close_time": datetime.fromtimestamp(target_deal.time, tz=timezone.utc),
+                            "profit": round(tot_profit, 2),
+                            "comment": getattr(target_deal, "comment", ""),
+                        }
+            except Exception as e:
+                logger.debug("[MT5-BRIDGE] get_closed_deal_info error for ticket #%s: %s", ticket, e)
         return None
 
     def get_account_balance(self) -> float | None:
         """Returns live account balance in USD from MT5 if connected."""
-        try:
-            import MetaTrader5 as mt5
-            ai = mt5.account_info()
-            if ai is not None and getattr(ai, "balance", None) is not None:
-                return round(float(ai.balance), 2)
-        except Exception:
-            pass
+        mt5 = self._ensure_native_mt5()
+        if mt5 is not None:
+            try:
+                ai = mt5.account_info()
+                if ai is not None and getattr(ai, "balance", None) is not None:
+                    return round(float(ai.balance), 2)
+            except Exception:
+                pass
+        with self._lock:
+            return self._heartbeat.get("balance")
+
+    def get_account_equity(self) -> float | None:
+        """Returns live account equity in USD from MT5 if connected."""
+        mt5 = self._ensure_native_mt5()
+        if mt5 is not None:
+            try:
+                ai = mt5.account_info()
+                if ai is not None and getattr(ai, "equity", None) is not None:
+                    return round(float(ai.equity), 2)
+            except Exception:
+                pass
+        with self._lock:
+            return self._heartbeat.get("equity")
         with self._lock:
             return self._heartbeat.get("balance")
 
@@ -386,6 +419,20 @@ class MT5BridgeManager:
                     "reason": f"Live price drifted {native_res.get('gap')} pts past entry target {native_res.get('entry_target')}. Blocked chasing market.",
                 }
 
+            if native_res.get("status") == "REJECTED_BY_BROKER":
+                with self._lock:
+                    if order_id in self._pending_ids:
+                        self._pending_ids.remove(order_id)
+                    order_payload["status"] = "REJECTED"
+                    order_payload["error"] = native_res.get("error")
+                return {
+                    "status": "rejected",
+                    "order_id": order_id,
+                    "retcode": native_res.get("retcode"),
+                    "error": native_res.get("error"),
+                    "reason": f"MT5 / Broker rejected order: {native_res.get('error')} (retcode {native_res.get('retcode')}).",
+                }
+
             with self._lock:
                 if order_id in self._pending_ids:
                     self._pending_ids.remove(order_id)
@@ -425,8 +472,10 @@ class MT5BridgeManager:
 
     def _execute_native_mt5_order(self, order_payload: dict[str, Any]) -> dict[str, Any] | None:
         """Executes an order directly via MetaTrader5 Python package without requiring an external EA."""
+        mt5 = self._ensure_native_mt5()
+        if mt5 is None:
+            return None
         try:
-            import MetaTrader5 as mt5
             t_info = mt5.terminal_info()
             if not t_info or not getattr(t_info, "connected", False):
                 return None
@@ -447,7 +496,7 @@ class MT5BridgeManager:
             live_spread = round(abs(tick.ask - tick.bid), 2)
             exec_cfg = get_execution_settings()
             tf = str(order_payload.get("timeframe", "5M")).upper()
-            if getattr(exec_cfg, "spread_filter_enabled", True):
+            if getattr(exec_cfg, "spread_filter_enabled", True) and not order_payload.get("is_test", False):
                 if tf == "5M":
                     max_spread = float(getattr(exec_cfg, "max_spread_points_5m", 0.50))
                 else:
@@ -472,7 +521,7 @@ class MT5BridgeManager:
 
             # Idea 1: Entry Chase Guard (Prevent late market orders when price has already drifted far from Fib level)
             entry_target = float(order_payload.get("entry_price") or 0.0)
-            if getattr(exec_cfg, "chase_filter_enabled", True) and entry_target > 0:
+            if getattr(exec_cfg, "chase_filter_enabled", True) and entry_target > 0 and not order_payload.get("is_test", False):
                 max_chase = float(getattr(exec_cfg, "max_chase_points", 2.0))
                 gap = round(abs(price - entry_target), 2)
                 is_chasing = False
@@ -503,6 +552,14 @@ class MT5BridgeManager:
             lot = float(order_payload.get("lot_size") or 0.01)
             sl = float(order_payload.get("stop_loss") or 0.0)
             tp = float(order_payload.get("take_profit") or 0.0)
+            sl_pts = float(order_payload.get("sl_points") or 0.0)
+            tp_pts = float(order_payload.get("tp_points") or 0.0)
+
+            # If relative points provided, calculate valid broker SL & TP from live market price
+            if sl <= 0.0 and sl_pts > 0.0:
+                sl = round(price - sl_pts, 2) if is_buy else round(price + sl_pts, 2)
+            if tp <= 0.0 and tp_pts > 0.0:
+                tp = round(price + tp_pts, 2) if is_buy else round(price - tp_pts, 2)
 
             # Apply Spread Buffer to Stop Loss to prevent broker spread wick spikes
             spread_buffer = float(getattr(exec_cfg, "spread_buffer_points", 0.35) or 0.0)
@@ -511,13 +568,8 @@ class MT5BridgeManager:
                     sl = round(sl - spread_buffer, 2)
                 else:
                     sl = round(sl + spread_buffer, 2)
-                logger.info(
-                    "[MT5-NATIVE] Applied spread buffer %.2f pts to SL -> final MT5 SL: %.2f",
-                    spread_buffer,
-                    sl,
-                )
 
-            # Check broker filling mode
+            # Determine supported filling mode dynamically
             sym_info = mt5.symbol_info(symbol)
             filling = mt5.ORDER_FILLING_IOC
             if sym_info and hasattr(sym_info, "filling_mode"):
@@ -569,6 +621,15 @@ class MT5BridgeManager:
                 logger.debug("[MT5-NATIVE] Duplicate position check error: %s", pos_chk_err)
 
             res = mt5.order_send(request)
+            # If rejected due to filling mode (10030), retry with alternate filling modes
+            if res is not None and res.retcode == getattr(mt5, "TRADE_RETCODE_INVALID_FILL", 10030):
+                for alt_filling in (mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN, mt5.ORDER_FILLING_IOC):
+                    if alt_filling != filling:
+                        request["type_filling"] = alt_filling
+                        res = mt5.order_send(request)
+                        if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
+                            break
+
             if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
                 ticket = int(res.order)
                 logger.info("[MT5-NATIVE] OrderSend() executed successfully! Ticket #%d @ %.2f", ticket, res.price)
@@ -582,16 +643,34 @@ class MT5BridgeManager:
                 return {"ticket": ticket, "price": res.price, "status": "FILLED"}
             else:
                 err_msg = res.comment if res else str(mt5.last_error())
-                logger.warning("[MT5-NATIVE] OrderSend() failed: %s (retcode=%s)", err_msg, getattr(res, "retcode", None))
-                return None
+                retcode = getattr(res, "retcode", None)
+                logger.warning("[MT5-NATIVE] OrderSend() failed: %s (retcode=%s)", err_msg, retcode)
+                self.record_execution_report({
+                    "order_id": order_payload["id"],
+                    "ticket": 0,
+                    "status": "REJECTED",
+                    "fill_price": 0.0,
+                    "retcode": retcode,
+                    "error": err_msg,
+                })
+                return {
+                    "ticket": None,
+                    "status": "REJECTED_BY_BROKER",
+                    "retcode": retcode,
+                    "error": err_msg,
+                }
         except Exception as exc:
+            logger.debug("[MT5-NATIVE] Native MT5 execution skipped: %s", exc)
+            return None
             logger.debug("[MT5-NATIVE] Native MT5 execution skipped: %s", exc)
             return None
 
     def _execute_native_mt5_close(self, ticket: int, symbol: str, lot: float, direction: str) -> bool:
         """Closes an open position directly via Python MetaTrader5 package."""
+        mt5 = self._ensure_native_mt5()
+        if mt5 is None:
+            return False
         try:
-            import MetaTrader5 as mt5
             t_info = mt5.terminal_info()
             if not t_info or not getattr(t_info, "connected", False):
                 return False
@@ -798,9 +877,8 @@ class MT5BridgeManager:
         # Attempt immediate direct modify via native Python MT5 on Windows
         if target_ticket:
             try:
-                import MetaTrader5 as mt5
-                t_info = mt5.terminal_info()
-                if t_info and getattr(t_info, "connected", False):
+                mt5 = self._ensure_native_mt5()
+                if mt5 is not None:
                     request = {
                         "action": mt5.TRADE_ACTION_SLTP,
                         "position": int(target_ticket),
@@ -886,6 +964,8 @@ class MT5BridgeManager:
                 "lot_size": order.get("lot_size"),
                 "fill_price": fill_price,
                 "status": status,
+                "retcode": report.get("retcode"),
+                "error": report.get("error"),
                 "timestamp": time.time(),
             }
             self._execution_history.append(record)
@@ -893,14 +973,76 @@ class MT5BridgeManager:
                 self._execution_history.pop(0)
 
         logger.info(
-            "[MT5-BRIDGE] Execution Report: Order %s -> Ticket %s (%s @ %.2f)",
+            "[MT5-BRIDGE] Execution Report: Order %s -> Ticket %s (%s @ %.2f, retcode=%s, error=%s)",
             order_id,
             ticket,
             status,
             fill_price,
+            report.get("retcode"),
+            report.get("error"),
         )
 
         return {"status": "success", "ticket": ticket, "order_id": order_id}
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Deep diagnostic info on MT5 connection, terminal, account, and symbol permissions."""
+        with self._lock:
+            res: dict[str, Any] = {
+                "is_online": self.is_online,
+                "seconds_since_heartbeat": round(time.time() - self._heartbeat.get("last_seen", 0.0), 1),
+                "pending_orders": [self._orders.get(oid) for oid in self._pending_ids],
+                "recent_executions": self._execution_history[-10:],
+            }
+        mt5 = self._ensure_native_mt5()
+        if mt5 is None:
+            res["native_mt5"] = "Not initialized or not running on Windows"
+            return res
+
+        try:
+            t_info = mt5.terminal_info()
+            if t_info:
+                res["terminal_info"] = {
+                    "connected": getattr(t_info, "connected", None),
+                    "trade_allowed": getattr(t_info, "trade_allowed", None),
+                    "tradeapi_disabled": getattr(t_info, "tradeapi_disabled", None),
+                    "dlls_allowed": getattr(t_info, "dlls_allowed", None),
+                    "name": getattr(t_info, "name", None),
+                    "path": getattr(t_info, "path", None),
+                    "build": getattr(t_info, "build", None),
+                }
+            ai = mt5.account_info()
+            if ai:
+                res["account_info"] = {
+                    "login": getattr(ai, "login", None),
+                    "server": getattr(ai, "server", None),
+                    "trade_allowed": getattr(ai, "trade_allowed", None),
+                    "trade_expert": getattr(ai, "trade_expert", None),
+                    "trade_mode": getattr(ai, "trade_mode", None),
+                    "balance": getattr(ai, "balance", None),
+                    "equity": getattr(ai, "equity", None),
+                    "margin_free": getattr(ai, "margin_free", None),
+                    "currency": getattr(ai, "currency", None),
+                }
+            exec_cfg = get_execution_settings()
+            sym = exec_cfg.mt5_symbol or "XAUUSD-VIP"
+            mt5.symbol_select(sym, True)
+            s_info = mt5.symbol_info(sym)
+            if s_info:
+                res["symbol_info"] = {
+                    "name": getattr(s_info, "name", None),
+                    "trade_mode": getattr(s_info, "trade_mode", None),
+                    "trade_execution": getattr(s_info, "trade_execution", None),
+                    "filling_mode": getattr(s_info, "filling_mode", None),
+                    "volume_min": getattr(s_info, "volume_min", None),
+                    "volume_max": getattr(s_info, "volume_max", None),
+                    "volume_step": getattr(s_info, "volume_step", None),
+                    "ask": getattr(s_info, "ask", None),
+                    "bid": getattr(s_info, "bid", None),
+                }
+            res["last_error"] = mt5.last_error()
+        except Exception as e:
+            res["diagnostic_error"] = str(e)
+        return res
 
     def clear_all(self) -> None:
         """Clear queues (useful for testing or reset)."""

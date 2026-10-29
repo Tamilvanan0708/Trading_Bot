@@ -7,15 +7,15 @@
 #property link      "https://github.com/Tamilvanan0708"
 #property version   "1.00"
 #property description "Ultra-fast bridge connecting Python Quantitative Engine to MetaTrader 5."
-#property description "STRICT POLICY: Exclusively executes Fib Retracement strategy trades on XAUUSD."
+#property description "Executes AI signals (Fib Retracement, SMC With Fib, Breakout) on XAUUSD."
 
 #include <Trade\Trade.mqh>
 
 //--- Inputs
 input group "=== Bot Connection Settings ==="
-input string   InpBotURL        = "https://trading-bot-pt0d.onrender.com"; // Live Render Bot URL
-input string   InpSymbolOverride= "";                                      // Broker Symbol (leave blank to use chart symbol, e.g. XAUUSD-VIP)
-input int      InpMagicNumber   = 777888;                   // EA Magic Number
+input string   InpBotURL        = "http://localhost:8000";                // Local Bot API URL (or Render URL)
+input string   InpSymbolOverride= "XAUUSD-VIP";                           // Broker Symbol (e.g. XAUUSD-VIP)
+input int      InpMagicNumber   = 777888;                                 // EA Magic Number
 input int      InpPollIntervalMs= 250;                      // Order Poll Interval in Milliseconds
 input int      InpSlippagePts   = 50;                       // Max Slippage in Points
 input bool     InpRequireStopLoss = true;                   // Reject open orders lacking a valid stop-loss (never send unprotected)

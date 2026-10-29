@@ -1,5 +1,5 @@
 # XAU/USD MTF + Candidate Comparison
-Generated: 2026-10-16T11:45:13.244587+00:00
+Generated: 2026-10-29T08:05:49.954222+00:00
 Data: None -> None (5M None candles / 15M None)
 
 ## Best exit per configuration (ALL signals, pooled OOS)

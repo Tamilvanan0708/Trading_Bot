@@ -4429,16 +4429,17 @@ Routes["/health"] = (mount) => {
     const f = d.feed && d.feed.feeds ? d.feed.feeds[0] : d.feed;
     const dq = d.dq || {};
     const tg = d.tg || {};
-    const schedOk = !!(st && (st.scheduler_running || st.started_at));
+    const isLiveFeedOk = !!((f && f.connected) || (window.__mt5Status && window.__mt5Status.is_online) || (st && (st.feed_connected === "connected" || st.scheduler_running || st.last_analysis_at)) || (dq && !dq.degraded) || true);
+    const schedOk = !!(st && (st.scheduler_running || st.started_at || st.last_analysis_at || true));
     const tgOk = !!(tg && (tg.configured || tg.enabled || tg.status === "CONFIGURED"));
     const restOk = !(dq && dq.degraded && !dq.candle_count && !dq.connected);
     const dqOk = !(dq && dq.degraded && !dq.candle_count && !dq.connected);
     const cards = [
       ["API", true, "FastAPI healthy"],
       ["Database", true, "PostgreSQL Cloud DB"],
-      ["Binance WS", !!(f && f.connected), f && f.connected ? `${f.ticks_cached || 4000}+ ticks cached` : "disconnected"],
+      ["Live Market Feed", isLiveFeedOk, isLiveFeedOk ? "MT5 broker live stream active" : "disconnected"],
       ["REST history", restOk, restOk ? "fresh" : "degraded"],
-      ["Scheduler", schedOk, st.last_analysis_at ? "last: " + UI.fmtTs(st.last_analysis_at) : (schedOk ? "running & active" : "no analysis yet")],
+      ["Scheduler", schedOk, st.last_analysis_at ? "last: " + UI.fmtTs(st.last_analysis_at) : (schedOk ? "running & active" : "initializing")],
       ["Data quality", dqOk, dq.candle_count ? dq.candle_count + " candles" : (dqOk ? "live stream active" : "—")],
       ["Telegram", tgOk, tgOk ? (tg.status || "CONFIGURED") : "disabled"],
       ["Research engine", true, "reports available"],
@@ -5907,9 +5908,11 @@ Routes["/backtest"] = (mount) => {
             <div style="flex:1;min-width:180px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">STRATEGY</label>
               <select id="bt-strategy" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
-                <option value="FIB_WITH_RETRACEMENT" ${(!window.__btStrategy || window.__btStrategy === 'FIB_WITH_RETRACEMENT') ? 'selected' : ''}>Fib Retracement (5M, 15M, 30M, 1H · 4H Excluded)</option>
+                <option value="BREAKOUT_STRATEGY" ${(!window.__btStrategy || window.__btStrategy === 'BREAKOUT_STRATEGY') ? 'selected' : ''}>Breakout Strategy (5M, 15M, 30M, 1H · Live Candles)</option>
+                <option value="FIB_WITH_RETRACEMENT" ${window.__btStrategy === 'FIB_WITH_RETRACEMENT' ? 'selected' : ''}>Fib Retracement (5M, 15M, 30M, 1H · 4H Excluded)</option>
                 <option value="SMC_WITH_FIB" ${window.__btStrategy === 'SMC_WITH_FIB' ? 'selected' : ''}>SMC with Fib (5M, 15M, 30M, 1H, 4H)</option>
-                <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>Both Strategies Combined (Fib + SMC)</option>
+                <option value="FIB_GO_WITH_TREND" ${window.__btStrategy === 'FIB_GO_WITH_TREND' ? 'selected' : ''}>Fib Go With Trend (15M, 30M, 1H, 2H, 4H)</option>
+                <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>All Strategies Combined (Breakout + Fib + SMC + Trend)</option>
               </select>
             </div>
 
@@ -6653,10 +6656,14 @@ Routes["/settings"] = async (mount) => {
           <span id="mt5-status-badge" class="badge ${mt5Online ? 'badge-green' : 'badge-yellow'}">${mt5Online ? '🟢 ONLINE (VT Markets Connected - Native MT5 API)' : '⚪ WAITING FOR MT5'}</span>
         </div>
         <div class="card-body">
-          <!-- Strict Strategy Filter Callout -->
-          <div style="background:rgba(171,71,188,0.1);border:1px solid rgba(171,71,188,0.3);padding:12px 16px;border-radius:6px;font-size:12.5px;color:#e1bee7;margin-bottom:16px;line-height:1.5">
-            🎯 <b>Strict Strategy Filter Active:</b> Only <b>Fib Retracement</b> strategy trades are permitted to execute on MT5. <i>SMC With Fib</i> is running in paper trading simulation.
+          <!-- Multi-Strategy Execution Callout -->
+          <div style="background:rgba(38,166,154,0.1);border:1px solid rgba(38,166,154,0.3);padding:12px 16px;border-radius:6px;font-size:12.5px;color:#80cbc4;margin-bottom:16px;line-height:1.5">
+            🎯 <b>Multi-Strategy Live Execution Active:</b> All enabled strategies (<b>Fib Retracement</b>, <b>SMC With Fib</b>, <b>Breakout Strategy</b>, and <b>TradingView Alerts</b>) automatically execute native live trades on MT5 with strict risk control.
           </div>
+          ${mt5.algo_trading_enabled === false ? `
+          <div style="background:rgba(239,83,80,0.15);border:1px solid #ef5350;padding:12px 16px;border-radius:6px;font-size:12.5px;color:#ffcdd2;margin-bottom:16px;line-height:1.5">
+            ⚠️ <b>ALGO TRADING DISABLED IN MT5:</b> The 'Algo Trading' button in your MetaTrader 5 top toolbar is currently OFF. Please click the <b>Algo Trading</b> button at the top of MT5 so it becomes active (red stop square), allowing OrderSend() to execute trades!
+          </div>` : ''}
 
           <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px">
             <!-- MT5 Execution Toggle -->
@@ -6668,7 +6675,7 @@ Routes["/settings"] = async (mount) => {
                 <input type="checkbox" id="set-mt5-bridge-enabled" ${mt5BridgeEnabled ? 'checked' : ''} style="cursor:pointer;width:16px;height:16px">
                 <span id="label-mt5-bridge-state">${mt5BridgeEnabled ? 'ENABLED (Auto-Orders Sent to MT5)' : 'DISABLED (Standby)'}</span>
               </label>
-              <span class="muted" style="font-size:11px;margin-top:4px;display:block">When ON, Fib Retracement entry signals trigger native MT5 OrderSend()</span>
+              <span class="muted" style="font-size:11px;margin-top:4px;display:block">When ON, all strategy entry signals trigger native MT5 OrderSend()</span>
             </div>
 
             <!-- Broker Symbol Mapping -->

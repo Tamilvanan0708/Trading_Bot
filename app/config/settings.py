@@ -103,8 +103,8 @@ class Settings(BaseSettings):
     BAI_BASE_URL: str = "https://api.b.ai/v1"
 
     # Telegram — load strictly from environment / .env
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_CHAT_ID: str = ""
+    TELEGRAM_BOT_TOKEN: str = "8724401786:AAEOjScHIEgtPb1LP2VlZzUZEG9NmHclWYE"
+    TELEGRAM_CHAT_ID: str = "817345394"
     TELEGRAM_ENABLED: bool = True
 
     # Paper Trading
@@ -148,12 +148,12 @@ class Settings(BaseSettings):
     NEWS_BLACKOUT_AFTER_MINUTES: int = Field(default=30, ge=0)
 
     # MetaTrader 5 Bridge
-    MT5_ENABLED: bool = False
+    MT5_ENABLED: bool = True
     MT5_LOGIN: int = 0
     MT5_SERVER: str = ""
     MT5_PASSWORD: str = ""
     MT5_MAGIC: int = 0
-    MT5_SYMBOL: str = "XAUUSD"
+    MT5_SYMBOL: str = "XAUUSD-VIP"
     MT5_TZ_OFFSET_MINUTES: int = 0
 
     # Live Market Feed Configuration
