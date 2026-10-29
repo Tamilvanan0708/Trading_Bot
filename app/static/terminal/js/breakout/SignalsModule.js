@@ -117,7 +117,22 @@ window.SignalsModule = (function () {
           }
 
           if (live.price) {
-            const isLiveBull = live.price >= (live.trendEma || (live.resistance - 2.0));
+            // Dynamic Unbiased Directional Structure:
+            // Evaluates real candle price action and range location for this specific timeframe
+            const rangeMid = (highest !== -Infinity && lowest !== Infinity) ? ((highest + lowest) / 2) : live.price;
+            const lastCandle = (candles && candles.length > 0) ? candles[candles.length - 1] : null;
+            const prevCandle = (candles && candles.length > 1) ? candles[candles.length - 2] : null;
+
+            const isRangeBull = live.price >= rangeMid;
+            const isCandleBull = lastCandle ? (lastCandle.close >= lastCandle.open) : isRangeBull;
+            const isBreakingUp = lastCandle && prevCandle ? (lastCandle.close > prevCandle.high) : false;
+            const isBreakingDown = lastCandle && prevCandle ? (lastCandle.close < prevCandle.low) : false;
+
+            let isLiveBull = isRangeBull;
+            if (isBreakingUp) isLiveBull = true;
+            else if (isBreakingDown) isLiveBull = false;
+            else isLiveBull = (isRangeBull && isCandleBull) || (live.price > (lastCandle ? lastCandle.open : rangeMid));
+
             const liveEntry = live.price;
             const liveAtr = (live.atr ? live.atr * (cfg.atrFactor / 8.5) : cfg.atrFactor);
             const liveTp = isLiveBull ? parseFloat((liveEntry + liveAtr * cfg.tpMult).toFixed(2)) : parseFloat((liveEntry - liveAtr * cfg.tpMult).toFixed(2));

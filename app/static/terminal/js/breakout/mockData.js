@@ -424,19 +424,8 @@ window.BreakoutDataService = (function () {
         return;
       }
 
-      // 2. Trend Alignment Armor:
-      // In uptrend (price >= trendEma), ONLY allow BUY breakouts (block counter-trend bear traps)
-      // In downtrend (price <= trendEma), ONLY allow SELL breakdowns (block counter-trend bull traps)
-      const anchorTrend = s.trendEma || liveState.trendEma || price;
-      if (isBull && price < anchorTrend) {
-        s.status = "REJECTED_COUNTER_TREND";
-        return;
-      }
-      if (isBear && price > anchorTrend) {
-        s.status = "REJECTED_COUNTER_TREND";
-        return;
-      }
-
+      // 2. High-Conviction Breakout Confirmation (Unbiased Buy & Sell Evaluation):
+      // Clearing bullish trigger confirms upside breakout; clearing bearish trigger confirms downside breakdown
       s.lastSignalTime = now;
       s.status = isBull ? "BULLISH_BREAKOUT" : "BEARISH_BREAKOUT";
 
@@ -1033,38 +1022,25 @@ window.BreakoutPaperTrading = (function () {
     const tf = order.timeframe || "15m";
     const dir = order.direction || "BUY";
 
-    // 🛡️ ANTI-HEDGE & ANTI-CANNIBALIZATION SHIELD:
+    // 🛡️ PER-TIMEFRAME SINGLE POSITION RULE:
     // Rule 1: NEVER allow conflicting or duplicate positions on the SAME timeframe!
+    // (e.g. If 15m has a position, no other trade can open on 15m until it closes)
     const existingTfPos = state.openPositions.find(p => p.timeframe === tf);
     if (existingTfPos) {
       if (window.UI && typeof window.UI.toast === "function") {
         window.UI.toast(
           "⏸️ Trade Blocked",
-          `Active position already exists on ${tf} (${existingTfPos.ticket} ${existingTfPos.direction}). No conflicting trades allowed on same timeframe.`,
+          `Active position already exists on ${tf} (${existingTfPos.ticket} ${existingTfPos.direction}). Only 1 active trade allowed per timeframe.`,
           "warning"
         );
       }
       return null;
     }
 
-    // Rule 2: Account-Wide Directional Alignment:
-    // An account CANNOT hold BUY and SELL simultaneously on the same asset (Gold)!
-    const opposingDirPos = state.openPositions.find(p => p.direction !== dir);
-    if (opposingDirPos) {
+    // Rule 2: Max 3 concurrent positions across portfolio to maintain risk discipline
+    if (state.openPositions.length >= 3) {
       if (window.UI && typeof window.UI.toast === "function") {
-        window.UI.toast(
-          "🚫 Opposing Trade Blocked",
-          `Account holds ${opposingDirPos.direction} (${opposingDirPos.ticket}). Cannot open contradictory ${dir} position to prevent self-cannibalization.`,
-          "warning"
-        );
-      }
-      return null;
-    }
-
-    // Rule 3: Max 2 concurrent positions account-wide to keep total risk strictly <= 10%
-    if (state.openPositions.length >= 2) {
-      if (window.UI && typeof window.UI.toast === "function") {
-        window.UI.toast("⚠️ Max Positions Reached", "Max 2 active positions allowed to preserve 5% risk portfolio discipline.", "warning");
+        window.UI.toast("⚠️ Max Positions Reached", "Max 3 active positions allowed across timeframes to preserve 5% risk discipline.", "warning");
       }
       return null;
     }
