@@ -50,6 +50,13 @@ async def get_bridge_status():
     return manager.get_status()
 
 
+@router.get("/diagnostics")
+async def get_bridge_diagnostics():
+    """Returns deep diagnostic info on MT5 connection, terminal permissions, account permissions, and errors."""
+    manager = get_mt5_bridge_manager()
+    return manager.get_diagnostics()
+
+
 @router.get("/pending-orders")
 async def get_pending_orders(symbol: str = "XAUUSD"):
     """

@@ -964,6 +964,8 @@ class MT5BridgeManager:
                 "lot_size": order.get("lot_size"),
                 "fill_price": fill_price,
                 "status": status,
+                "retcode": report.get("retcode"),
+                "error": report.get("error"),
                 "timestamp": time.time(),
             }
             self._execution_history.append(record)
@@ -971,14 +973,76 @@ class MT5BridgeManager:
                 self._execution_history.pop(0)
 
         logger.info(
-            "[MT5-BRIDGE] Execution Report: Order %s -> Ticket %s (%s @ %.2f)",
+            "[MT5-BRIDGE] Execution Report: Order %s -> Ticket %s (%s @ %.2f, retcode=%s, error=%s)",
             order_id,
             ticket,
             status,
             fill_price,
+            report.get("retcode"),
+            report.get("error"),
         )
 
         return {"status": "success", "ticket": ticket, "order_id": order_id}
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Deep diagnostic info on MT5 connection, terminal, account, and symbol permissions."""
+        with self._lock:
+            res: dict[str, Any] = {
+                "is_online": self.is_online,
+                "seconds_since_heartbeat": round(time.time() - self._heartbeat.get("last_seen", 0.0), 1),
+                "pending_orders": [self._orders.get(oid) for oid in self._pending_ids],
+                "recent_executions": self._execution_history[-10:],
+            }
+        mt5 = self._ensure_native_mt5()
+        if mt5 is None:
+            res["native_mt5"] = "Not initialized or not running on Windows"
+            return res
+
+        try:
+            t_info = mt5.terminal_info()
+            if t_info:
+                res["terminal_info"] = {
+                    "connected": getattr(t_info, "connected", None),
+                    "trade_allowed": getattr(t_info, "trade_allowed", None),
+                    "tradeapi_disabled": getattr(t_info, "tradeapi_disabled", None),
+                    "dlls_allowed": getattr(t_info, "dlls_allowed", None),
+                    "name": getattr(t_info, "name", None),
+                    "path": getattr(t_info, "path", None),
+                    "build": getattr(t_info, "build", None),
+                }
+            ai = mt5.account_info()
+            if ai:
+                res["account_info"] = {
+                    "login": getattr(ai, "login", None),
+                    "server": getattr(ai, "server", None),
+                    "trade_allowed": getattr(ai, "trade_allowed", None),
+                    "trade_expert": getattr(ai, "trade_expert", None),
+                    "trade_mode": getattr(ai, "trade_mode", None),
+                    "balance": getattr(ai, "balance", None),
+                    "equity": getattr(ai, "equity", None),
+                    "margin_free": getattr(ai, "margin_free", None),
+                    "currency": getattr(ai, "currency", None),
+                }
+            exec_cfg = get_execution_settings()
+            sym = exec_cfg.mt5_symbol or "XAUUSD-VIP"
+            mt5.symbol_select(sym, True)
+            s_info = mt5.symbol_info(sym)
+            if s_info:
+                res["symbol_info"] = {
+                    "name": getattr(s_info, "name", None),
+                    "trade_mode": getattr(s_info, "trade_mode", None),
+                    "trade_execution": getattr(s_info, "trade_execution", None),
+                    "filling_mode": getattr(s_info, "filling_mode", None),
+                    "volume_min": getattr(s_info, "volume_min", None),
+                    "volume_max": getattr(s_info, "volume_max", None),
+                    "volume_step": getattr(s_info, "volume_step", None),
+                    "ask": getattr(s_info, "ask", None),
+                    "bid": getattr(s_info, "bid", None),
+                }
+            res["last_error"] = mt5.last_error()
+        except Exception as e:
+            res["diagnostic_error"] = str(e)
+        return res
 
     def clear_all(self) -> None:
         """Clear queues (useful for testing or reset)."""
