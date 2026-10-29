@@ -12,6 +12,8 @@ if exist .venv\Scripts\python.exe (
 )
 
 :loop
+echo [%date% %time%] Syncing latest updates from GitHub...
+git pull origin main
 echo [%date% %time%] Starting Uvicorn Server with %PYTHON_CMD%...
 %PYTHON_CMD% -m uvicorn app.api.app:app --host 0.0.0.0 --port 8000 --workers 1
 

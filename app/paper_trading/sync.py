@@ -1893,6 +1893,19 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             await db.commit()
                             logger.info("[PAPER-AUTO] Engine %s closed SMC trade %s @ %.2f (+$%.2f)", smc_outcome, sig_id, exit_px, tf_open_trade.realized_pnl)
 
+                            # MT5 Live Position Close Synchronization (SMC With Fib)
+                            if exec_cfg.mt5_bridge_enabled:
+                                try:
+                                    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                    get_mt5_bridge_manager().enqueue_close(
+                                        paper_trade_id=tf_open_trade.id,
+                                        symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                        reason=exit_reason or "CLOSED",
+                                        direction=dir_str,
+                                    )
+                                except Exception as mt5_err:
+                                    logger.warning("[MT5-BRIDGE] Failed to dispatch SMC close to MT5: %s", mt5_err)
+
                             tkt = None
                             try:
                                 from app.services.mt5_bridge_manager import get_mt5_bridge_manager
@@ -2068,6 +2081,34 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 existing_open_smc = new_trade
                                 logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (SMC %s %s) @ %.2f", sig_id, tf_key.upper(), dir_str, entry_px)
 
+                                # MT5 Live Order Dispatch for SMC With Fib
+                                if exec_cfg.mt5_bridge_enabled:
+                                    try:
+                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                        ist_tz = timezone(timedelta(hours=5, minutes=30))
+                                        open_time_ist = (new_trade.opened_at or datetime.now(timezone.utc)).astimezone(ist_tz).strftime("%H:%M")
+                                        trade_comment = f"{new_trade.id[:6]}_SMC_{tf_key.upper()}_{open_time_ist}"[:31]
+                                        sl_dist = round(abs(entry_px - sl_px), 2) if sl_px > 0 else 3.0
+                                        tp_dist = round(abs(tp_px - entry_px), 2) if tp_px > 0 else 3.0
+                                        get_mt5_bridge_manager().enqueue_order({
+                                            "id": f"mt5-{new_trade.id[:8]}",
+                                            "paper_trade_id": new_trade.id,
+                                            "strategy": "SMC with Fib",
+                                            "layer": "SMC",
+                                            "timeframe": tf_key.upper(),
+                                            "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                            "direction": dir_str,
+                                            "lot_size": trade_lot,
+                                            "entry_price": entry_px,
+                                            "stop_loss": sl_px,
+                                            "take_profit_1": tp_px,
+                                            "sl_points": sl_dist,
+                                            "tp_points": tp_dist,
+                                            "comment": trade_comment,
+                                        })
+                                    except Exception as mt5_err:
+                                        logger.warning("[MT5-BRIDGE] Failed to dispatch SMC trade to MT5: %s", mt5_err)
+
                                 # Telegram: Dispatch Hybrid Trade Opened Alert
                                 try:
                                     msg = _build_hybrid_open_msg(
@@ -2212,6 +2253,34 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 existing_open_trend = new_trade
                                 trend_svc.active_trade_tf = tf_key
                                 logger.info("[PAPER-AUTO] Opened trade %s (FIB_TREND %s %s) @ %.2f", sig_id, tf_key.upper(), dir_str, entry_px)
+
+                                # MT5 Live Order Dispatch for Fib Trend
+                                if exec_cfg.mt5_bridge_enabled:
+                                    try:
+                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                        ist_tz = timezone(timedelta(hours=5, minutes=30))
+                                        open_time_ist = (new_trade.opened_at or datetime.now(timezone.utc)).astimezone(ist_tz).strftime("%H:%M")
+                                        trade_comment = f"{new_trade.id[:6]}_TRD_{tf_key.upper()}_{open_time_ist}"[:31]
+                                        sl_dist = round(abs(entry_px - sl_px), 2) if sl_px > 0 else 3.0
+                                        tp_dist = round(abs(tp_target - entry_px), 2) if tp_target > 0 else 3.0
+                                        get_mt5_bridge_manager().enqueue_order({
+                                            "id": f"mt5-{new_trade.id[:8]}",
+                                            "paper_trade_id": new_trade.id,
+                                            "strategy": "Fib Go With Trend",
+                                            "layer": "TREND",
+                                            "timeframe": tf_key.upper(),
+                                            "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                            "direction": dir_str,
+                                            "lot_size": trade_lot,
+                                            "entry_price": entry_px,
+                                            "stop_loss": sl_px,
+                                            "take_profit_1": tp_target,
+                                            "sl_points": sl_dist,
+                                            "tp_points": tp_dist,
+                                            "comment": trade_comment,
+                                        })
+                                    except Exception as mt5_err:
+                                        logger.warning("[MT5-BRIDGE] Failed to dispatch Trend trade to MT5: %s", mt5_err)
 
                                 try:
                                     msg = _build_hybrid_open_msg(
@@ -2423,8 +2492,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                 # Telegram & Signal Sync: Dispatch Trade Closed Alert (TP or SL or BE)
                 if closed:
-                    # MT5 Live Position Close Synchronization (Strict Fib Retracement)
-                    if "FIB_RETR" in (t.signal_id or ""):
+                    # MT5 Live Position Close Synchronization (All Strategies)
+                    if exec_cfg.mt5_bridge_enabled:
                         try:
                             from app.services.mt5_bridge_manager import get_mt5_bridge_manager
                             get_mt5_bridge_manager().enqueue_close(

@@ -180,8 +180,19 @@ async def get_performance(db: AsyncSession = Depends(get_db_session)):
     offset = float(getattr(exec_cfg, "balance_baseline_offset", 0.0) or 0.0)
     effective_pnl = round(realized_pnl - offset, 2)
 
+    # Dynamic MT5 Balance Synchronization: When MT5 is online, strictly match broker balance
+    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+    mt5_mgr = get_mt5_bridge_manager()
+    mt5_bal = mt5_mgr.get_account_balance()
+    if exec_cfg.mt5_bridge_enabled and mt5_bal is not None and mt5_mgr.is_online:
+        display_balance = mt5_bal
+        display_pnl = 0.0
+    else:
+        display_balance = round(initial_balance + effective_pnl, 2)
+        display_pnl = effective_pnl
+
     return {
-        "paper_account_balance": round(initial_balance + effective_pnl, 2),
+        "paper_account_balance": display_balance,
         "active_open_trades_count": len(active),
         "closed_trades_count": total_trades,
         "winning_trades": len(wins),
@@ -190,7 +201,7 @@ async def get_performance(db: AsyncSession = Depends(get_db_session)):
         "profit_factor": profit_factor,
         "avg_win_usd": avg_win,
         "avg_loss_usd": avg_loss,
-        "realized_pnl_usd": effective_pnl,
+        "realized_pnl_usd": display_pnl,
         "recent_backtest_runs_count": len(runs),
         "latest_backtest": {
             "id": runs[0].id,
@@ -246,10 +257,24 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
     avg_loss = round(gross_loss / len(losses), 2) if losses else 0.0
     expectancy = round((win_rate / 100.0 * avg_win) - ((1 - win_rate / 100.0) * avg_loss), 2) if total_trades else 0.0
 
+    # Dynamic MT5 Balance Synchronization: When MT5 is online, strictly match broker balance & equity
+    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+    mt5_mgr = get_mt5_bridge_manager()
+    mt5_bal = mt5_mgr.get_account_balance()
+    mt5_eq = mt5_mgr.get_account_equity()
+
+    if exec_cfg.mt5_bridge_enabled and mt5_bal is not None and mt5_mgr.is_online:
+        balance = mt5_bal
+        initial_balance = mt5_bal
+        equity = mt5_eq if mt5_eq is not None else round(mt5_bal + unrealized_pnl, 2)
+        net_profit = 0.0
+    else:
+        equity = round(balance + unrealized_pnl, 2)
+
     return {
         "initial_balance": initial_balance,
         "current_balance": balance,
-        "equity": round(balance + unrealized_pnl, 2),
+        "equity": equity,
         "account_currency": account_currency,
         "account_leverage": account_leverage,
         "currency_symbol": "₹" if account_currency == "cent" else "$",

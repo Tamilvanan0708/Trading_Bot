@@ -6653,10 +6653,14 @@ Routes["/settings"] = async (mount) => {
           <span id="mt5-status-badge" class="badge ${mt5Online ? 'badge-green' : 'badge-yellow'}">${mt5Online ? '🟢 ONLINE (VT Markets Connected - Native MT5 API)' : '⚪ WAITING FOR MT5'}</span>
         </div>
         <div class="card-body">
-          <!-- Strict Strategy Filter Callout -->
-          <div style="background:rgba(171,71,188,0.1);border:1px solid rgba(171,71,188,0.3);padding:12px 16px;border-radius:6px;font-size:12.5px;color:#e1bee7;margin-bottom:16px;line-height:1.5">
-            🎯 <b>Strict Strategy Filter Active:</b> Only <b>Fib Retracement</b> strategy trades are permitted to execute on MT5. <i>SMC With Fib</i> is running in paper trading simulation.
+          <!-- Multi-Strategy Execution Callout -->
+          <div style="background:rgba(38,166,154,0.1);border:1px solid rgba(38,166,154,0.3);padding:12px 16px;border-radius:6px;font-size:12.5px;color:#80cbc4;margin-bottom:16px;line-height:1.5">
+            🎯 <b>Multi-Strategy Live Execution Active:</b> All enabled strategies (<b>Fib Retracement</b>, <b>SMC With Fib</b>, <b>Breakout Strategy</b>, and <b>TradingView Alerts</b>) automatically execute native live trades on MT5 with strict risk control.
           </div>
+          ${mt5.algo_trading_enabled === false ? `
+          <div style="background:rgba(239,83,80,0.15);border:1px solid #ef5350;padding:12px 16px;border-radius:6px;font-size:12.5px;color:#ffcdd2;margin-bottom:16px;line-height:1.5">
+            ⚠️ <b>ALGO TRADING DISABLED IN MT5:</b> The 'Algo Trading' button in your MetaTrader 5 top toolbar is currently OFF. Please click the <b>Algo Trading</b> button at the top of MT5 so it becomes active (red stop square), allowing OrderSend() to execute trades!
+          </div>` : ''}
 
           <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px">
             <!-- MT5 Execution Toggle -->
@@ -6668,7 +6672,7 @@ Routes["/settings"] = async (mount) => {
                 <input type="checkbox" id="set-mt5-bridge-enabled" ${mt5BridgeEnabled ? 'checked' : ''} style="cursor:pointer;width:16px;height:16px">
                 <span id="label-mt5-bridge-state">${mt5BridgeEnabled ? 'ENABLED (Auto-Orders Sent to MT5)' : 'DISABLED (Standby)'}</span>
               </label>
-              <span class="muted" style="font-size:11px;margin-top:4px;display:block">When ON, Fib Retracement entry signals trigger native MT5 OrderSend()</span>
+              <span class="muted" style="font-size:11px;margin-top:4px;display:block">When ON, all strategy entry signals trigger native MT5 OrderSend()</span>
             </div>
 
             <!-- Broker Symbol Mapping -->
