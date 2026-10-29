@@ -384,9 +384,9 @@ window.SignalsModule = (function () {
                 <span style="font-weight:900;font-size:16px;color:var(--text-bright);letter-spacing:0.3px;">
                   $10,000 GOLD BREAKOUT PAPER TRADING ACCOUNT
                 </span>
-                <!-- PROMINENT PLUS / MINUS BADGE -->
+                <!-- PROMINENT PROFIT / LOSS BADGE -->
                 <span class="badge ${isPlus ? 'badge-green' : 'badge-red'}" style="font-size:12px;font-weight:900;padding:4px 10px;box-shadow:0 0 10px ${isPlus ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)'};" id="paper-plus-minus-badge">
-                  ${isPlus ? '🟢 PLUS' : '🔴 MINUS'} ${isPlus ? '+' : ''}$${acct.netPnlUsd.toFixed(2)} (${isPlus ? '+' : ''}${acct.netPnlPct.toFixed(2)}%)
+                  ${isPlus ? '🟢 PROFIT' : '🔴 LOSS'} ${isPlus ? '+' : ''}$${acct.netPnlUsd.toFixed(2)} (${isPlus ? '+' : ''}${acct.netPnlPct.toFixed(2)}%)
                 </span>
                 ${isCbActive ? '<span class="badge badge-red" style="font-size:10.5px;font-weight:800;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;" title="Auto-trade paused: 2 consecutive SL hits detected in chop. Reset $10k or change market condition to resume.">🛑 CHOP CIRCUIT BREAKER PAUSE</span>' : ''}
               </div>
@@ -428,7 +428,7 @@ window.SignalsModule = (function () {
 
           <div class="paper-metric-item" style="border-color:${isPlus ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)'};background:${isPlus ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)'};">
             <span class="paper-metric-lbl" style="color:${isPlus ? 'var(--green-bright)' : 'var(--red-bright)'};font-weight:800;">
-              Live Equity (${isPlus ? 'PLUS' : 'MINUS'})
+              Live Equity (${isPlus ? 'PROFIT' : 'LOSS'})
             </span>
             <span class="paper-metric-val" id="paper-acct-equity" style="color:${isPlus ? 'var(--green-bright)' : 'var(--red-bright)'};">
               $${acct.equity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -705,7 +705,7 @@ window.SignalsModule = (function () {
                   marketPriceHtml = `<span style="color:var(--accent);font-weight:700;" id="paper-pos-live-${t.ticket}">$${curP.toFixed(2)}</span>`;
                   pnlHtml = `
                     <span style="font-family:var(--font-num);font-weight:800;color:${isProf ? 'var(--green-bright)' : 'var(--red-bright)'};" id="paper-pos-pnl-${t.ticket}">
-                      ${isProf ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(usd).toFixed(2)} (${isProf ? '+' : ''}${acctPct.toFixed(2)}%)
+                      ${isProf ? '🟢 PROFIT +' : '🔴 LOSS -'}$${Math.abs(usd).toFixed(2)} (${isProf ? '+' : ''}${acctPct.toFixed(2)}%)
                     </span>
                   `;
                   statusHtml = `<span class="badge badge-green" style="font-weight:800;font-size:9.5px;padding:2px 6px;"><span class="live-beacon" style="margin-right:3px;"></span>OPEN LIVE</span>`;
@@ -730,7 +730,7 @@ window.SignalsModule = (function () {
                   marketPriceHtml = `<span style="color:var(--text-dim);font-weight:700;">$${Number(t.exitPrice || t.entryPrice).toFixed(2)}</span>`;
                   pnlHtml = `
                     <span style="font-family:var(--font-num);font-weight:800;color:${isWin ? 'var(--green-bright)' : 'var(--red-bright)'};">
-                      ${isWin ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(pnlVal).toFixed(2)} (${isWin ? '+' : ''}${acctPct.toFixed(2)}%)
+                      ${isWin ? '🟢 PROFIT +' : '🔴 LOSS -'}$${Math.abs(pnlVal).toFixed(2)} (${isWin ? '+' : ''}${acctPct.toFixed(2)}%)
                     </span>
                   `;
 
@@ -1452,14 +1452,14 @@ window.SignalsModule = (function () {
           <div class="cockpit-metric-card cockpit-pnl-card ${isProfit ? '' : 'is-loss'}">
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span class="cockpit-metric-lbl" style="color:${isProfit ? 'var(--green-bright)' : 'var(--red-bright)'}">
-                ${isProfit ? 'Floating PLUS' : 'Floating MINUS'} on $10,000
+                ${isProfit ? 'Floating PROFIT' : 'Floating LOSS'} on $10,000
               </span>
               <span class="badge ${isProfit ? 'badge-green' : 'badge-red'}" style="font-size:10px;font-weight:800;" id="cockpit-pnl-pts">
                 ${m.pts >= 0 ? '+' : ''}${m.pts.toFixed(2)} pts
               </span>
             </div>
             <div class="cockpit-pnl-val" id="cockpit-pnl-usd" style="color:${isProfit ? 'var(--green-bright)' : 'var(--red-bright)'}">
-              ${isProfit ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(m.usd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ${isProfit ? '🟢 PROFIT +' : '🔴 LOSS -'}$${Math.abs(m.usd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
             <div style="font-size:11px;font-family:var(--font-mono);color:${isProfit ? 'var(--green)' : 'var(--red)'}" id="cockpit-pnl-pct">
               ${m.pct >= 0 ? '+' : ''}${m.pct.toFixed(2)}% Impact on $10k Account
@@ -1572,7 +1572,7 @@ window.SignalsModule = (function () {
         if (window.UI && typeof window.UI.toast === "function") {
           window.UI.toast(
             "Trade Closed",
-            `Settled ${finalUsd >= 0 ? 'PLUS +' : 'MINUS -'}$${Math.abs(finalUsd).toFixed(2)} on $10,000 Account`,
+            `Settled ${finalUsd >= 0 ? 'PROFIT +' : 'LOSS -'}$${Math.abs(finalUsd).toFixed(2)} on $10,000 Account`,
             finalUsd >= 0 ? "success" : "info"
           );
         }
@@ -1652,7 +1652,7 @@ window.SignalsModule = (function () {
       if (balEl) balEl.textContent = `$${acct.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
       if (badgeEl) {
         badgeEl.className = `badge ${isPlus ? 'badge-green' : 'badge-red'}`;
-        badgeEl.textContent = `${isPlus ? '🟢 PLUS' : '🔴 MINUS'} ${isPlus ? '+' : ''}$${acct.netPnlUsd.toFixed(2)} (${isPlus ? '+' : ''}${acct.netPnlPct.toFixed(2)}%)`;
+        badgeEl.textContent = `${isPlus ? '🟢 PROFIT' : '🔴 LOSS'} ${isPlus ? '+' : ''}$${acct.netPnlUsd.toFixed(2)} (${isPlus ? '+' : ''}${acct.netPnlPct.toFixed(2)}%)`;
       }
 
       // Update paper open positions rows
@@ -1667,7 +1667,7 @@ window.SignalsModule = (function () {
           const usd = diff * pos.lots * 100;
           const posProf = usd >= 0;
           const acctPct = (usd / 10000) * 100;
-          pnlEl.textContent = `${posProf ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(usd).toFixed(2)} (${posProf ? '+' : ''}${acctPct.toFixed(2)}% on $10k)`;
+          pnlEl.textContent = `${posProf ? '🟢 PROFIT +' : '🔴 LOSS -'}$${Math.abs(usd).toFixed(2)} (${posProf ? '+' : ''}${acctPct.toFixed(2)}% on $10k)`;
           pnlEl.style.color = posProf ? "var(--green-bright)" : "var(--red-bright)";
         }
       });
@@ -1717,7 +1717,7 @@ window.SignalsModule = (function () {
 
       if (m && pnlUsdEl) {
         const isProfit = m.usd >= 0;
-        pnlUsdEl.textContent = `${isProfit ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(m.usd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        pnlUsdEl.textContent = `${isProfit ? '🟢 PROFIT +' : '🔴 LOSS -'}$${Math.abs(m.usd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         pnlUsdEl.style.color = isProfit ? "var(--green-bright)" : "var(--red-bright)";
 
         if (pnlPtsEl) {
@@ -1772,7 +1772,7 @@ window.SignalsModule = (function () {
         const lotSize = sig.lots || 0.5;
         const usd = pts * (lotSize * 100);
         const isProf = usd >= 0;
-        pnlEl.textContent = `${isProf ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(usd).toFixed(2)}`;
+        pnlEl.textContent = `${isProf ? '🟢 PROFIT +' : '🔴 LOSS -'}$${Math.abs(usd).toFixed(2)}`;
         pnlEl.style.color = isProf ? "var(--green-bright)" : "var(--red-bright)";
       }
     });
@@ -1810,16 +1810,16 @@ window.SignalsModule = (function () {
         const pts = isBull ? (curPrice - sig.entryPrice) : (sig.entryPrice - curPrice);
         const usd = pts * (lotSize * 100);
         isProf = usd >= 0;
-        rowPnlUsd = `${isProf ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(usd).toFixed(2)}`;
+        rowPnlUsd = `${isProf ? '🟢 PROFIT +' : '🔴 LOSS -'}$${Math.abs(usd).toFixed(2)}`;
       } else if (sig.status === "TP_HIT") {
         const pts = Math.abs(sig.takeProfit - sig.entryPrice);
         const usd = pts * (lotSize * 100);
-        rowPnlUsd = `🟢 PLUS +$${usd.toFixed(2)}`;
+        rowPnlUsd = `🟢 PROFIT +$${usd.toFixed(2)}`;
         isProf = true;
       } else if (sig.status === "SL_HIT") {
         const pts = Math.abs(sig.entryPrice - sig.stopLoss);
         const usd = pts * (lotSize * 100);
-        rowPnlUsd = `🔴 MINUS -$${usd.toFixed(2)}`;
+        rowPnlUsd = `🔴 LOSS -$${usd.toFixed(2)}`;
         isProf = false;
       }
 

@@ -1173,7 +1173,7 @@ window.BreakoutPaperTrading = (function () {
       const isProf = pnlUsd > 0;
       const isBe = reason === "BE_HIT" || Math.abs(pnlUsd) < 1.0;
       window.UI.toast(
-        isProf ? "🎯 Paper Trade Profit (PLUS)" : (isBe ? "🛡️ Trade Exited at Break-Even ($0 Risk)" : "🛑 Paper Trade Exited (MINUS)"),
+        isProf ? "🎯 Paper Trade Profit (PROFIT)" : (isBe ? "🛡️ Trade Exited at Break-Even ($0 Risk)" : "🛑 Paper Trade Exited (LOSS)"),
         `Closed ${ticket} @ $${closedPos.exitPrice.toFixed(2)} (${reason}). Result: ${isProf ? '+' : ''}$${pnlUsd.toFixed(2)} on $10,000 Account`,
         isProf ? "success" : (isBe ? "info" : "warning")
       );
