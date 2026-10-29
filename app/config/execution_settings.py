@@ -105,8 +105,8 @@ class ExecutionSettings(BaseModel):
         description="Magic number for MT5 orders"
     )
     mt5_allowed_strategy: str = Field(
-        default="Fib Retracement",
-        description="Strictly allowed strategy for MT5 execution (only Fib Retracement)"
+        default="ALL",
+        description="Allowed strategy for MT5 execution (ALL, Fib Retracement, SMC with Fib, Breakout Strategy)"
     )
     min_impulse_filter_enabled: bool = Field(
         default=True,

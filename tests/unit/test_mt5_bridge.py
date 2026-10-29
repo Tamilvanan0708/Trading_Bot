@@ -20,6 +20,9 @@ def reset_bridge():
 
 def test_strict_strategy_filtering():
     """Verify that ONLY Fib Retracement orders are queued for MT5, and other strategies are blocked."""
+    from app.config.execution_settings import get_execution_settings
+    exec_cfg = get_execution_settings()
+    exec_cfg.mt5_allowed_strategy = "Fib Retracement"
     mgr = get_mt5_bridge_manager()
 
     # 1. Fib Retracement - MUST BE QUEUED

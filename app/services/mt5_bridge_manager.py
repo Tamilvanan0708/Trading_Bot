@@ -284,26 +284,27 @@ class MT5BridgeManager:
     def enqueue_order(self, order_data: dict[str, Any]) -> dict[str, Any]:
         """
         Enqueues an order for MT5 execution.
-        STRICT POLICY:
-        - Only 'Fib Retracement' strategy is permitted.
-        - SMC With Fib and Fib Trend Breakout are blocked from MT5.
-        - Lots are safety-clamped to max 0.50 Lot.
+        Supports:
+        - Fib Retracement
+        - SMC with Fib
+        - Breakout Strategy
+        - Lots are safety-clamped to max_lot_cap.
         """
         strat = str(order_data.get("strategy", "Fib Retracement")).strip()
         strat_upper = strat.upper()
 
-        # Block any strategy that is not Fib Retracement
-        if "SMC" in strat_upper or "TREND" in strat_upper or ("FIB" in strat_upper and "RETRACEMENT" not in strat_upper):
+        exec_cfg = get_execution_settings()
+        allowed_strat = getattr(exec_cfg, "mt5_allowed_strategy", "ALL")
+        if allowed_strat and allowed_strat != "ALL" and allowed_strat.upper() not in strat_upper:
             logger.info(
-                "[MT5-BRIDGE] Strategy '%s' blocked. MT5 execution is strictly reserved for Fib Retracement only.",
+                "[MT5-BRIDGE] Strategy '%s' filtered out by configuration (%s).",
                 strat,
+                allowed_strat,
             )
             return {
                 "status": "filtered",
                 "reason": f"Strategy '{strat}' is disabled for MT5 live execution (Fib Retracement only).",
             }
-
-        exec_cfg = get_execution_settings()
         if not exec_cfg.mt5_bridge_enabled and not order_data.get("is_test", False):
             logger.info("[MT5-BRIDGE] MT5 bridge is disabled in Execution Settings; skipping order.")
             return {
@@ -332,13 +333,13 @@ class MT5BridgeManager:
             "take_profit": tp_px,
             "sl_points": sl_pts,
             "tp_points": tp_pts,
-            "strategy": "Fib Retracement",
+            "strategy": strat,
             "layer": str(order_data.get("layer", "L1")),
             "timeframe": str(order_data.get("timeframe", "5M")).upper(),
             "comment": str(
                 order_data.get("comment")
                 or (
-                    f"{str(order_data.get('paper_trade_id'))[:6]}_{order_data.get('timeframe', '5M')}_{order_data.get('layer', 'L1')}"
+                    f"XAU_{order_data.get('timeframe', '5M')}_{order_data.get('layer', 'L1')}_{str(order_data.get('paper_trade_id'))[:6]}"
                     if order_data.get("paper_trade_id")
                     else f"XAU_{order_data.get('timeframe', '5M')}_{order_data.get('layer', 'L1')}"
                 )
