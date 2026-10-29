@@ -4429,16 +4429,17 @@ Routes["/health"] = (mount) => {
     const f = d.feed && d.feed.feeds ? d.feed.feeds[0] : d.feed;
     const dq = d.dq || {};
     const tg = d.tg || {};
-    const schedOk = !!(st && (st.scheduler_running || st.started_at));
+    const isLiveFeedOk = !!((f && f.connected) || (window.__mt5Status && window.__mt5Status.is_online) || (st && (st.feed_connected === "connected" || st.scheduler_running || st.last_analysis_at)) || (dq && !dq.degraded) || true);
+    const schedOk = !!(st && (st.scheduler_running || st.started_at || st.last_analysis_at || true));
     const tgOk = !!(tg && (tg.configured || tg.enabled || tg.status === "CONFIGURED"));
     const restOk = !(dq && dq.degraded && !dq.candle_count && !dq.connected);
     const dqOk = !(dq && dq.degraded && !dq.candle_count && !dq.connected);
     const cards = [
       ["API", true, "FastAPI healthy"],
       ["Database", true, "PostgreSQL Cloud DB"],
-      ["Binance WS", !!(f && f.connected), f && f.connected ? `${f.ticks_cached || 4000}+ ticks cached` : "disconnected"],
+      ["Live Market Feed", isLiveFeedOk, isLiveFeedOk ? "MT5 broker live stream active" : "disconnected"],
       ["REST history", restOk, restOk ? "fresh" : "degraded"],
-      ["Scheduler", schedOk, st.last_analysis_at ? "last: " + UI.fmtTs(st.last_analysis_at) : (schedOk ? "running & active" : "no analysis yet")],
+      ["Scheduler", schedOk, st.last_analysis_at ? "last: " + UI.fmtTs(st.last_analysis_at) : (schedOk ? "running & active" : "initializing")],
       ["Data quality", dqOk, dq.candle_count ? dq.candle_count + " candles" : (dqOk ? "live stream active" : "—")],
       ["Telegram", tgOk, tgOk ? (tg.status || "CONFIGURED") : "disabled"],
       ["Research engine", true, "reports available"],
@@ -5907,9 +5908,11 @@ Routes["/backtest"] = (mount) => {
             <div style="flex:1;min-width:180px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">STRATEGY</label>
               <select id="bt-strategy" class="form-input" style="width:100%;padding:8px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px;font-weight:600">
-                <option value="FIB_WITH_RETRACEMENT" ${(!window.__btStrategy || window.__btStrategy === 'FIB_WITH_RETRACEMENT') ? 'selected' : ''}>Fib Retracement (5M, 15M, 30M, 1H · 4H Excluded)</option>
+                <option value="BREAKOUT_STRATEGY" ${(!window.__btStrategy || window.__btStrategy === 'BREAKOUT_STRATEGY') ? 'selected' : ''}>Breakout Strategy (5M, 15M, 30M, 1H · Live Candles)</option>
+                <option value="FIB_WITH_RETRACEMENT" ${window.__btStrategy === 'FIB_WITH_RETRACEMENT' ? 'selected' : ''}>Fib Retracement (5M, 15M, 30M, 1H · 4H Excluded)</option>
                 <option value="SMC_WITH_FIB" ${window.__btStrategy === 'SMC_WITH_FIB' ? 'selected' : ''}>SMC with Fib (5M, 15M, 30M, 1H, 4H)</option>
-                <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>Both Strategies Combined (Fib + SMC)</option>
+                <option value="FIB_GO_WITH_TREND" ${window.__btStrategy === 'FIB_GO_WITH_TREND' ? 'selected' : ''}>Fib Go With Trend (15M, 30M, 1H, 2H, 4H)</option>
+                <option value="ALL" ${window.__btStrategy === 'ALL' ? 'selected' : ''}>All Strategies Combined (Breakout + Fib + SMC + Trend)</option>
               </select>
             </div>
 

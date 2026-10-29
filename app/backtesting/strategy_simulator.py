@@ -125,11 +125,14 @@ class StrategyBacktester:
             all_trades = await self._run_smc_fib(warmup_start, start_date, end_date, selected_tf=tf_key)
         elif strat_key == "FIB_WITH_RETRACEMENT":
             all_trades = await self._run_fib_retracement(warmup_start, start_date, end_date, selected_tf=tf_key)
+        elif strat_key in ("BREAKOUT_STRATEGY", "BREAKOUT"):
+            all_trades = await self._run_breakout(warmup_start, start_date, end_date, selected_tf=tf_key)
         elif strat_key in ("ALL", "ALL_COMBINED"):
             t_trend = await self._run_fib_trend(warmup_start, start_date, end_date, selected_tf=tf_key)
             t_smc = await self._run_smc_fib(warmup_start, start_date, end_date, selected_tf=tf_key)
             t_retr = await self._run_fib_retracement(warmup_start, start_date, end_date, selected_tf=tf_key)
-            all_trades = t_trend + t_smc + t_retr
+            t_breakout = await self._run_breakout(warmup_start, start_date, end_date, selected_tf=tf_key)
+            all_trades = t_trend + t_smc + t_retr + t_breakout
             all_trades.sort(key=lambda t: t.entry_time)
         else:
             raise ValueError(f"Unknown strategy: {strategy_name}")
@@ -651,6 +654,179 @@ class StrategyBacktester:
                             status="OPEN",
                             lot_size=trade_lot,
                         ))
+
+        return trades
+
+    # -------------------------------------------------------------------------
+    # Strategy 4: Breakout Strategy (5m, 15m, 30m, 1h)
+    # -------------------------------------------------------------------------
+    async def _run_breakout(
+        self,
+        warmup_start: datetime,
+        start_date: datetime,
+        end_date: datetime,
+        selected_tf: str = "all",
+    ) -> list[BacktestTradeRecord]:
+        allowed = ["5m", "15m", "30m", "1h"]
+        if selected_tf != "all":
+            if selected_tf not in allowed:
+                return []
+            timeframes = [selected_tf]
+        else:
+            timeframes = allowed
+
+        candle_results = await asyncio.gather(*[
+            fetch_historical_candles(self.symbol, tf, warmup_start, end_date)
+            for tf in timeframes
+        ])
+        tf_candles: dict[str, list[Candle]] = dict(zip(timeframes, candle_results))
+
+        timeline: list[tuple[datetime, str, Candle]] = []
+        for tf, clist in tf_candles.items():
+            for c in clist:
+                timeline.append((c.timestamp, tf, c))
+        timeline.sort(key=lambda x: x[0])
+
+        trades: list[BacktestTradeRecord] = []
+        active_trade: dict[str, Any] | None = None
+        history: dict[str, list[Candle]] = {tf: [] for tf in timeframes}
+
+        cfg_map = {
+            "5m":  {"lookback": 20, "atr": 3.5, "buffer": 0.60, "tp_mult": 2.5, "sl_mult": 1.5},
+            "15m": {"lookback": 25, "atr": 6.0, "buffer": 0.90, "tp_mult": 2.5, "sl_mult": 1.5},
+            "30m": {"lookback": 30, "atr": 9.0, "buffer": 1.20, "tp_mult": 2.6, "sl_mult": 1.5},
+            "1h":  {"lookback": 35, "atr": 15.0, "buffer": 1.80, "tp_mult": 2.8, "sl_mult": 1.5},
+        }
+
+        for ts, tf, candle in timeline:
+            h = history[tf]
+            h.append(candle)
+            cfg = cfg_map.get(tf, {"lookback": 20, "atr": 5.0, "buffer": 1.0, "tp_mult": 2.5, "sl_mult": 1.5})
+
+            if active_trade is not None:
+                is_long = active_trade["direction"] == "LONG"
+                sl = active_trade["sl_price"]
+                tp = active_trade["tp_price"]
+
+                closed = False
+                exit_reason = ""
+                exit_price = 0.0
+
+                if is_long:
+                    if candle.low <= sl:
+                        closed = True
+                        exit_reason = "SL_HIT"
+                        exit_price = sl
+                    elif candle.high >= tp:
+                        closed = True
+                        exit_reason = "TP_HIT"
+                        exit_price = tp
+                else:
+                    if candle.high >= sl:
+                        closed = True
+                        exit_reason = "SL_HIT"
+                        exit_price = sl
+                    elif candle.low <= tp:
+                        closed = True
+                        exit_reason = "TP_HIT"
+                        exit_price = tp
+
+                if closed:
+                    pts = round((exit_price - active_trade["entry_price"]) if is_long else (active_trade["entry_price"] - exit_price), 2)
+                    trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, active_trade["entry_price"], sl)
+                    trades.append(BacktestTradeRecord(
+                        trade_id=active_trade["id"],
+                        strategy="Breakout Strategy",
+                        timeframe=active_trade["timeframe"].upper(),
+                        direction=active_trade["direction"],
+                        zero_level=active_trade["zero_level"],
+                        entry_time=active_trade["entry_time"],
+                        entry_price=active_trade["entry_price"],
+                        sl_price=sl,
+                        tp_price=tp,
+                        exit_time=candle.timestamp.isoformat(),
+                        exit_price=exit_price,
+                        exit_reason=exit_reason,
+                        pnl_pts=pts,
+                        pnl_usd=pnl_usd,
+                        r_multiple=r_mult,
+                        status="WIN" if pnl_usd > 0 else "LOSS",
+                        lot_size=trade_lot,
+                    ))
+                    active_trade = None
+
+            lb = cfg["lookback"]
+            if active_trade is None and candle.timestamp >= start_date and len(h) >= lb + 5:
+                recent = h[-(lb + 1):-1]
+                highest = max(c.high for c in recent)
+                lowest = min(c.low for c in recent)
+
+                closes = [c.close for c in h[-50:]]
+                ema50 = sum(closes) / len(closes)
+
+                tr_list = [max(c.high - c.low, abs(c.high - h[i-1].close) if i > 0 else c.high - c.low) for i, c in enumerate(h[-14:])]
+                calc_atr = max(sum(tr_list) / len(tr_list), 1.0) if tr_list else cfg["atr"]
+
+                bullish_trigger = highest + cfg["buffer"]
+                bearish_trigger = lowest - cfg["buffer"]
+
+                is_bull_breakout = (candle.close >= bullish_trigger or candle.high >= bullish_trigger) and candle.close >= ema50
+                is_bear_breakout = (candle.close <= bearish_trigger or candle.low <= bearish_trigger) and candle.close <= ema50
+
+                if is_bull_breakout and not is_bear_breakout:
+                    entry_px = round(candle.close, 2)
+                    tp_px = round(entry_px + (calc_atr * cfg["tp_mult"]), 2)
+                    sl_px = round(entry_px - (calc_atr * cfg["sl_mult"]), 2)
+                    active_trade = {
+                        "id": f"BO_{tf.upper()}_{int(candle.timestamp.timestamp())}",
+                        "timeframe": tf,
+                        "direction": "LONG",
+                        "entry_time": candle.timestamp.isoformat(),
+                        "entry_price": entry_px,
+                        "sl_price": sl_px,
+                        "tp_price": tp_px,
+                        "zero_level": round(lowest, 2),
+                    }
+                elif is_bear_breakout and not is_bull_breakout:
+                    entry_px = round(candle.close, 2)
+                    tp_px = round(entry_px - (calc_atr * cfg["tp_mult"]), 2)
+                    sl_px = round(entry_px + (calc_atr * cfg["sl_mult"]), 2)
+                    active_trade = {
+                        "id": f"BO_{tf.upper()}_{int(candle.timestamp.timestamp())}",
+                        "timeframe": tf,
+                        "direction": "SHORT",
+                        "entry_time": candle.timestamp.isoformat(),
+                        "entry_price": entry_px,
+                        "sl_price": sl_px,
+                        "tp_price": tp_px,
+                        "zero_level": round(highest, 2),
+                    }
+
+        if active_trade is not None:
+            last_c = timeline[-1][2] if timeline else None
+            exit_px = last_c.close if last_c else active_trade["entry_price"]
+            is_long = active_trade["direction"] == "LONG"
+            pts = round((exit_px - active_trade["entry_price"]) if is_long else (active_trade["entry_price"] - exit_px), 2)
+            trade_lot, pnl_usd, r_mult = self._calculate_trade_pnl(pts, active_trade["entry_price"], active_trade["sl_price"])
+            trades.append(BacktestTradeRecord(
+                trade_id=active_trade["id"],
+                strategy="Breakout Strategy",
+                timeframe=active_trade["timeframe"].upper(),
+                direction=active_trade["direction"],
+                zero_level=active_trade["zero_level"],
+                entry_time=active_trade["entry_time"],
+                entry_price=active_trade["entry_price"],
+                sl_price=active_trade["sl_price"],
+                tp_price=active_trade["tp_price"],
+                exit_time=last_c.timestamp.isoformat() if last_c else active_trade["entry_time"],
+                exit_price=exit_px,
+                exit_reason="EXPIRED",
+                pnl_pts=pts,
+                pnl_usd=pnl_usd,
+                r_multiple=r_mult,
+                status="OPEN",
+                lot_size=trade_lot,
+            ))
 
         return trades
 

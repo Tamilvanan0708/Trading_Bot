@@ -42,6 +42,8 @@ def _extract_tf(t: PaperTradeModel) -> str:
 def _extract_strategy(t: PaperTradeModel) -> str:
     sig = (t.signal_id or "").upper()
     logs_str = str(t.state_logs or "").upper()
+    if "BREAKOUT" in sig or "BREAKOUT" in logs_str:
+        return "BREAKOUT_STRATEGY"
     if "FIB_TREND" in sig or "TREND" in sig or "TREND" in logs_str:
         return "FIB_GO_WITH_TREND"
     if "SMC_FIB" in sig or "SMC" in sig or "SMC" in logs_str:
@@ -56,8 +58,11 @@ def _normalize_bt_strategy(raw_strategy: str) -> str:
       - "Fib Retracement [L1]", "Fib Retracement [L2]" → FIB_WITH_RETRACEMENT
       - "Fib Go with Trend"                             → FIB_GO_WITH_TREND
       - "SMC With Fib", "SMC_WITH_FIB"                  → SMC_WITH_FIB
+      - "Breakout Strategy"                             → BREAKOUT_STRATEGY
     """
     s = raw_strategy.upper().strip()
+    if "BREAKOUT" in s:
+        return "BREAKOUT_STRATEGY"
     if "RETRACEM" in s or "FIB_RETR" in s:
         return "FIB_WITH_RETRACEMENT"
     if "TREND" in s:

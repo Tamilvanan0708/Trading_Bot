@@ -216,37 +216,47 @@ async def fetch_historical_candles(
 
     # 0. Primary: Fetch directly from MetaTrader 5 (MT5) if available on the system
     try:
-        from app.config.settings import get_settings
-        settings = get_settings()
-        if settings.MT5_ENABLED or settings.LIVE_FEED_PROVIDER == "mt5":
-            from app.data.mt5_provider import MT5MarketDataProvider
-            from app.core.constants import TimeFrame
-            tf_enum = TF_ENUM_MAP.get(tf_str, TimeFrame.M15)
-            mt5_symbol = getattr(settings, "MT5_SYMBOL", "") or symbol
-            mt5_p = MT5MarketDataProvider(
-                symbol=mt5_symbol,
-                login=settings.MT5_LOGIN,
-                server=settings.MT5_SERVER,
-                password=settings.MT5_PASSWORD,
-                magic=settings.MT5_MAGIC,
-                timezone_offset_minutes=settings.MT5_TZ_OFFSET_MINUTES,
-            )
-            if not mt5_p.is_connected:
-                await mt5_p.connect_async()
-            mt5_candles = await mt5_p.get_ohlcv(
-                symbol=mt5_symbol,
-                timeframe=tf_enum,
-                start_time=start_dt,
-                end_time=end_dt,
-            )
-            if mt5_candles and len(mt5_candles) > 0:
+        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+        from app.config.execution_settings import get_execution_settings
+        mt5_mgr = get_mt5_bridge_manager()
+        mt5 = mt5_mgr._ensure_native_mt5()
+        if mt5 is not None:
+            exec_cfg = get_execution_settings()
+            trade_sym = exec_cfg.mt5_symbol or "XAUUSD-VIP"
+            mt5_tf_map = {
+                "1m": mt5.TIMEFRAME_M1,
+                "5m": mt5.TIMEFRAME_M5,
+                "15m": mt5.TIMEFRAME_M15,
+                "30m": mt5.TIMEFRAME_M30,
+                "1h": mt5.TIMEFRAME_H1,
+                "2h": mt5.TIMEFRAME_H2,
+                "4h": mt5.TIMEFRAME_H4,
+                "1d": mt5.TIMEFRAME_D1,
+            }
+            tf_const = mt5_tf_map.get(tf_str, mt5.TIMEFRAME_M15)
+            mt5.symbol_select(trade_sym, True)
+            s_utc = start_dt.astimezone(timezone.utc).replace(tzinfo=None)
+            e_utc = end_dt.astimezone(timezone.utc).replace(tzinfo=None)
+            rates = mt5.copy_rates_range(trade_sym, tf_const, s_utc, e_utc)
+            if rates is not None and len(rates) > 0:
+                mt5_candles = [
+                    Candle(
+                        timestamp=datetime.fromtimestamp(int(r["time"]), tz=timezone.utc),
+                        open=float(r["open"]),
+                        high=float(r["high"]),
+                        low=float(r["low"]),
+                        close=float(r["close"]),
+                        volume=float(r["tick_volume"]),
+                    )
+                    for r in rates
+                ]
                 logger.info(
-                    "[DATA-LOADER] Successfully loaded %d %s candles directly from MT5 (%s to %s)",
+                    "[DATA-LOADER] Successfully loaded %d %s candles directly from live MT5 (%s to %s)",
                     len(mt5_candles), tf_str, start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
                 )
                 return filter_forex_trading_days(mt5_candles) if filter_forex else mt5_candles
     except Exception as mt5_err:  # noqa: BLE001
-        logger.debug("[DATA-LOADER] MT5 fetch unavailable or skipped: %s", mt5_err)
+        logger.debug("[DATA-LOADER] Live MT5 rates fetch skipped: %s", mt5_err)
 
     start_str = start_dt.strftime("%Y%m%d_%H%M")
     end_str = end_dt.strftime("%Y%m%d_%H%M")
@@ -344,7 +354,7 @@ async def fetch_historical_candles(
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         "Accept": "application/json",
     }
-    timeout = httpx.Timeout(20.0, connect=10.0)
+    timeout = httpx.Timeout(6.0, connect=3.0)
 
     logger.info(
         "[DATA-LOADER] Fetching %s %s candles from Binance API from %s to %s",
