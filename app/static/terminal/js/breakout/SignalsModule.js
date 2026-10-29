@@ -21,10 +21,10 @@ window.SignalsModule = (function () {
   let priceSubscribed = false;
 
   const TIMEFRAME_CONFIGS = [
-    { tf: "5m", label: "5m Scalp", atrFactor: 4.5, tpMult: 2.2, slMult: 1.2, lookback: 15, surgeThreshold: 1.35 },
-    { tf: "15m", label: "15m Fast", atrFactor: 8.5, tpMult: 2.4, slMult: 1.3, lookback: 20, surgeThreshold: 1.4 },
-    { tf: "30m", label: "30m Momentum", atrFactor: 14.0, tpMult: 2.6, slMult: 1.4, lookback: 20, surgeThreshold: 1.45 },
-    { tf: "1h", label: "1h Trend", atrFactor: 24.0, tpMult: 2.8, slMult: 1.4, lookback: 20, surgeThreshold: 1.5 }
+    { tf: "5m", label: "5m Scalp", atrFactor: 4.0, tpMult: 1.80, slMult: 1.15, lookback: 15, surgeThreshold: 1.30 },
+    { tf: "15m", label: "15m Fast", atrFactor: 6.5, tpMult: 2.00, slMult: 1.25, lookback: 20, surgeThreshold: 1.35 },
+    { tf: "30m", label: "30m Momentum", atrFactor: 9.5, tpMult: 2.20, slMult: 1.35, lookback: 20, surgeThreshold: 1.40 },
+    { tf: "1h", label: "1h Trend", atrFactor: 16.0, tpMult: 2.40, slMult: 1.45, lookback: 20, surgeThreshold: 1.45 }
   ];
 
   /**
@@ -186,12 +186,21 @@ window.SignalsModule = (function () {
         hasInitializedRealSignals = true;
         activeLiveTrade = merged.find(s => s.id === "SIG-LIVE-15M") || merged[0];
 
-        // 🚀 Multi-Timeframe Auto-Execution: If Auto-Trade is enabled and 0 open trades, execute the active breakout setup!
+        // 🚀 Multi-Timeframe High-Velocity Auto-Execution Engine:
+        // Analyzes all 4 timeframes (5m, 15m, 30m, 1h). Whenever a verified setup appears on ANY timeframe,
+        // if that timeframe does NOT have an active trade and portfolio has capacity (< 3 trades), execute it immediately!
         if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.getAccountSummary === "function") {
           const acct = window.BreakoutPaperTrading.getAccountSummary();
-          const openPositions = window.BreakoutPaperTrading.getOpenPositions();
-          if (acct.autoExecute && openPositions.length === 0 && activeLiveTrade) {
-            executePaperTradeFromSignal(activeLiveTrade.id);
+          if (acct.autoExecute) {
+            ["5m", "15m", "30m", "1h"].forEach(tf => {
+              const liveSignalForTf = detected.find(s => s.id === `SIG-LIVE-${tf.toUpperCase()}`);
+              if (liveSignalForTf) {
+                const canExec = window.BreakoutPaperTrading.canExecuteBreakoutTrade(liveSignalForTf, liveSignalForTf.entryPrice);
+                if (canExec.allowed) {
+                  executePaperTradeFromSignal(liveSignalForTf.id);
+                }
+              }
+            });
           }
         }
       }
@@ -777,6 +786,7 @@ window.SignalsModule = (function () {
                   let badgeClass = "badge-dim";
                   let label = r;
                   if (r === "TP_HIT") { badgeClass = "badge-green"; label = "🎯 TP HIT"; }
+                  else if (r === "PROFIT_LOCKED_HIT") { badgeClass = "badge-green"; label = "💰 PROFIT LOCKED"; }
                   else if (r === "SL_HIT") { badgeClass = "badge-red"; label = "🛑 SL HIT"; }
                   else if (r === "BE_HIT") { badgeClass = "badge-blue"; label = "🛡️ B/E HIT"; }
                   else if (r === "MANUAL_CLOSE" || r === "COCKPIT_CLOSE") { badgeClass = "badge-dim"; label = "🎯 MANUAL"; }
@@ -2068,6 +2078,29 @@ window.SignalsModule = (function () {
         renderPaperPositions(container);
         updateTbody(container);
       });
+    }
+
+    // 🚀 Continuous Multi-Timeframe Background Scanner (5m, 15m, 30m, 1h)
+    // Constantly evaluates all 4 timeframes in real time so that whenever an authentic breakout appears,
+    // it executes immediately!
+    if (!window.__breakoutMtfScanInterval) {
+      window.__breakoutMtfScanInterval = setInterval(() => {
+        if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.getAccountSummary === "function") {
+          const acct = window.BreakoutPaperTrading.getAccountSummary();
+          if (acct.autoExecute && !isScanning) {
+            hasInitializedRealSignals = false;
+            initializeRealSignals().then(() => {
+              const cont = document.querySelector(".breakout-signals-module");
+              if (cont) {
+                renderPaperPortfolioHUD(cont);
+                renderPaperPositions(cont);
+                renderCockpitHUD(cont);
+                updateTbody(cont);
+              }
+            });
+          }
+        }
+      }, 15000);
     }
 
     if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.subscribePortfolio === "function") {

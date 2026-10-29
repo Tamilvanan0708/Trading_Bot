@@ -356,17 +356,17 @@ window.BreakoutDataService = (function () {
    * =========================================================================
    */
   const MTF_CONFIGS = {
-    "5m":  { name: "5m Scalp",    lookback: 20, atr: 3.5,  buffer: 0.60, tpMult: 2.4, slMult: 1.5, resOffset: 2.20,  supOffset: 2.20 },
-    "15m": { name: "15m Fast",     lookback: 25, atr: 6.0,  buffer: 0.90, tpMult: 2.5, slMult: 1.5, resOffset: 4.50,  supOffset: 4.50 },
-    "30m": { name: "30m Momentum", lookback: 30, atr: 9.0,  buffer: 1.20, tpMult: 2.6, slMult: 1.5, resOffset: 7.50,  supOffset: 7.50 },
-    "1h":  { name: "1h Trend",     lookback: 35, atr: 15.0, buffer: 1.80, tpMult: 2.8, slMult: 1.5, resOffset: 12.00, supOffset: 12.00 }
+    "5m":  { name: "5m Scalp",    lookback: 15, atr: 3.5,  buffer: 0.35, tpMult: 1.80, slMult: 1.15, resOffset: 1.80,  supOffset: 1.80 },
+    "15m": { name: "15m Fast",     lookback: 20, atr: 6.0,  buffer: 0.50, tpMult: 2.00, slMult: 1.25, resOffset: 3.20,  supOffset: 3.20 },
+    "30m": { name: "30m Momentum", lookback: 25, atr: 9.0,  buffer: 0.75, tpMult: 2.20, slMult: 1.35, resOffset: 4.80,  supOffset: 4.80 },
+    "1h":  { name: "1h Trend",     lookback: 30, atr: 14.0, buffer: 1.00, tpMult: 2.40, slMult: 1.45, resOffset: 6.50,  supOffset: 6.50 }
   };
 
   const mtfStructures = {
     "5m":  { timeframe: "5m",  resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 3.5,  lastSignalTime: 0, status: "MONITORING" },
     "15m": { timeframe: "15m", resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 6.0,  lastSignalTime: 0, status: "MONITORING" },
     "30m": { timeframe: "30m", resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 9.0,  lastSignalTime: 0, status: "MONITORING" },
-    "1h":  { timeframe: "1h",  resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 15.0, lastSignalTime: 0, status: "MONITORING" }
+    "1h":  { timeframe: "1h",  resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 14.0, lastSignalTime: 0, status: "MONITORING" }
   };
 
   function updateMtfStructures(price) {
@@ -374,9 +374,8 @@ window.BreakoutDataService = (function () {
     Object.keys(MTF_CONFIGS).forEach(tf => {
       const cfg = MTF_CONFIGS[tf];
       const s = mtfStructures[tf];
-      // Anchor to genuine macro structural swing range (avoids artificial 2-point micro-floating)
-      if (!s.resistance || Math.abs(price - s.resistance) > (cfg.atr * 2.0) || Math.abs(price - s.support) > (cfg.atr * 2.0)) {
-        // If liveState has computed candle resistance/support, use that for 15m/5m anchor
+      // Dynamic structural swing calibration across 5m, 15m, 30m, 1h
+      if (!s.resistance || Math.abs(price - s.resistance) > (cfg.atr * 1.5) || Math.abs(price - s.support) > (cfg.atr * 1.5)) {
         const baseRes = (tf === "15m" && liveState.resistance) ? liveState.resistance : (price + cfg.resOffset);
         const baseSup = (tf === "15m" && liveState.support) ? liveState.support : (price - cfg.supOffset);
 
@@ -412,8 +411,8 @@ window.BreakoutDataService = (function () {
       const s = mtfStructures[tf];
       if (!s || !s.resistance || !s.support) return;
 
-      // 180s (3-minute) institutional cooldown per timeframe to prevent rapid whip-sawing in chop
-      if (now - (s.lastSignalTime || 0) < 180000) return;
+      // 90s (1.5-minute) responsive institutional cooldown per timeframe
+      if (now - (s.lastSignalTime || 0) < 90000) return;
 
       // 🛡️ Per-Timeframe Active Trade Guard:
       // If timeframe already holds an active trade, keep status locked to that trade to prevent opposing signals
@@ -1377,40 +1376,61 @@ window.BreakoutPaperTrading = (function () {
     for (let i = state.openPositions.length - 1; i >= 0; i--) {
       const pos = state.openPositions[i];
       const isBuy = pos.direction === "BUY";
+      const totalTarget = Math.abs(pos.takeProfit - pos.entryPrice);
+      const currentGain = isBuy ? (price - pos.entryPrice) : (pos.entryPrice - price);
 
-      // 🛡️ DYNAMIC INSTITUTIONAL BREAK-EVEN PROTECTION:
-      // When trade achieves 75% of distance to TP, lock in Break-Even!
-      // Guarantees winning moves NEVER turn into a -$500 loss while giving trade ample room to run.
-      if (!pos.isBreakEven) {
-        const totalTarget = Math.abs(pos.takeProfit - pos.entryPrice);
-        const currentGain = isBuy ? (price - pos.entryPrice) : (pos.entryPrice - price);
-        if (currentGain >= (totalTarget * 0.75)) {
-          if (!pos.initialStopLoss) pos.initialStopLoss = pos.stopLoss;
-          pos.stopLoss = pos.entryPrice;
-          pos.isBreakEven = true;
-          saveState(state);
-          notifyPortfolioChange();
-          if (window.UI && typeof window.UI.toast === "function") {
-            window.UI.toast(
-              "🛡️ Break-Even Trailed",
-              `${pos.ticket} (${pos.timeframe}) reached 75% profit target! SL trailed to entry ($${pos.entryPrice.toFixed(2)}). Trade is now 100% Risk-Free!`,
-              "success"
-            );
-          }
+      // 🛡️ TIER 1: ZERO-RISK BREAK-EVEN LOCK (At 38% TP distance or +1.0R gain)
+      // As soon as price achieves 38% of target, trail SL to Entry + $0.50 spread protection.
+      // Guarantees winning moves NEVER retrace into a -$500 loss!
+      if (!pos.isBreakEven && currentGain >= (totalTarget * 0.38)) {
+        if (!pos.initialStopLoss) pos.initialStopLoss = pos.stopLoss;
+        const bePrice = isBuy ? parseFloat((pos.entryPrice + 0.50).toFixed(2)) : parseFloat((pos.entryPrice - 0.50).toFixed(2));
+        pos.stopLoss = bePrice;
+        pos.isBreakEven = true;
+        saveState(state);
+        notifyPortfolioChange();
+        if (window.UI && typeof window.UI.toast === "function") {
+          window.UI.toast(
+            "🛡️ 100% Risk-Free Break-Even",
+            `${pos.ticket} (${pos.timeframe}) reached 38% target! SL locked at Entry + $0.50. Position is 100% Risk-Free!`,
+            "success"
+          );
         }
       }
 
+      // 💰 TIER 2: HIGH-PROFIT TRAILING LOCK (At 65% TP distance)
+      // Once price achieves 65% of target, trail SL to secure at least 35% of full profit!
+      // If the market retraces from 70%, the trade closes in guaranteed cash PROFIT (+35%), NOT a loss!
+      if (!pos.isProfitLocked && currentGain >= (totalTarget * 0.65)) {
+        const lockedProfitDist = totalTarget * 0.35;
+        const profitLockPrice = isBuy ? parseFloat((pos.entryPrice + lockedProfitDist).toFixed(2)) : parseFloat((pos.entryPrice - lockedProfitDist).toFixed(2));
+        pos.stopLoss = profitLockPrice;
+        pos.isProfitLocked = true;
+        saveState(state);
+        notifyPortfolioChange();
+        if (window.UI && typeof window.UI.toast === "function") {
+          window.UI.toast(
+            "💰 Profit Locked (+35%)",
+            `${pos.ticket} (${pos.timeframe}) reached 65% target! SL trailed to lock in +$${(lockedProfitDist * pos.lots * 100).toFixed(2)} guaranteed cash profit!`,
+            "success"
+          );
+        }
+      }
+
+      // 🎯 EXIT RESOLUTION: Check TP or SL hits
       if (isBuy) {
         if (price >= pos.takeProfit) {
           closePaperTrade(pos.ticket, pos.takeProfit, "TP_HIT");
         } else if (price <= pos.stopLoss) {
-          closePaperTrade(pos.ticket, pos.stopLoss, pos.isBreakEven ? "BE_HIT" : "SL_HIT");
+          const reason = pos.isProfitLocked ? "PROFIT_LOCKED_HIT" : (pos.isBreakEven ? "BE_HIT" : "SL_HIT");
+          closePaperTrade(pos.ticket, pos.stopLoss, reason);
         }
       } else {
         if (price <= pos.takeProfit) {
           closePaperTrade(pos.ticket, pos.takeProfit, "TP_HIT");
         } else if (price >= pos.stopLoss) {
-          closePaperTrade(pos.ticket, pos.stopLoss, pos.isBreakEven ? "BE_HIT" : "SL_HIT");
+          const reason = pos.isProfitLocked ? "PROFIT_LOCKED_HIT" : (pos.isBreakEven ? "BE_HIT" : "SL_HIT");
+          closePaperTrade(pos.ticket, pos.stopLoss, reason);
         }
       }
     }
