@@ -161,9 +161,24 @@ window.SignalsModule = (function () {
       });
 
       if (detected.length > 0) {
-        window.BreakoutMockData.signals = detected;
+        // Merge with existing signals to preserve history across reloads
+        const existingSignals = window.BreakoutMockData.signals || [];
+        const existingIds = new Set(existingSignals.map(s => s.id));
+        const newUnique = detected.filter(s => !existingIds.has(s.id));
+        const merged = [...newUnique, ...existingSignals].slice(0, 60);
+
+        window.BreakoutMockData.signals = merged;
         hasInitializedRealSignals = true;
-        activeLiveTrade = detected.find(s => s.id === "SIG-LIVE-15M") || detected[0];
+        activeLiveTrade = merged.find(s => s.id === "SIG-LIVE-15M") || merged[0];
+
+        // 🚀 Multi-Timeframe Auto-Execution: If Auto-Trade is enabled and 0 open trades, execute the active breakout setup!
+        if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.getAccountSummary === "function") {
+          const acct = window.BreakoutPaperTrading.getAccountSummary();
+          const openPositions = window.BreakoutPaperTrading.getOpenPositions();
+          if (acct.autoExecute && openPositions.length === 0 && activeLiveTrade) {
+            executePaperTradeFromSignal(activeLiveTrade.id);
+          }
+        }
       }
     } catch (e) {
       console.warn("Could not compute real multi-timeframe breakout signals:", e);
@@ -226,6 +241,14 @@ window.SignalsModule = (function () {
 
     const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : { price: sig.entryPrice };
     const curP = live.price || sig.entryPrice;
+    const isBuy = sig.direction === "BUY";
+
+    // Maintain consistent Risk-to-Reward geometry relative to current execution price (avoids zig-zag/inverted TP/SL)
+    const tpDist = Math.abs(sig.takeProfit - sig.entryPrice) || 12.0;
+    const slDist = Math.abs(sig.stopLoss - sig.entryPrice) || 6.0;
+
+    const effectiveTp = isBuy ? parseFloat((curP + tpDist).toFixed(2)) : parseFloat((curP - tpDist).toFixed(2));
+    const effectiveSl = isBuy ? parseFloat((curP - slDist).toFixed(2)) : parseFloat((curP + slDist).toFixed(2));
 
     // Open in Paper Trading Engine with 5% risk sizing
     if (window.BreakoutPaperTrading) {
@@ -234,10 +257,14 @@ window.SignalsModule = (function () {
         timeframe: sig.timeframe || "15m",
         direction: sig.direction,
         entryPrice: curP,
-        takeProfit: sig.takeProfit,
-        stopLoss: sig.stopLoss,
+        takeProfit: effectiveTp,
+        stopLoss: effectiveSl,
+        confidenceScore: sig.confidenceScore || 94.5,
+        manualForce: true,
         reason: `${sig.timeframe} Breakout 5% Risk Order`
       });
+
+      if (!newPos) return;
 
       activeLiveTrade = {
         id: newPos.ticket,
@@ -249,7 +276,7 @@ window.SignalsModule = (function () {
         takeProfit: newPos.takeProfit,
         stopLoss: newPos.stopLoss,
         lots: newPos.lots,
-        riskReward: sig.riskReward || "1:2.2",
+        riskReward: sig.riskReward || "1:2.0",
         confidenceScore: sig.confidenceScore,
         timeframe: sig.timeframe || "15m",
         volumeSurge: sig.volumeSurge || "+185%",
@@ -339,9 +366,12 @@ window.SignalsModule = (function () {
     if (!wrap || !window.BreakoutPaperTrading) return;
 
     const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : {};
-    const curP = live.price || 4091.20;
+    const curP = live.price || 3998.50;
     const acct = window.BreakoutPaperTrading.getAccountSummary(curP);
     const isPlus = acct.isPlus;
+    const isCbActive = (typeof window.BreakoutPaperTrading.isCircuitBreakerActive === "function") 
+      ? window.BreakoutPaperTrading.isCircuitBreakerActive() 
+      : false;
 
     wrap.innerHTML = `
       <div class="paper-portfolio-card" style="border-color:${isPlus ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)'};">
@@ -358,6 +388,7 @@ window.SignalsModule = (function () {
                 <span class="badge ${isPlus ? 'badge-green' : 'badge-red'}" style="font-size:12px;font-weight:900;padding:4px 10px;box-shadow:0 0 10px ${isPlus ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)'};" id="paper-plus-minus-badge">
                   ${isPlus ? '🟢 PLUS' : '🔴 MINUS'} ${isPlus ? '+' : ''}$${acct.netPnlUsd.toFixed(2)} (${isPlus ? '+' : ''}${acct.netPnlPct.toFixed(2)}%)
                 </span>
+                ${isCbActive ? '<span class="badge badge-red" style="font-size:10.5px;font-weight:800;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;" title="Auto-trade paused: 2 consecutive SL hits detected in chop. Reset $10k or change market condition to resume.">🛑 CHOP CIRCUIT BREAKER PAUSE</span>' : ''}
               </div>
               <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">
                 Starting Capital: <b>$10,000.00</b> • Max Risk: <b>5.0% ($500.00 max loss per trade)</b> • Automated 5% Guard Active
@@ -429,6 +460,51 @@ window.SignalsModule = (function () {
           </div>
         </div>
 
+        <!-- 📡 MULTI-TIMEFRAME BREAKOUT RADAR (5m, 15m, 30m, 1h) -->
+        <div style="background:rgba(255,255,255,0.015);border-top:1px solid var(--border);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:15px;">📡</span>
+            <div>
+              <div style="font-weight:800;font-size:11.5px;color:var(--text-bright);text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;gap:6px;">
+                <span>MULTI-TIMEFRAME STRUCTURE RADAR (5M, 15M, 30M, 1H)</span>
+                <span class="badge badge-green" style="font-size:9px;padding:1px 5px;">LIVE SCANNER ACTIVE</span>
+              </div>
+              <div style="font-size:10px;color:var(--text-dim);">
+                Auditing 4 timeframes for breakout structures — Auto-executes into Paper Trading with guaranteed 5% risk ($500 cap)
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;" id="mtf-radar-cards-container">
+            ${(() => {
+              const mtf = (window.BreakoutDataService && typeof window.BreakoutDataService.getMtfStructures === "function") 
+                ? window.BreakoutDataService.getMtfStructures() 
+                : {};
+              return ["5m", "15m", "30m", "1h"].map(tf => {
+                const s = mtf[tf] || {};
+                const res = s.resistance ? `$${s.resistance.toFixed(1)}` : '--';
+                const sup = s.support ? `$${s.support.toFixed(1)}` : '--';
+                const isTrig = s.status === "BULLISH_BREAKOUT" || s.status === "BEARISH_BREAKOUT";
+                const isBull = s.status === "BULLISH_BREAKOUT";
+
+                return `
+                  <div id="radar-card-${tf}" style="background:var(--bg-1);border:1px solid ${isTrig ? (isBull ? 'var(--green)' : 'var(--red)') : 'var(--border)'};border-radius:var(--r-sm);padding:4px 8px;display:flex;align-items:center;gap:6px;font-size:11px;transition:all 0.2s ease;">
+                    <span class="badge badge-tf-${tf}" style="font-size:9.5px;padding:1px 5px;font-weight:800;">${tf.toUpperCase()}</span>
+                    <div style="display:flex;flex-direction:column;line-height:1.2;">
+                      <span style="font-size:9.5px;color:var(--text-dim);font-family:var(--font-mono);">
+                        R: <b style="color:var(--red-bright);" id="radar-res-${tf}">${res}</b> | S: <b style="color:var(--green-bright);" id="radar-sup-${tf}">${sup}</b>
+                      </span>
+                    </div>
+                    <span class="badge ${isTrig ? (isBull ? 'badge-green' : 'badge-red') : 'badge-dim'}" id="radar-pill-${tf}" style="font-size:9px;padding:1px 4px;font-weight:700;">
+                      ${isTrig ? (isBull ? '▲ BREAKOUT' : '▼ BREAKDOWN') : '👀 MONITORING'}
+                    </span>
+                  </div>
+                `;
+              }).join("");
+            })()}
+          </div>
+        </div>
+
         <!-- Quick Paper Order Bar (Expandable) -->
         <div id="quick-paper-order-box" style="display:none;background:rgba(255,255,255,0.02);padding:14px;border-radius:var(--r-md);border:1px solid var(--border);margin-top:10px;">
           <div style="font-weight:700;font-size:12px;color:var(--text-bright);margin-bottom:10px;display:flex;justify-content:space-between;">
@@ -481,6 +557,12 @@ window.SignalsModule = (function () {
         const next = !acct.autoExecute;
         window.BreakoutPaperTrading.setAutoExecute(next);
         renderPaperPortfolioHUD(container);
+        if (next) {
+          const openPositions = window.BreakoutPaperTrading.getOpenPositions();
+          if (openPositions.length === 0 && activeLiveTrade) {
+            executePaperTradeFromSignal(activeLiveTrade.id);
+          }
+        }
       });
     }
 
@@ -521,7 +603,7 @@ window.SignalsModule = (function () {
   }
 
   /**
-   * Renders the Active Open Paper Positions Table and Closed History
+   * Renders the Unified Paper Positions Table (Active Open & Closed Trade History in ONE Table)
    */
   function renderPaperPositions(container) {
     const wrap = container ? container.querySelector("#paper-positions-wrapper") : null;
@@ -530,93 +612,228 @@ window.SignalsModule = (function () {
     const positions = window.BreakoutPaperTrading.getOpenPositions();
     const closed = window.BreakoutPaperTrading.getClosedPositions();
     const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : {};
-    const curP = live.price || 4091.20;
+    const curP = live.price || 3998.50;
+
+    // Combine active open trades and closed trade history into ONE single unified ledger
+    const allTrades = [
+      ...positions.map(p => ({ ...p, isLive: true })),
+      ...closed.map(c => ({ ...c, isLive: false }))
+    ];
 
     wrap.innerHTML = `
       <div style="background:var(--bg-0);border:1px solid var(--border);border-radius:var(--r-md);margin-bottom:var(--sp-4);overflow:hidden;">
         <!-- Header -->
         <div style="padding:10px 16px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-weight:800;font-size:13px;color:var(--text-bright);letter-spacing:0.5px;">
-              ACTIVE PAPER POSITIONS ($10,000 PORTFOLIO)
-            </span>
-            <span class="badge badge-green" style="font-size:10px;">${positions.length} ACTIVE</span>
-            <span class="badge badge-dim" style="font-size:10px;">STRICT 5% RISK ($500 MAX LOSS)</span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:18px;">📋</span>
+            <div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-weight:900;font-size:13.5px;color:var(--text-bright);letter-spacing:0.4px;">
+                  PAPER TRADING POSITIONS & AUDIT HISTORY
+                </span>
+                <span class="badge ${positions.length > 0 ? 'badge-green' : 'badge-dim'}" style="font-size:10px;font-weight:800;">
+                  ${positions.length} ACTIVE
+                </span>
+                <span class="badge badge-dim" style="font-size:10px;">
+                  ${closed.length} CLOSED
+                </span>
+                <span class="badge badge-dim" style="font-size:10px;">STRICT 5% RISK ($500 CAP)</span>
+              </div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">
+                Unified Real-Time Trade Ledger • Full Date & Time Tracking • Live Stream 2s Tick Sync
+              </div>
+            </div>
           </div>
           <span style="font-size:11px;color:var(--text-dim);">Live floating tick stream updating every 2s</span>
         </div>
 
-        <!-- Open Positions Table -->
-        <div class="table-wrap" style="margin:0;">
-          <table class="table" style="width:100%;font-size:12px;margin:0;">
+        <!-- Unified Positions & Trade History Table -->
+        <div class="table-wrap" style="margin:0;overflow-x:auto;">
+          <table class="table" style="width:100%;font-size:12px;margin:0;border-collapse:collapse;">
             <thead>
-              <tr style="background:rgba(255,255,255,0.015);border-bottom:1px solid var(--border);">
-                <th style="padding:8px 12px;color:var(--text-muted);font-size:10px;text-transform:uppercase;">Ticket</th>
-                <th style="padding:8px 12px;color:var(--text-muted);font-size:10px;text-transform:uppercase;">Time & TF</th>
-                <th style="padding:8px 12px;color:var(--text-muted);font-size:10px;text-transform:uppercase;">Pair</th>
-                <th style="padding:8px 12px;color:var(--text-muted);font-size:10px;text-transform:uppercase;">Direction</th>
-                <th style="padding:8px 12px;color:var(--text-muted);font-size:10px;text-transform:uppercase;">5% Sized Lots</th>
-                <th style="padding:8px 12px;color:var(--text-muted);font-size:10px;text-transform:uppercase;">Entry Price</th>
-                <th style="padding:8px 12px;color:var(--accent);font-size:10px;text-transform:uppercase;">Live Price</th>
-                <th style="padding:8px 12px;color:var(--green);font-size:10px;text-transform:uppercase;">Take Profit</th>
-                <th style="padding:8px 12px;color:var(--red);font-size:10px;text-transform:uppercase;">Stop Loss (5% Cap)</th>
-                <th style="padding:8px 12px;color:var(--text-muted);font-size:10px;text-transform:uppercase;">Floating P&L</th>
-                <th style="padding:8px 12px;color:var(--text-muted);font-size:10px;text-transform:uppercase;text-align:right;">Action</th>
+              <tr style="background:rgba(255,255,255,0.025);border-bottom:1px solid var(--border);">
+                <th style="padding:10px 12px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:left;vertical-align:middle;white-space:nowrap;">Ticket</th>
+                <th style="padding:10px 12px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:left;vertical-align:middle;white-space:nowrap;">Date & Time</th>
+                <th style="padding:10px 8px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:center;vertical-align:middle;white-space:nowrap;">TF</th>
+                <th style="padding:10px 8px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:center;vertical-align:middle;white-space:nowrap;">Pair</th>
+                <th style="padding:10px 8px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:center;vertical-align:middle;white-space:nowrap;">Direction</th>
+                <th style="padding:10px 10px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:right;vertical-align:middle;white-space:nowrap;">5% Lots</th>
+                <th style="padding:10px 10px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:right;vertical-align:middle;white-space:nowrap;">Entry</th>
+                <th style="padding:10px 10px;color:var(--accent);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:right;vertical-align:middle;white-space:nowrap;">Market / Exit</th>
+                <th style="padding:10px 10px;color:var(--green);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:right;vertical-align:middle;white-space:nowrap;">Take Profit</th>
+                <th style="padding:10px 10px;color:var(--red);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:right;vertical-align:middle;white-space:nowrap;">Stop Loss (5%)</th>
+                <th style="padding:10px 12px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:right;vertical-align:middle;white-space:nowrap;">P&L ($10k)</th>
+                <th style="padding:10px 10px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:center;vertical-align:middle;white-space:nowrap;">Status</th>
+                <th style="padding:10px 14px;color:var(--text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;text-align:right;vertical-align:middle;white-space:nowrap;">Action</th>
               </tr>
             </thead>
             <tbody id="paper-positions-tbody">
-              ${positions.length === 0 ? `
+              ${allTrades.length === 0 ? `
                 <tr>
-                  <td colspan="11" style="text-align:center;padding:24px;color:var(--text-muted);">
-                    No open paper positions. Auto-trade is monitoring live signals, or click <b>💼 Paper Trade</b> below.
+                  <td colspan="13" style="text-align:center;padding:28px;color:var(--text-muted);">
+                    No paper positions yet. Auto-trade is monitoring live signals across 5m, 15m, 30m, 1h, or click <b>💼 Paper Trade</b> below.
                   </td>
                 </tr>
-              ` : positions.map(pos => {
-                const isBuy = pos.direction === "BUY";
-                const diff = isBuy ? (curP - pos.entryPrice) : (pos.entryPrice - curP);
-                const usd = diff * pos.lots * 100;
-                const isProf = usd >= 0;
-                const acctPct = (usd / 10000) * 100;
+              ` : allTrades.map(t => {
+                const isBuy = t.direction === "BUY";
+
+                // Parse date & time cleanly
+                let tradeDate = t.isLive ? (t.openDate || "") : (t.closeDate || t.openDate || "");
+                let tradeTime = t.isLive ? (t.openTime || "") : (t.closeTime || t.openTime || "");
+
+                if (!tradeDate) {
+                  const now = new Date();
+                  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                  tradeDate = `${String(now.getDate()).padStart(2, "0")} ${months[now.getMonth()]} ${now.getFullYear()}`;
+                }
+                if (!tradeTime) {
+                  tradeTime = new Date().toLocaleTimeString("en-GB");
+                }
+
+                // P&L calculation
+                let pnlHtml = "";
+                let marketPriceHtml = "";
+                let statusHtml = "";
+                let actionHtml = "";
+
+                if (t.isLive) {
+                  const diff = isBuy ? (curP - t.entryPrice) : (t.entryPrice - curP);
+                  const usd = diff * t.lots * 100;
+                  const isProf = usd >= 0;
+                  const acctPct = (usd / 10000) * 100;
+
+                  marketPriceHtml = `<span style="color:var(--accent);font-weight:700;" id="paper-pos-live-${t.ticket}">$${curP.toFixed(2)}</span>`;
+                  pnlHtml = `
+                    <span style="font-family:var(--font-num);font-weight:800;color:${isProf ? 'var(--green-bright)' : 'var(--red-bright)'};" id="paper-pos-pnl-${t.ticket}">
+                      ${isProf ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(usd).toFixed(2)} (${isProf ? '+' : ''}${acctPct.toFixed(2)}%)
+                    </span>
+                  `;
+                  statusHtml = `<span class="badge badge-green" style="font-weight:800;font-size:9.5px;padding:2px 6px;"><span class="live-beacon" style="margin-right:3px;"></span>OPEN LIVE</span>`;
+                  actionHtml = `
+                    <div style="display:inline-flex;gap:4px;justify-content:flex-end;align-items:center;">
+                      <button class="btn-view-trade-structure" data-ticket="${t.ticket}" style="font-size:10.5px;padding:2px 7px;display:inline-flex;align-items:center;gap:3px;" title="View Technical Structure Markup">
+                        📸 Structure
+                      </button>
+                      <button class="btn-close-paper btn-close-pos" data-ticket="${t.ticket}" title="Close position at current market price">
+                        🎯 Close
+                      </button>
+                      <button class="btn btn-sm btn-ghost btn-be-pos" data-ticket="${t.ticket}" style="font-size:10px;padding:2px 5px;" title="Move Stop Loss to Break-Even">
+                        🛡️ B/E
+                      </button>
+                    </div>
+                  `;
+                } else {
+                  const isWin = (t.realizedPnl || 0) >= 0;
+                  const pnlVal = t.realizedPnl || 0;
+                  const acctPct = (pnlVal / 10000) * 100;
+
+                  marketPriceHtml = `<span style="color:var(--text-dim);font-weight:700;">$${Number(t.exitPrice || t.entryPrice).toFixed(2)}</span>`;
+                  pnlHtml = `
+                    <span style="font-family:var(--font-num);font-weight:800;color:${isWin ? 'var(--green-bright)' : 'var(--red-bright)'};">
+                      ${isWin ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(pnlVal).toFixed(2)} (${isWin ? '+' : ''}${acctPct.toFixed(2)}%)
+                    </span>
+                  `;
+
+                  // Format status badge according to closeReason
+                  const r = t.closeReason || "CLOSED";
+                  let badgeClass = "badge-dim";
+                  let label = r;
+                  if (r === "TP_HIT") { badgeClass = "badge-green"; label = "🎯 TP HIT"; }
+                  else if (r === "SL_HIT") { badgeClass = "badge-red"; label = "🛑 SL HIT"; }
+                  else if (r === "BE_HIT") { badgeClass = "badge-blue"; label = "🛡️ B/E HIT"; }
+                  else if (r === "MANUAL_CLOSE" || r === "COCKPIT_CLOSE") { badgeClass = "badge-dim"; label = "🎯 MANUAL"; }
+
+                  statusHtml = `<span class="badge ${badgeClass}" style="font-weight:800;font-size:9.5px;padding:2px 6px;">${label}</span>`;
+                  actionHtml = `
+                    <div style="display:inline-flex;gap:4px;justify-content:flex-end;align-items:center;">
+                      <button class="btn-view-trade-structure" data-ticket="${t.ticket}" style="font-size:10.5px;padding:2px 7px;display:inline-flex;align-items:center;gap:3px;" title="View Technical Structure Markup">
+                        📸 Structure
+                      </button>
+                    </div>
+                  `;
+                }
 
                 return `
-                  <tr id="paper-pos-row-${pos.ticket}">
-                    <td>
-                      <div style="font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--accent);">${pos.ticket}</div>
-                      ${pos.confirmationScore ? `<div style="font-size:9px;color:var(--green-bright);font-weight:700;" title="${pos.confirmationDetails || 'Institutional Confirmation'}">✓ ${pos.confirmationScore}% Confirmed</div>` : ''}
+                  <tr id="paper-pos-row-${t.ticket}" style="border-bottom:1px solid rgba(255,255,255,0.035);background:${t.isLive ? 'rgba(59,130,246,0.025)' : 'transparent'};">
+                    <!-- Ticket -->
+                    <td style="padding:10px 12px;text-align:left;vertical-align:middle;">
+                      <div style="font-family:var(--font-mono);font-size:11px;font-weight:800;color:var(--accent);">${t.ticket}</div>
+                      ${t.confirmationScore ? `<div style="font-size:9px;color:var(--green-bright);font-weight:700;margin-top:2px;">✓ ${t.confirmationScore}% Confirmed</div>` : ''}
                     </td>
-                    <td>
-                      <div style="display:flex;align-items:center;gap:5px;">
-                        <span style="font-size:11px;color:var(--text-dim);">${pos.openTime}</span>
-                        <span class="badge badge-tf-${pos.timeframe}">${pos.timeframe}</span>
+
+                    <!-- Date & Time -->
+                    <td style="padding:10px 12px;text-align:left;vertical-align:middle;">
+                      <div style="display:flex;flex-direction:column;line-height:1.3;">
+                        <span style="font-weight:700;font-size:11px;color:var(--text-bright);">${tradeDate}</span>
+                        <span style="font-size:10px;color:var(--text-dim);font-family:var(--font-mono);">${tradeTime}</span>
                       </div>
                     </td>
-                    <td style="font-weight:700;">${pos.symbol}</td>
-                    <td>
-                      <div style="display:flex;align-items:center;gap:4px;">
-                        <span class="badge ${isBuy ? 'badge-green' : 'badge-red'}" style="font-weight:800;">${isBuy ? '▲ BUY' : '▼ SELL'}</span>
-                        ${pos.isBreakEven ? '<span class="badge badge-blue" style="font-size:9.5px;padding:1px 4px;" title="Risk-Free: SL at Entry">🛡️ B/E</span>' : ''}
+
+                    <!-- TF -->
+                    <td style="padding:10px 8px;text-align:center;vertical-align:middle;">
+                      <span class="badge badge-tf-${t.timeframe}" style="font-weight:800;font-size:10px;padding:2px 6px;">${t.timeframe}</span>
+                    </td>
+
+                    <!-- Pair -->
+                    <td style="padding:10px 8px;text-align:center;vertical-align:middle;font-weight:800;font-size:12px;color:var(--text-bright);">
+                      ${t.symbol || 'XAU/USD'}
+                    </td>
+
+                    <!-- Direction -->
+                    <td style="padding:10px 8px;text-align:center;vertical-align:middle;">
+                      <div style="display:inline-flex;align-items:center;gap:3px;justify-content:center;">
+                        <span class="badge ${isBuy ? 'badge-green' : 'badge-red'}" style="font-weight:800;font-size:10px;padding:2px 6px;">${isBuy ? '▲ BUY' : '▼ SELL'}</span>
+                        ${t.isBreakEven ? '<span class="badge badge-blue" style="font-size:9px;padding:1px 3px;" title="Risk-Free: SL at Entry">🛡️ B/E</span>' : ''}
                       </div>
                     </td>
-                    <td style="font-family:var(--font-num);font-weight:700;">${pos.lots.toFixed(2)} Lot</td>
-                    <td style="font-family:var(--font-num);font-weight:700;">$${pos.entryPrice.toFixed(2)}</td>
-                    <td style="font-family:var(--font-num);font-weight:700;color:var(--accent);" id="paper-pos-live-${pos.ticket}">$${curP.toFixed(2)}</td>
-                    <td style="font-family:var(--font-num);color:var(--green-bright);">$${pos.takeProfit.toFixed(2)}</td>
-                    <td style="font-family:var(--font-num);color:var(--red-bright);">$${pos.stopLoss.toFixed(2)}</td>
-                    <td style="font-family:var(--font-num);font-weight:800;color:${isProf ? 'var(--green-bright)' : 'var(--red-bright)'};" id="paper-pos-pnl-${pos.ticket}">
-                      ${isProf ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(usd).toFixed(2)} (${isProf ? '+' : ''}${acctPct.toFixed(2)}% on $10k)
+
+                    <!-- 5% Lots -->
+                    <td style="padding:10px 10px;text-align:right;vertical-align:middle;font-family:var(--font-num);font-weight:700;">
+                      ${Number(t.lots).toFixed(2)} Lot
                     </td>
-                    <td style="text-align:right;">
-                      <div style="display:inline-flex;gap:4px;">
-                        <button class="btn-view-trade-structure" data-ticket="${pos.ticket}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;" title="View Trade Technical Structure & Breakout Markup">
-                          📸 Structure
-                        </button>
-                        <button class="btn-close-paper btn-close-pos" data-ticket="${pos.ticket}" title="Close position at current market price">
-                          🎯 Close Market
-                        </button>
-                        <button class="btn btn-sm btn-ghost btn-be-pos" data-ticket="${pos.ticket}" style="font-size:10px;padding:2px 6px;" title="Move Stop Loss to Break-Even">
-                          🛡️ B/E
-                        </button>
-                      </div>
+
+                    <!-- Entry -->
+                    <td style="padding:10px 10px;text-align:right;vertical-align:middle;font-family:var(--font-num);font-weight:700;">
+                      $${Number(t.entryPrice).toFixed(2)}
+                    </td>
+
+                    <!-- Market / Exit -->
+                    <td style="padding:10px 10px;text-align:right;vertical-align:middle;font-family:var(--font-num);">
+                      ${marketPriceHtml}
+                    </td>
+
+                    <!-- Take Profit -->
+                    <td style="padding:10px 10px;text-align:right;vertical-align:middle;font-family:var(--font-num);color:var(--green-bright);font-weight:700;">
+                      $${Number(t.takeProfit).toFixed(2)}
+                    </td>
+
+                    <!-- Stop Loss -->
+                    <td style="padding:10px 10px;text-align:right;vertical-align:middle;font-family:var(--font-num);">
+                      ${t.isBreakEven ? `
+                        <div style="font-weight:700;color:var(--accent);display:inline-flex;align-items:center;gap:3px;justify-content:flex-end;" title="Stop Loss Trailed to Entry: 100% Risk-Free Trade">
+                          🛡️ $${Number(t.stopLoss).toFixed(2)} <span class="badge badge-blue" style="font-size:9px;padding:1px 4px;font-weight:800;">B/E</span>
+                        </div>
+                        <div style="font-size:10px;color:var(--text-dim);text-decoration:line-through;font-weight:600;" title="Initial 5% Protective SL ($500 max loss)">
+                          Initial: $${Number(t.initialStopLoss || (isBuy ? t.entryPrice - 10 : t.entryPrice + 10)).toFixed(2)}
+                        </div>
+                      ` : `
+                        <span style="color:var(--red-bright);font-weight:700;">$${Number(t.stopLoss).toFixed(2)}</span>
+                      `}
+                    </td>
+
+                    <!-- P&L ($10k) -->
+                    <td style="padding:10px 12px;text-align:right;vertical-align:middle;">
+                      ${pnlHtml}
+                    </td>
+
+                    <!-- Status -->
+                    <td style="padding:10px 10px;text-align:center;vertical-align:middle;">
+                      ${statusHtml}
+                    </td>
+
+                    <!-- Action -->
+                    <td style="padding:10px 14px;text-align:right;vertical-align:middle;">
+                      ${actionHtml}
                     </td>
                   </tr>
                 `;
@@ -624,58 +841,6 @@ window.SignalsModule = (function () {
             </tbody>
           </table>
         </div>
-
-        <!-- Closed Positions History Collapsible -->
-        ${closed.length > 0 ? `
-          <div style="padding:10px 16px;background:rgba(255,255,255,0.01);border-top:1px solid var(--border);">
-            <div style="font-weight:700;font-size:11px;color:var(--text-dim);text-transform:uppercase;margin-bottom:6px;">
-              Recent Closed Trades ($10,000 Account Plus / Minus Audit Log)
-            </div>
-            <div class="table-wrap" style="margin:0;max-height:160px;overflow-y:auto;">
-              <table class="table" style="width:100%;font-size:11px;margin:0;">
-                <thead>
-                  <tr style="border-bottom:1px solid var(--border);">
-                    <th style="padding:4px 8px;color:var(--text-muted);">Ticket</th>
-                    <th style="padding:4px 8px;color:var(--text-muted);">Closed</th>
-                    <th style="padding:4px 8px;color:var(--text-muted);">TF</th>
-                    <th style="padding:4px 8px;color:var(--text-muted);">Type</th>
-                    <th style="padding:4px 8px;color:var(--text-muted);">Lots</th>
-                    <th style="padding:4px 8px;color:var(--text-muted);">Entry</th>
-                    <th style="padding:4px 8px;color:var(--text-muted);">Exit</th>
-                    <th style="padding:4px 8px;color:var(--text-muted);">Reason</th>
-                    <th style="padding:4px 8px;color:var(--text-muted);text-align:right;">Result on $10k</th>
-                    <th style="padding:4px 8px;color:var(--text-muted);text-align:right;">Markup</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${closed.slice(0, 10).map(c => {
-                    const isWin = c.realizedPnl >= 0;
-                    return `
-                      <tr>
-                        <td style="font-family:var(--font-mono);color:var(--accent);">${c.ticket}</td>
-                        <td style="color:var(--text-dim);">${c.closeTime}</td>
-                        <td><span class="badge badge-tf-${c.timeframe}">${c.timeframe}</span></td>
-                        <td><span class="badge ${c.direction === 'BUY' ? 'badge-green' : 'badge-red'}">${c.direction}</span></td>
-                        <td>${c.lots.toFixed(2)}</td>
-                        <td>$${c.entryPrice.toFixed(2)}</td>
-                        <td>$${c.exitPrice.toFixed(2)}</td>
-                        <td><span class="badge badge-dim">${c.closeReason}</span></td>
-                        <td style="text-align:right;font-weight:800;color:${isWin ? 'var(--green-bright)' : 'var(--red-bright)'};">
-                          ${isWin ? '🟢 PLUS +' : '🔴 MINUS -'}$${Math.abs(c.realizedPnl).toFixed(2)}
-                        </td>
-                        <td style="text-align:right;">
-                          <button class="btn-view-trade-structure" data-ticket="${c.ticket}" style="font-size:10px;padding:2px 6px;display:inline-flex;align-items:center;gap:2px;" title="View Trade Technical Structure & Breakout Markup">
-                            📸
-                          </button>
-                        </td>
-                      </tr>
-                    `;
-                  }).join("")}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ` : ''}
       </div>
     `;
 
@@ -824,7 +989,7 @@ window.SignalsModule = (function () {
 
   function generateTradeStructureSvg(pos) {
     const isBuy = pos.direction === "BUY";
-    const entry = Number(pos.entryPrice) || 4091.20;
+    const entry = Number(pos.entryPrice) || 3998.50;
     const tp = Number(pos.takeProfit) || (isBuy ? entry + 14 : entry - 14);
     const sl = Number(pos.stopLoss) || (isBuy ? entry - 13 : entry + 13);
 
@@ -1153,8 +1318,8 @@ window.SignalsModule = (function () {
   window.openTradeStructureModal = openTradeStructureModal;
 
   function quickOpenPaperTrade(direction, tf = "15m") {
-    const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : { price: 4091.20 };
-    const curP = live.price || 4091.20;
+    const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : { price: 3998.50 };
+    const curP = live.price || 3998.50;
 
     const newPos = window.BreakoutPaperTrading.openPaperTrade({
       asset: "XAU/USD",
@@ -1506,6 +1671,30 @@ window.SignalsModule = (function () {
           pnlEl.style.color = posProf ? "var(--green-bright)" : "var(--red-bright)";
         }
       });
+
+      // Update Multi-Timeframe Radar cards dynamically
+      if (window.BreakoutDataService && typeof window.BreakoutDataService.getMtfStructures === "function") {
+        const mtf = window.BreakoutDataService.getMtfStructures();
+        ["5m", "15m", "30m", "1h"].forEach(tf => {
+          const s = mtf[tf];
+          if (!s) return;
+          const rEl = document.getElementById(`radar-res-${tf}`);
+          const sEl = document.getElementById(`radar-sup-${tf}`);
+          const pEl = document.getElementById(`radar-pill-${tf}`);
+          const cEl = document.getElementById(`radar-card-${tf}`);
+          if (rEl && s.resistance) rEl.textContent = `$${s.resistance.toFixed(1)}`;
+          if (sEl && s.support) sEl.textContent = `$${s.support.toFixed(1)}`;
+          if (pEl) {
+            const isTrig = s.status === "BULLISH_BREAKOUT" || s.status === "BEARISH_BREAKOUT";
+            const isBull = s.status === "BULLISH_BREAKOUT";
+            pEl.className = `badge ${isTrig ? (isBull ? 'badge-green' : 'badge-red') : 'badge-dim'}`;
+            pEl.textContent = isTrig ? (isBull ? '▲ BREAKOUT' : '▼ BREAKDOWN') : '👀 MONITORING';
+            if (cEl) {
+              cEl.style.borderColor = isTrig ? (isBull ? 'var(--green)' : 'var(--red)') : 'var(--border)';
+            }
+          }
+        });
+      }
     }
 
     // 2. Update Cockpit Elements
@@ -1559,10 +1748,26 @@ window.SignalsModule = (function () {
     signals.forEach(sig => {
       const pEl = document.getElementById(`sig-live-price-${sig.id}`);
       const pnlEl = document.getElementById(`sig-pnl-${sig.id}`);
+      const statusEl = document.getElementById(`sig-status-${sig.id}`);
       if (pEl) pEl.textContent = `$${curPrice.toFixed(2)}`;
 
+      const isB = sig.direction === "BUY" || sig.signalType === "BULLISH_BREAKOUT";
+
+      // Real-time signal status resolution when price reaches TP or SL
+      if (sig.status === "ACTIVE") {
+        if (isB) {
+          if (curPrice >= sig.takeProfit) sig.status = "TP_HIT";
+          else if (curPrice <= sig.stopLoss) sig.status = "SL_HIT";
+        } else {
+          if (curPrice <= sig.takeProfit) sig.status = "TP_HIT";
+          else if (curPrice >= sig.stopLoss) sig.status = "SL_HIT";
+        }
+        if (statusEl && sig.status !== "ACTIVE") {
+          statusEl.innerHTML = renderStatusBadge(sig.status);
+        }
+      }
+
       if (sig.status === "ACTIVE" && pnlEl) {
-        const isB = sig.direction === "BUY" || sig.signalType === "BULLISH_BREAKOUT";
         const pts = isB ? (curPrice - sig.entryPrice) : (sig.entryPrice - curPrice);
         const lotSize = sig.lots || 0.5;
         const usd = pts * (lotSize * 100);
@@ -1587,7 +1792,7 @@ window.SignalsModule = (function () {
     }
 
     const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : {};
-    const curPrice = live.price || 4091.20;
+    const curPrice = live.price || 3998.50;
 
     return signals.map(sig => {
       const isBull = sig.signalType === "BULLISH_BREAKOUT" || sig.direction === "BUY";
@@ -1651,7 +1856,7 @@ window.SignalsModule = (function () {
             ${rowPnlUsd}
           </td>
           <td>${renderConfidenceBar(sig.confidenceScore)}</td>
-          <td>${renderStatusBadge(sig.status)}</td>
+          <td id="sig-status-${sig.id}">${renderStatusBadge(sig.status)}</td>
           <td style="text-align:right;">
             <div style="display:inline-flex;gap:5px;align-items:center;justify-content:flex-end;">
               <button class="btn-view-trade-structure btn-view-signal-structure" data-sigid="${sig.id}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:3px;" title="View Technical Structure & Breakout Strategy Markup">

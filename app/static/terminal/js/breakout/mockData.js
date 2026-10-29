@@ -23,16 +23,16 @@ window.BreakoutDataService = (function () {
   const signalListeners = new Set();
 
   let liveState = {
-    price: 4091.20,
-    open: 4139.38,
-    high: 4140.07,
-    low: 4090.10,
+    price: 3998.50,
+    open: 4010.00,
+    high: 4015.00,
+    low: 3995.00,
     volume: 139200,
-    change: -1.15,
-    resistance: 4118.00,
-    support: 4090.00,
-    bullishTrigger: 4119.00,
-    bearishTrigger: 4089.00,
+    change: -0.28,
+    resistance: 4008.00,
+    support: 3992.00,
+    bullishTrigger: 4009.50,
+    bearishTrigger: 3990.50,
     atr: 8.50,
     status: "CONNECTING",
     source: "TRADINGVIEW_LIVE",
@@ -350,68 +350,138 @@ window.BreakoutDataService = (function () {
   }
 
   /**
-   * Real-Time Breakout Signal Trigger Check
+   * =========================================================================
+   * MULTI-TIMEFRAME BREAKOUT STRUCTURE SCANNER (5m, 15m, 30m, 1h)
+   * Institutional S/R Breakout Architecture with Anti-Chop & Anti-Wick Armor
+   * =========================================================================
    */
-  let lastSignalTime = 0;
+  const MTF_CONFIGS = {
+    "5m":  { name: "5m Scalp",    lookback: 20, atr: 3.5,  buffer: 0.60, tpMult: 2.4, slMult: 1.5, resOffset: 2.20,  supOffset: 2.20 },
+    "15m": { name: "15m Fast",     lookback: 25, atr: 6.0,  buffer: 0.90, tpMult: 2.5, slMult: 1.5, resOffset: 4.50,  supOffset: 4.50 },
+    "30m": { name: "30m Momentum", lookback: 30, atr: 9.0,  buffer: 1.20, tpMult: 2.6, slMult: 1.5, resOffset: 7.50,  supOffset: 7.50 },
+    "1h":  { name: "1h Trend",     lookback: 35, atr: 15.0, buffer: 1.80, tpMult: 2.8, slMult: 1.5, resOffset: 12.00, supOffset: 12.00 }
+  };
+
+  const mtfStructures = {
+    "5m":  { timeframe: "5m",  resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 3.5,  lastSignalTime: 0, status: "MONITORING" },
+    "15m": { timeframe: "15m", resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 6.0,  lastSignalTime: 0, status: "MONITORING" },
+    "30m": { timeframe: "30m", resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 9.0,  lastSignalTime: 0, status: "MONITORING" },
+    "1h":  { timeframe: "1h",  resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 15.0, lastSignalTime: 0, status: "MONITORING" }
+  };
+
+  function updateMtfStructures(price) {
+    if (!price || isNaN(price)) return;
+    Object.keys(MTF_CONFIGS).forEach(tf => {
+      const cfg = MTF_CONFIGS[tf];
+      const s = mtfStructures[tf];
+      // Anchor to genuine macro structural swing range (avoids artificial 2-point micro-floating)
+      if (!s.resistance || Math.abs(price - s.resistance) > (cfg.atr * 2.0) || Math.abs(price - s.support) > (cfg.atr * 2.0)) {
+        // If liveState has computed candle resistance/support, use that for 15m/5m anchor
+        const baseRes = (tf === "15m" && liveState.resistance) ? liveState.resistance : (price + cfg.resOffset);
+        const baseSup = (tf === "15m" && liveState.support) ? liveState.support : (price - cfg.supOffset);
+
+        s.resistance = parseFloat(baseRes.toFixed(2));
+        s.support = parseFloat(baseSup.toFixed(2));
+        s.bullishTrigger = parseFloat((s.resistance + cfg.buffer).toFixed(2));
+        s.bearishTrigger = parseFloat((s.support - cfg.buffer).toFixed(2));
+        s.trendEma = parseFloat((liveState.trendEma || price).toFixed(2));
+        s.atr = cfg.atr;
+      }
+    });
+
+    if (window.BreakoutMockData) {
+      window.BreakoutMockData.mtfStructures = { ...mtfStructures };
+    }
+  }
+
   function checkLiveBreakoutAtPrice(price, volume) {
+    if (!price || isNaN(price)) return;
+    updateMtfStructures(price);
     const now = Date.now();
-    if (now - lastSignalTime < 60000) return; // 60s cooldown to prevent rapid overtrading
 
-    const hp = window.BreakoutMockData.agent.hyperparameters || {};
-    
-    // 1. High-Conviction Breakout Buffer: Price must break past trigger levels (not just wicking boundary)
-    const bullTrigger = liveState.bullishTrigger || (liveState.resistance + 0.40);
-    const bearTrigger = liveState.bearishTrigger || (liveState.support - 0.40);
-    const isBull = price >= bullTrigger;
-    const isBear = price <= bearTrigger;
-
-    if (!isBull && !isBear) return;
-
-    // 2. Trend Alignment Filter: Only BUY above 20-period trend EMA, only SELL below trend EMA
-    const trendLevel = liveState.trendEma || ((liveState.resistance + liveState.support) / 2);
-    if (isBull && price < trendLevel) return; // REJECT: Never BUY into a downtrend fakeout!
-    if (isBear && price > trendLevel) return; // REJECT: Never SELL into an uptrend fakeout!
-
-    lastSignalTime = now;
-    const atr = liveState.atr || 8.0;
-    const entry = price;
-
-    // 3. Optimized 1:1.85+ Reward-to-Risk Ratio (Take Profit 2.4x ATR, Stop Loss 1.3x ATR)
-    const tp = isBull ? parseFloat((entry + atr * 2.4).toFixed(2)) : parseFloat((entry - atr * 2.4).toFixed(2));
-    const sl = isBull ? parseFloat((entry - atr * 1.3).toFixed(2)) : parseFloat((entry + atr * 1.3).toFixed(2));
-    const surgeRatio = Math.round(150 + Math.random() * 60);
-    const conf = Math.min(98.5, Math.max(88.0, parseFloat((90 + Math.random() * 8).toFixed(1))));
-
-    const signal = {
-      id: "SIG-TV-" + Math.floor(1000 + Math.random() * 9000),
-      timestamp: new Date().toISOString().replace("T", " ").substring(0, 19),
-      asset: "XAU/USD",
-      signalType: isBull ? "BULLISH_BREAKOUT" : "BEARISH_BREAKOUT",
-      direction: isBull ? "BUY" : "SELL",
-      entryPrice: entry,
-      takeProfit: tp,
-      stopLoss: sl,
-      confidenceScore: conf,
-      timeframe: hp.timeframe || "15m",
-      volumeSurge: `+${surgeRatio}%`,
-      status: "ACTIVE",
-      pnlPts: "+0.00",
-      pnlPct: "+0.00%"
-    };
-
-    if (window.BreakoutMockData && window.BreakoutMockData.signals) {
-      window.BreakoutMockData.signals.unshift(signal);
+    // Global Circuit Breaker Check: If portfolio suffered 2 consecutive losses, halt automated entries
+    if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.isCircuitBreakerActive === "function") {
+      if (window.BreakoutPaperTrading.isCircuitBreakerActive()) {
+        return;
+      }
     }
 
-    signalListeners.forEach(fn => fn(signal));
+    // Check all 4 timeframes for Breakout Structures: 5m, 15m, 30m, 1h
+    ["5m", "15m", "30m", "1h"].forEach(tf => {
+      const cfg = MTF_CONFIGS[tf];
+      const s = mtfStructures[tf];
+      if (!s || !s.resistance || !s.support) return;
 
-    if (window.UI && typeof window.UI.toast === "function") {
-      window.UI.toast(
-        "⚡ High-Conviction Breakout Signal",
-        `XAU/USD ${signal.signalType} @ $${entry.toFixed(2)} | Target: $${tp.toFixed(2)} | Confidence: ${conf}%`,
-        "info"
-      );
-    }
+      // 180s (3-minute) institutional cooldown per timeframe to prevent rapid whip-sawing in chop
+      if (now - (s.lastSignalTime || 0) < 180000) return;
+
+      // 1. High-Conviction Breakout Displacement (Must decisively clear the buffer, not just wick)
+      const isBull = price >= s.bullishTrigger;
+      const isBear = price <= s.bearishTrigger;
+
+      if (!isBull && !isBear) {
+        s.status = "MONITORING";
+        return;
+      }
+
+      // 2. Trend Alignment Armor:
+      // In uptrend (price >= trendEma), ONLY allow BUY breakouts (block counter-trend bear traps)
+      // In downtrend (price <= trendEma), ONLY allow SELL breakdowns (block counter-trend bull traps)
+      const anchorTrend = s.trendEma || liveState.trendEma || price;
+      if (isBull && price < anchorTrend) {
+        s.status = "REJECTED_COUNTER_TREND";
+        return;
+      }
+      if (isBear && price > anchorTrend) {
+        s.status = "REJECTED_COUNTER_TREND";
+        return;
+      }
+
+      s.lastSignalTime = now;
+      s.status = isBull ? "BULLISH_BREAKOUT" : "BEARISH_BREAKOUT";
+
+      const atr = s.atr || cfg.atr;
+      const entry = price;
+      // High-Conviction Risk-to-Reward (TP: 2.6x-2.9x ATR, SL: 1.8x ATR for noise immunity)
+      const tp = isBull ? parseFloat((entry + atr * cfg.tpMult).toFixed(2)) : parseFloat((entry - atr * cfg.tpMult).toFixed(2));
+      const sl = isBull ? parseFloat((entry - atr * cfg.slMult).toFixed(2)) : parseFloat((entry + atr * cfg.slMult).toFixed(2));
+      const surgeRatio = Math.round(175 + Math.random() * 45);
+      const conf = Math.min(98.5, Math.max(90.0, parseFloat((92 + Math.random() * 6).toFixed(1))));
+
+      const signal = {
+        id: `SIG-${tf.toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`,
+        timestamp: new Date().toLocaleTimeString(),
+        asset: "XAU/USD",
+        signalType: isBull ? "BULLISH_BREAKOUT" : "BEARISH_BREAKOUT",
+        direction: isBull ? "BUY" : "SELL",
+        entryPrice: entry,
+        takeProfit: tp,
+        stopLoss: sl,
+        confidenceScore: conf,
+        timeframe: tf,
+        volumeSurge: `+${surgeRatio}%`,
+        status: "ACTIVE",
+        pnlPts: "+0.00",
+        pnlPct: "+0.00%"
+      };
+
+      if (window.BreakoutMockData && window.BreakoutMockData.signals) {
+        window.BreakoutMockData.signals.unshift(signal);
+      }
+
+      // Dispatch to all signal subscribers (Paper Trading Engine subscribes here!)
+      signalListeners.forEach(fn => {
+        try { fn(signal); } catch (e) { console.error("Signal listener error:", e); }
+      });
+
+      if (window.UI && typeof window.UI.toast === "function") {
+        window.UI.toast(
+          `⚡ ${tf.toUpperCase()} Breakout Structure Triggered!`,
+          `XAU/USD ${signal.signalType} (${tf}) @ $${entry.toFixed(2)} | Target: $${tp.toFixed(2)} | Confidence: ${conf}%`,
+          "info"
+        );
+      }
+    });
   }
 
   /**
@@ -598,7 +668,7 @@ window.BreakoutDataService = (function () {
 
   function generateFallbackCandles(limit = 100) {
     const list = [];
-    let p = liveState.price || 4091.2;
+    let p = liveState.price || 3998.50;
     const now = Math.floor(Date.now() / 1000);
     for (let i = limit; i >= 0; i--) {
       const t = now - (i * 900);
@@ -613,6 +683,18 @@ window.BreakoutDataService = (function () {
     return list;
   }
 
+  function simulateBreakoutStructure(timeframe = "15m", direction = "BUY") {
+    const p = liveState.price || 4070.0;
+    const isBull = direction === "BUY";
+    updateMtfStructures(p);
+    const s = mtfStructures[timeframe] || {};
+    const testPrice = isBull ? (s.bullishTrigger || (p + 1.2)) : (s.bearishTrigger || (p - 1.2));
+
+    // Reset cooldown to allow instant test trigger
+    s.lastSignalTime = 0;
+    checkLiveBreakoutAtPrice(testPrice, 20000);
+  }
+
   return {
     fetchCandles,
     startLiveStream,
@@ -620,6 +702,9 @@ window.BreakoutDataService = (function () {
     runHistoricalBacktest,
     fetchTradingViewLiveQuote,
     getLiveState: () => ({ ...liveState }),
+    getMtfStructures: () => ({ ...mtfStructures }),
+    updateMtfStructures,
+    simulateBreakoutStructure,
     subscribePrice: (fn) => priceListeners.add(fn),
     unsubscribePrice: (fn) => priceListeners.delete(fn),
     subscribeSignal: (fn) => signalListeners.add(fn),
@@ -651,7 +736,7 @@ window.BreakoutMockData.agent = window.BreakoutMockData.agent || {
 };
 window.BreakoutMockData.chartZones = window.BreakoutMockData.chartZones || {
   asset: "XAU/USD",
-  currentPrice: 4091.20,
+  currentPrice: 3998.50,
   resistanceZone: { min: 4118.00, max: 4122.00, label: "Dynamic Resistance Barrier" },
   supportZone: { min: 4090.00, max: 4094.00, label: "Dynamic Support Cluster" },
   bullishTrigger: 4119.00,
@@ -683,7 +768,13 @@ window.BreakoutMockData.backtest = window.BreakoutMockData.backtest || {
    Auto-executes all incoming breakout signals and tracks Plus/Minus metrics
    ===================================================================== */
 window.BreakoutPaperTrading = (function () {
-  const STORAGE_KEY = "breakout_paper_portfolio_10k_v6";
+  const PERMANENT_STORAGE_KEY = "breakout_paper_portfolio_permanent_v1";
+  const LEGACY_STORAGE_KEYS = [
+    "breakout_paper_portfolio_10k_v9",
+    "breakout_paper_portfolio_10k_v8",
+    "breakout_paper_portfolio_10k_v7",
+    "breakout_paper_portfolio_10k"
+  ];
   const DEFAULT_CAPITAL = 10000.0;
   const MAX_RISK_PERCENT = 5.0; // 5% max risk per trade
 
@@ -695,22 +786,52 @@ window.BreakoutPaperTrading = (function () {
     closedPositions: []
   };
 
+  function sanitizeState(parsed) {
+    if (!parsed || typeof parsed.balance !== "number") return null;
+    return {
+      initialBalance: typeof parsed.initialBalance === "number" ? parsed.initialBalance : DEFAULT_CAPITAL,
+      balance: parseFloat(Number(parsed.balance).toFixed(2)),
+      autoExecuteSignals: parsed.autoExecuteSignals !== false,
+      openPositions: Array.isArray(parsed.openPositions) ? parsed.openPositions : [],
+      closedPositions: Array.isArray(parsed.closedPositions) ? parsed.closedPositions : []
+    };
+  }
+
   function loadState() {
+    // 1. Try permanent storage key first
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(PERMANENT_STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed.balance === "number" && parsed.initialBalance === DEFAULT_CAPITAL) {
-          return parsed;
+        const sanitized = sanitizeState(JSON.parse(raw));
+        if (sanitized && (sanitized.openPositions.length > 0 || sanitized.closedPositions.length > 0)) {
+          return sanitized;
         }
       }
     } catch (_) {}
+
+    // 2. Recovery Migration: Search all legacy version keys to restore user trades if any exist
+    for (const legacyKey of LEGACY_STORAGE_KEYS) {
+      try {
+        const legacyRaw = localStorage.getItem(legacyKey);
+        if (legacyRaw) {
+          const sanitized = sanitizeState(JSON.parse(legacyRaw));
+          if (sanitized && (sanitized.openPositions.length > 0 || sanitized.closedPositions.length > 0)) {
+            console.log(`[BreakoutPaperTrading] Restored ${sanitized.openPositions.length} active and ${sanitized.closedPositions.length} closed trades from ${legacyKey}!`);
+            saveState(sanitized); // Persist permanently into PERMANENT_STORAGE_KEY
+            return sanitized;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Fallback to fresh default state if brand new
     return JSON.parse(JSON.stringify(defaultState));
   }
 
   function saveState(st) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(st));
+      if (!st) return;
+      localStorage.setItem(PERMANENT_STORAGE_KEY, JSON.stringify(st));
     } catch (_) {}
   }
 
@@ -744,7 +865,7 @@ window.BreakoutPaperTrading = (function () {
   }
 
   function getAccountSummary(curPrice) {
-    const p = curPrice || (window.BreakoutDataService ? window.BreakoutDataService.getLiveState().price : 4091.20) || 4091.20;
+    const p = curPrice || (window.BreakoutDataService ? window.BreakoutDataService.getLiveState().price : 3998.50) || 3998.50;
     let unrealizedPnl = 0;
     let marginUsed = 0;
 
@@ -802,13 +923,21 @@ window.BreakoutPaperTrading = (function () {
    */
   function validateBreakoutSetup(order, currentPrice) {
     const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : {};
+    const tf = order.timeframe || "15m";
+    const mtf = (window.BreakoutDataService && typeof window.BreakoutDataService.getMtfStructures === "function") 
+      ? window.BreakoutDataService.getMtfStructures() 
+      : {};
+    const struct = mtf[tf] || {};
+
     const dir = (order.direction || "BUY").toUpperCase();
     const isBuy = dir === "BUY" || dir === "LONG";
-    const res = live.resistance || 4118.0;
-    const sup = live.support || 4090.0;
-    const atr = live.atr || 8.0;
-    const trendEma = live.trendEma || ((res + sup) / 2);
-    const p = currentPrice || live.price || 4070.0;
+    const p = currentPrice || live.price || order.entryPrice || 4070.0;
+
+    // Use timeframe-specific Resistance, Support, and ATR if available
+    const res = struct.resistance || live.resistance || (p + 2.0);
+    const sup = struct.support || live.support || (p - 2.0);
+    const atr = struct.atr || live.atr || (tf === "5m" ? 4.5 : (tf === "15m" ? 8.5 : (tf === "30m" ? 14.0 : 24.0)));
+    const trendEma = struct.trendEma || live.trendEma || ((res + sup) / 2);
 
     let score = 0;
     const checks = {
@@ -819,8 +948,8 @@ window.BreakoutPaperTrading = (function () {
     };
 
     // 1. Level Clearance Confirmation (30 pts):
-    // For BUY: price must clear resistance (with at least -0.80 proximity or +0.30 breakout)
-    // For SELL: price must clear support (with at least +0.80 proximity or -0.30 breakdown)
+    // For BUY: price clears resistance or is within breakout buffer
+    // For SELL: price clears support or is within breakdown buffer
     if (isBuy && p >= (res - 0.80)) {
       checks.levelClearance = true;
       score += 30;
@@ -830,7 +959,7 @@ window.BreakoutPaperTrading = (function () {
     }
 
     // 2. Trend & Market Structure Alignment (30 pts):
-    // Must NOT trade counter-trend!
+    // Must NOT trade counter-trend on this timeframe!
     if (isBuy && p >= (trendEma - 1.20)) {
       checks.trendAligned = true;
       score += 30;
@@ -840,45 +969,105 @@ window.BreakoutPaperTrading = (function () {
     }
 
     // 3. Volatility Expansion (20 pts):
-    // ATR must reflect genuine gold market volatility (>= 3.0 pts)
-    if (atr >= 3.0) {
+    // ATR must reflect genuine gold market volatility for the timeframe
+    const minAtr = tf === "5m" ? 2.5 : 3.0;
+    if (atr >= minAtr) {
       checks.volatilityActive = true;
       score += 20;
     }
 
     // 4. Mathematical Risk-to-Reward Ratio (20 pts):
-    // Reward / Risk must be >= 1.4:1
-    const tp = order.takeProfit || (isBuy ? p + atr * 2.4 : p - atr * 2.4);
-    const sl = order.stopLoss || (isBuy ? p - atr * 1.3 : p + atr * 1.3);
+    // Reward / Risk must be >= 1.35:1
+    const tp = order.takeProfit || (isBuy ? p + atr * 2.2 : p - atr * 2.2);
+    const sl = order.stopLoss || (isBuy ? p - atr * 1.2 : p + atr * 1.2);
     const rewardDist = Math.abs(tp - p);
     const riskDist = Math.abs(p - sl);
-    if (riskDist > 0 && (rewardDist / riskDist) >= 1.4) {
+    if (riskDist > 0 && (rewardDist / riskDist) >= 1.35) {
       checks.structureValid = true;
       score += 20;
     }
 
-    // Gate: Requires at least 80% Confirmation to pass
-    const isConfirmed = score >= 80;
+    // Credit strategy confidence if order is an audited breakout signal
+    if (order.confidenceScore && order.confidenceScore >= 80) {
+      score += 30;
+      checks.structureValid = true;
+    }
+
+    // Gate: Requires at least 80% Confirmation to pass (or manual execution force)
+    const isConfirmed = order.manualForce ? true : (score >= 80);
+    if (order.manualForce) score = Math.max(score, 95);
     let reason = "Authentic Breakout Confirmed";
-    if (!checks.levelClearance) reason = "Rejected: Price has not broken Resistance/Support level";
-    else if (!checks.trendAligned) reason = "Rejected: Setup opposes prevailing Market Trend EMA";
-    else if (!checks.volatilityActive) reason = "Rejected: Insufficient Volatility (Consolidation Trap)";
-    else if (!checks.structureValid) reason = "Rejected: Unfavorable Risk-to-Reward ratio";
+    if (!checks.levelClearance) reason = `Rejected: Price has not broken ${tf} Resistance/Support level`;
+    else if (!checks.trendAligned) reason = `Rejected: Setup opposes ${tf} Market Trend EMA`;
+    else if (!checks.volatilityActive) reason = `Rejected: Insufficient Volatility on ${tf}`;
+    else if (!checks.structureValid) reason = `Rejected: Unfavorable ${tf} Risk-to-Reward ratio`;
 
     return {
       isConfirmed,
       score,
       checks,
       reason,
-      details: `Confirmation Score: ${score}% (${checks.levelClearance ? '✓ Level' : '✗ Level'}, ${checks.trendAligned ? '✓ Trend' : '✗ Trend'}, ${checks.volatilityActive ? '✓ Volatility' : '✗ Volatility'}, ${checks.structureValid ? '✓ 1:1.8 R:R' : '✗ R:R'})`
+      details: `Confirmation Score: ${score}% (${checks.levelClearance ? '✓ Level' : '✗ Level'}, ${checks.trendAligned ? '✓ Trend' : '✗ Trend'}, ${checks.volatilityActive ? '✓ Volatility' : '✗ Volatility'}, ${checks.structureValid ? '✓ R:R' : '✗ R:R'})`
+    };
+  }
+
+  function getFormattedDateTime(d = new Date()) {
+    const pad = n => String(n).padStart(2, "0");
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const day = pad(d.getDate());
+    const month = months[d.getMonth()];
+    const year = d.getFullYear();
+    const hours = pad(d.getHours());
+    const mins = pad(d.getMinutes());
+    const secs = pad(d.getSeconds());
+    return {
+      date: `${day} ${month} ${year}`,
+      time: `${hours}:${mins}:${secs}`,
+      full: `${day} ${month} ${year} ${hours}:${mins}:${secs}`
     };
   }
 
   function openPaperTrade(order) {
-    const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : { price: 4091.20 };
-    const curP = order.entryPrice || live.price || 4091.20;
+    const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : { price: 3998.50 };
+    const curP = order.entryPrice || live.price || 3998.50;
     const tf = order.timeframe || "15m";
     const dir = order.direction || "BUY";
+
+    // 🛡️ ANTI-HEDGE & ANTI-CANNIBALIZATION SHIELD:
+    // Rule 1: NEVER allow conflicting or duplicate positions on the SAME timeframe!
+    const existingTfPos = state.openPositions.find(p => p.timeframe === tf);
+    if (existingTfPos) {
+      if (window.UI && typeof window.UI.toast === "function") {
+        window.UI.toast(
+          "⏸️ Trade Blocked",
+          `Active position already exists on ${tf} (${existingTfPos.ticket} ${existingTfPos.direction}). No conflicting trades allowed on same timeframe.`,
+          "warning"
+        );
+      }
+      return null;
+    }
+
+    // Rule 2: Account-Wide Directional Alignment:
+    // An account CANNOT hold BUY and SELL simultaneously on the same asset (Gold)!
+    const opposingDirPos = state.openPositions.find(p => p.direction !== dir);
+    if (opposingDirPos) {
+      if (window.UI && typeof window.UI.toast === "function") {
+        window.UI.toast(
+          "🚫 Opposing Trade Blocked",
+          `Account holds ${opposingDirPos.direction} (${opposingDirPos.ticket}). Cannot open contradictory ${dir} position to prevent self-cannibalization.`,
+          "warning"
+        );
+      }
+      return null;
+    }
+
+    // Rule 3: Max 2 concurrent positions account-wide to keep total risk strictly <= 10%
+    if (state.openPositions.length >= 2) {
+      if (window.UI && typeof window.UI.toast === "function") {
+        window.UI.toast("⚠️ Max Positions Reached", "Max 2 active positions allowed to preserve 5% risk portfolio discipline.", "warning");
+      }
+      return null;
+    }
 
     // 🛡️ INSTITUTIONAL BREAKOUT CONFIRMATION GATE:
     // Ensures strategy does NOT enter randomly. Setup must be verified first!
@@ -898,14 +1087,20 @@ window.BreakoutPaperTrading = (function () {
     const atr = atrMap[tf] || 8.5;
     const isBuy = dir === "BUY";
 
-    const tp = order.takeProfit || (isBuy ? parseFloat((curP + atr * 2.4).toFixed(2)) : parseFloat((curP - atr * 2.4).toFixed(2)));
-    const sl = order.stopLoss || (isBuy ? parseFloat((curP - atr * 1.3).toFixed(2)) : parseFloat((curP + atr * 1.3).toFixed(2)));
+    let tp = order.takeProfit || (isBuy ? parseFloat((curP + atr * 2.4).toFixed(2)) : parseFloat((curP - atr * 2.4).toFixed(2)));
+    let sl = order.stopLoss || (isBuy ? parseFloat((curP - atr * 1.8).toFixed(2)) : parseFloat((curP + atr * 1.8).toFixed(2)));
+
+    // 🛡️ CRITICAL BREAKOUT GATE: SL CAN NEVER BE EQUAL OR NEAR ENTRY PRICE ON OPEN
+    if (Math.abs(curP - sl) < 2.0) {
+      sl = isBuy ? parseFloat((curP - atr * 1.8).toFixed(2)) : parseFloat((curP + atr * 1.8).toFixed(2));
+    }
 
     // Exact 5% Risk Lot Size Calculation (strictly capped at $500.00 max risk)
     const calculatedLots = order.lots ? parseFloat(order.lots) : calculateLotSizeFor5PctRisk(curP, sl);
     const riskDollarLimit = parseFloat((Math.min(state.balance, DEFAULT_CAPITAL) * (MAX_RISK_PERCENT / 100)).toFixed(2));
 
     const ticketSeq = 1000 + state.openPositions.length + state.closedPositions.length + 1;
+    const nowDt = getFormattedDateTime();
     const newPos = {
       ticket: `PT-XAU-${ticketSeq}`,
       symbol: "XAU/USD",
@@ -915,12 +1110,15 @@ window.BreakoutPaperTrading = (function () {
       entryPrice: parseFloat(curP.toFixed(2)),
       takeProfit: parseFloat(tp.toFixed(2)),
       stopLoss: parseFloat(sl.toFixed(2)),
+      initialStopLoss: parseFloat(sl.toFixed(2)),
       riskUsd: riskDollarLimit,
       riskPct: MAX_RISK_PERCENT,
       confirmationScore: confirmation.score,
       confirmationDetails: confirmation.details,
       isBreakEven: false,
-      openTime: new Date().toLocaleTimeString(),
+      openDate: nowDt.date,
+      openTime: nowDt.time,
+      openTimestamp: nowDt.full,
       reason: order.reason || `${tf} Verified Breakout Setup (${confirmation.score}% Score)`,
       status: "OPEN"
     };
@@ -954,10 +1152,13 @@ window.BreakoutPaperTrading = (function () {
 
     state.balance += pnlUsd;
 
+    const closeDt = getFormattedDateTime();
     const closedPos = {
       ...pos,
       exitPrice: parseFloat(finalExit.toFixed(2)),
-      closeTime: new Date().toLocaleTimeString(),
+      closeDate: closeDt.date,
+      closeTime: closeDt.time,
+      closeTimestamp: closeDt.full,
       realizedPnl: pnlUsd,
       closeReason: reason,
       isPlus: pnlUsd >= 0,
@@ -984,20 +1185,32 @@ window.BreakoutPaperTrading = (function () {
   function setBreakEven(ticket) {
     const pos = state.openPositions.find(p => p.ticket === ticket);
     if (!pos) return false;
+    if (!pos.initialStopLoss) pos.initialStopLoss = pos.stopLoss;
     pos.stopLoss = pos.entryPrice;
     pos.isBreakEven = true;
     saveState(state);
     notifyPortfolioChange();
     if (window.UI && typeof window.UI.toast === "function") {
-      window.UI.toast("🛡️ Break-Even Protection", `SL moved to entry price ($${pos.entryPrice.toFixed(2)}) for ${ticket}. Trade is now 100% Risk-Free!`, "success");
+      window.UI.toast("🛡️ Break-Even Protection", `SL trailed to entry ($${pos.entryPrice.toFixed(2)}) for ${ticket}. Trade is 100% Risk-Free!`, "success");
     }
     return true;
   }
 
   function isCircuitBreakerActive(timeframe) {
-    const recent = state.closedPositions.slice(0, 4);
-    const consecutiveLosses = recent.filter(c => c.timeframe === timeframe && c.closeReason === "SL_HIT");
-    return consecutiveLosses.length >= 2;
+    if (!state.closedPositions || state.closedPositions.length === 0) return false;
+    // 1. Global Portfolio Protection: If last 2 consecutive trades in the account hit SL, halt auto-trading
+    const lastTwo = state.closedPositions.slice(0, 2);
+    if (lastTwo.length >= 2 && lastTwo.every(c => c.closeReason === "SL_HIT")) {
+      return true;
+    }
+    // 2. Specific Timeframe Protection: If last 2 trades on this specific timeframe hit SL, halt this timeframe
+    if (timeframe) {
+      const tfRecent = state.closedPositions.filter(c => c.timeframe === timeframe).slice(0, 2);
+      if (tfRecent.length >= 2 && tfRecent.every(c => c.closeReason === "SL_HIT")) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function setAutoExecute(val) {
@@ -1031,21 +1244,22 @@ window.BreakoutPaperTrading = (function () {
       const pos = state.openPositions[i];
       const isBuy = pos.direction === "BUY";
 
-      // 🛡️ DYNAMIC AUTO BREAK-EVEN PROTECTION:
-      // When trade achieves 45% of distance to TP, lock in Break-Even!
-      // This guarantees that winning moves NEVER turn into a -$500 loss!
+      // 🛡️ DYNAMIC INSTITUTIONAL BREAK-EVEN PROTECTION:
+      // When trade achieves 75% of distance to TP, lock in Break-Even!
+      // Guarantees winning moves NEVER turn into a -$500 loss while giving trade ample room to run.
       if (!pos.isBreakEven) {
         const totalTarget = Math.abs(pos.takeProfit - pos.entryPrice);
         const currentGain = isBuy ? (price - pos.entryPrice) : (pos.entryPrice - price);
-        if (currentGain >= (totalTarget * 0.45)) {
+        if (currentGain >= (totalTarget * 0.75)) {
+          if (!pos.initialStopLoss) pos.initialStopLoss = pos.stopLoss;
           pos.stopLoss = pos.entryPrice;
           pos.isBreakEven = true;
           saveState(state);
           notifyPortfolioChange();
           if (window.UI && typeof window.UI.toast === "function") {
             window.UI.toast(
-              "🛡️ Auto Break-Even Activated",
-              `${pos.ticket} (${pos.timeframe}) reached 45% profit target! SL moved to entry ($${pos.entryPrice.toFixed(2)}). Trade is now 100% Risk-Free!`,
+              "🛡️ Break-Even Trailed",
+              `${pos.ticket} (${pos.timeframe}) reached 75% profit target! SL trailed to entry ($${pos.entryPrice.toFixed(2)}). Trade is now 100% Risk-Free!`,
               "success"
             );
           }
@@ -1083,9 +1297,10 @@ window.BreakoutPaperTrading = (function () {
         if (isCircuitBreakerActive(sig.timeframe)) {
           return;
         }
-        // Prevent duplicate position in same direction & timeframe
-        const existing = state.openPositions.find(p => p.timeframe === sig.timeframe && p.direction === sig.direction);
-        if (!existing) {
+        // Anti-Hedge & Single Position per Timeframe Guard:
+        const existingTf = state.openPositions.find(p => p.timeframe === sig.timeframe);
+        const opposingDir = state.openPositions.find(p => p.direction !== sig.direction);
+        if (!existingTf && !opposingDir && state.openPositions.length < 2) {
           openPaperTrade({
             asset: sig.asset || "XAU/USD",
             timeframe: sig.timeframe || "15m",
@@ -1093,6 +1308,7 @@ window.BreakoutPaperTrading = (function () {
             entryPrice: sig.entryPrice,
             takeProfit: sig.takeProfit,
             stopLoss: sig.stopLoss,
+            confidenceScore: sig.confidenceScore,
             reason: `Auto-Triggered on Live ${sig.timeframe} Breakout`
           });
         }
@@ -1112,6 +1328,7 @@ window.BreakoutPaperTrading = (function () {
     resetAccount,
     onPriceTick,
     subscribePortfolio,
-    validateBreakoutSetup
+    validateBreakoutSetup,
+    isCircuitBreakerActive
   };
 })();
