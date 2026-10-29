@@ -415,6 +415,17 @@ window.BreakoutDataService = (function () {
       // 180s (3-minute) institutional cooldown per timeframe to prevent rapid whip-sawing in chop
       if (now - (s.lastSignalTime || 0) < 180000) return;
 
+      // 🛡️ Per-Timeframe Active Trade Guard:
+      // If timeframe already holds an active trade, keep status locked to that trade to prevent opposing signals
+      if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.getOpenPositions === "function") {
+        const openPos = window.BreakoutPaperTrading.getOpenPositions();
+        const activeTf = openPos.find(p => p.timeframe === tf);
+        if (activeTf) {
+          s.status = activeTf.direction === "BUY" ? "BULLISH_BREAKOUT" : "BEARISH_BREAKOUT";
+          return;
+        }
+      }
+
       // 1. High-Conviction Breakout Displacement (Must decisively clear the buffer, not just wick)
       const isBull = price >= s.bullishTrigger;
       const isBear = price <= s.bearishTrigger;
@@ -777,12 +788,41 @@ window.BreakoutPaperTrading = (function () {
 
   function sanitizeState(parsed) {
     if (!parsed || typeof parsed.balance !== "number") return null;
+    const rawOpen = Array.isArray(parsed.openPositions) ? parsed.openPositions : [];
+    const closed = Array.isArray(parsed.closedPositions) ? parsed.closedPositions : [];
+
+    // 🛡️ Enforce Single Position Per Timeframe Rule on restored state:
+    // If historical/legacy state had duplicate or conflicting trades on the same timeframe (e.g. 15m BUY & 15m SELL),
+    // cleanly retire conflicting positions into closedPositions so conflict is completely eliminated.
+    const sanitizedOpen = [];
+    const seenTimeframes = new Set();
+    rawOpen.forEach(pos => {
+      const tf = pos.timeframe || "15m";
+      if (!seenTimeframes.has(tf)) {
+        seenTimeframes.add(tf);
+        sanitizedOpen.push(pos);
+      } else {
+        // Resolve conflict cleanly without balance corruption
+        closed.unshift({
+          ...pos,
+          closeReason: "CONFLICT_RESOLVED",
+          closeDate: pos.openDate || "Restored",
+          closeTime: pos.openTime || "00:00:00",
+          closeTimestamp: pos.openTimestamp || "",
+          closeTimeMs: Date.now(),
+          realizedPnl: 0.00,
+          isPlus: true,
+          status: "CLOSED"
+        });
+      }
+    });
+
     return {
       initialBalance: typeof parsed.initialBalance === "number" ? parsed.initialBalance : DEFAULT_CAPITAL,
       balance: parseFloat(Number(parsed.balance).toFixed(2)),
       autoExecuteSignals: parsed.autoExecuteSignals !== false,
-      openPositions: Array.isArray(parsed.openPositions) ? parsed.openPositions : [],
-      closedPositions: Array.isArray(parsed.closedPositions) ? parsed.closedPositions : []
+      openPositions: sanitizedOpen,
+      closedPositions: closed
     };
   }
 
@@ -1016,49 +1056,166 @@ window.BreakoutPaperTrading = (function () {
     };
   }
 
+  /**
+   * 🛡️ DEDICATED BREAKOUT DIRECTIONAL LOCK & CONFLICT RESOLVER
+   * 
+   * Strict Rules Enforced:
+   * 1. Mutual Exclusion: NEVER allow conflicting BUY and SELL trades simultaneously on the SAME timeframe.
+   * 2. Anti-Whipsaw Cooldown: When a trade on a timeframe closes, the opposite side is locked for 3 minutes (180s)
+   *    to prevent rapid flip-flop whip-saws (e.g. BUY stops out and trader immediately shorts the bottom).
+   * 3. Portfolio Capacity: Max 3 active positions across portfolio to protect 5% risk discipline.
+   * 4. Circuit Breaker: 2 consecutive losses pause automated entries on that timeframe.
+   */
+  function resolveBreakoutDirectionConflict(timeframe, direction, options = {}) {
+    const tf = timeframe || "15m";
+    const dir = (direction || "BUY").toUpperCase();
+
+    // Check 1: Concurrent Same-Timeframe Mutual Exclusion
+    const activeSameTfPos = state.openPositions.find(p => p.timeframe === tf);
+    if (activeSameTfPos) {
+      if (activeSameTfPos.direction !== dir) {
+        return {
+          allowed: false,
+          conflictType: "CONCURRENT_OPPOSING_TRADE",
+          reason: `Direction Conflict: Timeframe ${tf} currently has an active ${activeSameTfPos.direction} trade (${activeSameTfPos.ticket}). Breakout strategy strictly prohibits taking an opposing ${dir} trade on the same timeframe concurrently.`,
+          activeTrade: activeSameTfPos
+        };
+      } else {
+        return {
+          allowed: false,
+          conflictType: "DUPLICATE_TIMEFRAME_TRADE",
+          reason: `Position Active: Timeframe ${tf} already has an active ${dir} trade (${activeSameTfPos.ticket}). Only 1 active position permitted per timeframe.`,
+          activeTrade: activeSameTfPos
+        };
+      }
+    }
+
+    // Check 2: Directional Cooldown & Anti-Whipsaw Guard (180 seconds)
+    const lastClosedOnTf = state.closedPositions.find(c => c.timeframe === tf);
+    if (lastClosedOnTf && !options.manualBypass) {
+      const now = Date.now();
+      let closeMs = lastClosedOnTf.closeTimeMs || 0;
+      if (!closeMs && lastClosedOnTf.closeTimestamp) {
+        const parsed = Date.parse(lastClosedOnTf.closeTimestamp);
+        if (!isNaN(parsed)) closeMs = parsed;
+      }
+      if (closeMs > 0 && (now - closeMs) < 180000) {
+        if (lastClosedOnTf.direction !== dir) {
+          const remainingSec = Math.ceil((180000 - (now - closeMs)) / 1000);
+          return {
+            allowed: false,
+            conflictType: "WHIPSAW_COOLDOWN_ACTIVE",
+            reason: `Anti-Whipsaw Guard: ${tf} recently closed ${lastClosedOnTf.direction} (${lastClosedOnTf.ticket}) ${Math.round((now - closeMs) / 1000)}s ago. Opposite ${dir} trade locked for ${remainingSec}s to prevent false-reversal traps.`,
+            lastClosedTrade: lastClosedOnTf,
+            remainingSec
+          };
+        }
+      }
+    }
+
+    // Check 3: Portfolio Capacity Guard (Max 3 concurrent positions total)
+    if (state.openPositions.length >= 3 && !options.manualBypass) {
+      return {
+        allowed: false,
+        conflictType: "MAX_POSITIONS_REACHED",
+        reason: `Max 3 active positions reached across timeframes to protect 5% risk portfolio discipline.`
+      };
+    }
+
+    // Check 4: Circuit Breaker Check
+    if (isCircuitBreakerActive(tf) && !options.manualBypass) {
+      return {
+        allowed: false,
+        conflictType: "CIRCUIT_BREAKER_ACTIVE",
+        reason: `Circuit Breaker Active on ${tf}: 2 consecutive losses detected. Automated trading paused.`
+      };
+    }
+
+    return {
+      allowed: true,
+      conflictType: "NONE",
+      reason: `Clear to execute ${dir} on ${tf}.`
+    };
+  }
+
+  /**
+   * 🛡️ BREAKOUT TRADE EXECUTION AUDITOR
+   * Audits direction conflict, technical confirmation, and geometry before placing any paper trade.
+   */
+  function canExecuteBreakoutTrade(order, currentPrice) {
+    if (!order) return { allowed: false, reason: "Invalid order parameters" };
+    const tf = order.timeframe || "15m";
+    const dir = (order.direction || "BUY").toUpperCase();
+    const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : {};
+    const curP = currentPrice || order.entryPrice || live.price || 3998.50;
+
+    // 1. Directional Lock and Conflict Resolver
+    const conflictCheck = resolveBreakoutDirectionConflict(tf, dir, { manualBypass: !!order.manualForce });
+    if (!conflictCheck.allowed) {
+      return conflictCheck;
+    }
+
+    // 2. Setup Confirmation Check (Unbiased Institutional Gate)
+    const confirmation = validateBreakoutSetup(order, curP);
+    if (!order.manualForce && !confirmation.isConfirmed) {
+      return {
+        allowed: false,
+        conflictType: "UNCONFIRMED_BREAKOUT",
+        reason: confirmation.reason,
+        details: confirmation.details,
+        confirmation
+      };
+    }
+
+    // 3. Geometric Target/SL Sanity Check
+    const isBuy = dir === "BUY";
+    const tp = order.takeProfit;
+    const sl = order.stopLoss;
+    if (tp && sl) {
+      if (isBuy && (tp <= curP || sl >= curP)) {
+        return {
+          allowed: false,
+          conflictType: "INVALID_GEOMETRY",
+          reason: `Invalid BUY Geometry: TP ($${tp}) must be above entry ($${curP}) and SL ($${sl}) must be below entry.`
+        };
+      }
+      if (!isBuy && (tp >= curP || sl <= curP)) {
+        return {
+          allowed: false,
+          conflictType: "INVALID_GEOMETRY",
+          reason: `Invalid SELL Geometry: TP ($${tp}) must be below entry ($${curP}) and SL ($${sl}) must be above entry.`
+        };
+      }
+    }
+
+    return {
+      allowed: true,
+      conflictType: "NONE",
+      reason: "Confirmed breakout setup ready for execution",
+      confirmation
+    };
+  }
+
   function openPaperTrade(order) {
     const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : { price: 3998.50 };
     const curP = order.entryPrice || live.price || 3998.50;
     const tf = order.timeframe || "15m";
     const dir = order.direction || "BUY";
 
-    // 🛡️ PER-TIMEFRAME SINGLE POSITION RULE:
-    // Rule 1: NEVER allow conflicting or duplicate positions on the SAME timeframe!
-    // (e.g. If 15m has a position, no other trade can open on 15m until it closes)
-    const existingTfPos = state.openPositions.find(p => p.timeframe === tf);
-    if (existingTfPos) {
+    // 🛡️ DEDICATED CONFLICT RESOLVER & CONFIRMATION AUDITOR
+    const check = canExecuteBreakoutTrade(order, curP);
+    if (!check.allowed) {
       if (window.UI && typeof window.UI.toast === "function") {
         window.UI.toast(
-          "⏸️ Trade Blocked",
-          `Active position already exists on ${tf} (${existingTfPos.ticket} ${existingTfPos.direction}). Only 1 active trade allowed per timeframe.`,
+          check.conflictType === "CONCURRENT_OPPOSING_TRADE" ? "⏸️ Direction Conflict Blocked" : "⚠️ Trade Blocked",
+          check.reason,
           "warning"
         );
       }
       return null;
     }
 
-    // Rule 2: Max 3 concurrent positions across portfolio to maintain risk discipline
-    if (state.openPositions.length >= 3) {
-      if (window.UI && typeof window.UI.toast === "function") {
-        window.UI.toast("⚠️ Max Positions Reached", "Max 3 active positions allowed across timeframes to preserve 5% risk discipline.", "warning");
-      }
-      return null;
-    }
-
-    // 🛡️ INSTITUTIONAL BREAKOUT CONFIRMATION GATE:
-    // Ensures strategy does NOT enter randomly. Setup must be verified first!
-    const confirmation = validateBreakoutSetup(order, curP);
-    if (!order.manualForce && !confirmation.isConfirmed) {
-      if (window.UI && typeof window.UI.toast === "function") {
-        window.UI.toast(
-          "⚠️ Breakout Unconfirmed — Trade Skipped",
-          `${confirmation.reason} (${confirmation.details})`,
-          "warning"
-        );
-      }
-      return null;
-    }
-
+    const confirmation = check.confirmation || validateBreakoutSetup(order, curP);
     const atrMap = { "5m": 4.5, "15m": 8.5, "30m": 14.0, "1h": 24.0 };
     const atr = atrMap[tf] || 8.5;
     const isBuy = dir === "BUY";
@@ -1135,6 +1292,7 @@ window.BreakoutPaperTrading = (function () {
       closeDate: closeDt.date,
       closeTime: closeDt.time,
       closeTimestamp: closeDt.full,
+      closeTimeMs: Date.now(),
       realizedPnl: pnlUsd,
       closeReason: reason,
       isPlus: pnlUsd >= 0,
@@ -1269,14 +1427,9 @@ window.BreakoutPaperTrading = (function () {
     // Auto-trade incoming breakout signals if autoExecute is enabled
     window.BreakoutDataService.subscribeSignal((sig) => {
       if (state.autoExecuteSignals && sig) {
-        // Circuit breaker guard against consolidation chops
-        if (isCircuitBreakerActive(sig.timeframe)) {
-          return;
-        }
-        // Anti-Hedge & Single Position per Timeframe Guard:
-        const existingTf = state.openPositions.find(p => p.timeframe === sig.timeframe);
-        const opposingDir = state.openPositions.find(p => p.direction !== sig.direction);
-        if (!existingTf && !opposingDir && state.openPositions.length < 2) {
+        // Enforce Directional Conflict Resolver and Breakout Confirmation
+        const check = canExecuteBreakoutTrade(sig, sig.entryPrice);
+        if (check.allowed) {
           openPaperTrade({
             asset: sig.asset || "XAU/USD",
             timeframe: sig.timeframe || "15m",
@@ -1305,6 +1458,8 @@ window.BreakoutPaperTrading = (function () {
     onPriceTick,
     subscribePortfolio,
     validateBreakoutSetup,
+    resolveBreakoutDirectionConflict,
+    canExecuteBreakoutTrade,
     isCircuitBreakerActive
   };
 })();

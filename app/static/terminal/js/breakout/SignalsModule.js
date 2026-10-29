@@ -258,6 +258,29 @@ window.SignalsModule = (function () {
     const curP = live.price || sig.entryPrice;
     const isBuy = sig.direction === "BUY";
 
+    // 🛡️ Pre-Execution Directional Conflict & Confirmation Gate
+    if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.canExecuteBreakoutTrade === "function") {
+      const check = window.BreakoutPaperTrading.canExecuteBreakoutTrade({
+        timeframe: sig.timeframe || "15m",
+        direction: sig.direction,
+        entryPrice: curP,
+        confidenceScore: sig.confidenceScore,
+        takeProfit: sig.takeProfit,
+        stopLoss: sig.stopLoss
+      }, curP);
+
+      if (!check.allowed) {
+        if (window.UI && typeof window.UI.toast === "function") {
+          window.UI.toast(
+            check.conflictType === "CONCURRENT_OPPOSING_TRADE" ? "⏸️ Direction Conflict Blocked" : "⚠️ Trade Blocked",
+            check.reason,
+            "warning"
+          );
+        }
+        return;
+      }
+    }
+
     // Maintain consistent Risk-to-Reward geometry relative to current execution price (avoids zig-zag/inverted TP/SL)
     const tpDist = Math.abs(sig.takeProfit - sig.entryPrice) || 12.0;
     const slDist = Math.abs(sig.stopLoss - sig.entryPrice) || 6.0;
@@ -275,7 +298,7 @@ window.SignalsModule = (function () {
         takeProfit: effectiveTp,
         stopLoss: effectiveSl,
         confidenceScore: sig.confidenceScore || 94.5,
-        manualForce: true,
+        manualForce: false,
         reason: `${sig.timeframe} Breakout 5% Risk Order`
       });
 
@@ -1332,7 +1355,7 @@ window.SignalsModule = (function () {
 
   window.openTradeStructureModal = openTradeStructureModal;
 
-  function quickOpenPaperTrade(direction, tf = "15m") {
+  function quickOpenPaperTrade(direction, tf = "15m", options = {}) {
     const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : { price: 3998.50 };
     const curP = live.price || 3998.50;
 
@@ -1341,8 +1364,11 @@ window.SignalsModule = (function () {
       timeframe: tf,
       direction: direction,
       entryPrice: curP,
+      manualForce: options.manualForce || false,
       reason: `${tf} Quick 5% Risk Breakout Execution`
     });
+
+    if (!newPos) return;
 
     activeLiveTrade = {
       id: newPos.ticket,
@@ -1629,7 +1655,7 @@ window.SignalsModule = (function () {
         if (window.BreakoutPaperTrading) {
           window.BreakoutPaperTrading.closePaperTrade(activeLiveTrade.id, null, "POSITION_REVERSED");
         }
-        quickOpenPaperTrade(newDir, tf);
+        quickOpenPaperTrade(newDir, tf, { manualForce: true });
       });
     }
 
@@ -1838,6 +1864,24 @@ window.SignalsModule = (function () {
         isProf = false;
       }
 
+      let conflictBadge = "";
+      let isExecutionBlocked = false;
+      let blockReason = "";
+      if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.resolveBreakoutDirectionConflict === "function") {
+        const conflict = window.BreakoutPaperTrading.resolveBreakoutDirectionConflict(sig.timeframe || "15m", sig.direction);
+        if (!conflict.allowed) {
+          isExecutionBlocked = true;
+          blockReason = conflict.reason;
+          if (conflict.conflictType === "CONCURRENT_OPPOSING_TRADE") {
+            conflictBadge = `<span class="badge badge-dim" style="font-size:9.5px;color:var(--text-muted);border:1px dashed var(--border);padding:2px 6px;" title="${conflict.reason}">⏸️ ${sig.timeframe} Active (${conflict.activeTrade.direction})</span>`;
+          } else if (conflict.conflictType === "DUPLICATE_TIMEFRAME_TRADE") {
+            conflictBadge = `<span class="badge badge-dim" style="font-size:9.5px;color:var(--accent);border:1px dashed var(--accent);padding:2px 6px;" title="${conflict.reason}">🔵 ${sig.timeframe} Open</span>`;
+          } else if (conflict.conflictType === "WHIPSAW_COOLDOWN_ACTIVE") {
+            conflictBadge = `<span class="badge badge-dim" style="font-size:9.5px;color:var(--text-muted);padding:2px 6px;" title="${conflict.reason}">⏳ ${conflict.remainingSec}s Cooldown</span>`;
+          }
+        }
+      }
+
       return `
         <tr class="signal-row ${isCurrentActive ? 'row-active-trade' : ''}" data-id="${sig.id}" style="cursor:pointer;transition:background var(--trans);">
           <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap;">
@@ -1877,9 +1921,11 @@ window.SignalsModule = (function () {
               <button class="btn-view-trade-structure btn-view-signal-structure" data-sigid="${sig.id}" style="font-size:11px;padding:3px 8px;display:inline-flex;align-items:center;gap:3px;" title="View Technical Structure & Breakout Strategy Markup">
                 📸 Structure
               </button>
-              <button class="btn-execute-paper btn-trigger-paper-trade" data-sigid="${sig.id}" title="Execute this signal into $10k Paper Portfolio with 5% risk">
-                💼 Paper Trade (5% Risk)
-              </button>
+              ${isExecutionBlocked && conflictBadge ? conflictBadge : `
+                <button class="btn-execute-paper btn-trigger-paper-trade" data-sigid="${sig.id}" title="Execute this signal into $10k Paper Portfolio with 5% risk">
+                  💼 Paper Trade (5% Risk)
+                </button>
+              `}
             </div>
           </td>
         </tr>
