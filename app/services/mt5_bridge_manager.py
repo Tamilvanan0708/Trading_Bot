@@ -419,6 +419,20 @@ class MT5BridgeManager:
                     "reason": f"Live price drifted {native_res.get('gap')} pts past entry target {native_res.get('entry_target')}. Blocked chasing market.",
                 }
 
+            if native_res.get("status") == "REJECTED_BY_BROKER":
+                with self._lock:
+                    if order_id in self._pending_ids:
+                        self._pending_ids.remove(order_id)
+                    order_payload["status"] = "REJECTED"
+                    order_payload["error"] = native_res.get("error")
+                return {
+                    "status": "rejected",
+                    "order_id": order_id,
+                    "retcode": native_res.get("retcode"),
+                    "error": native_res.get("error"),
+                    "reason": f"MT5 / Broker rejected order: {native_res.get('error')} (retcode {native_res.get('retcode')}).",
+                }
+
             with self._lock:
                 if order_id in self._pending_ids:
                     self._pending_ids.remove(order_id)
@@ -466,13 +480,6 @@ class MT5BridgeManager:
             if not t_info or not getattr(t_info, "connected", False):
                 return None
 
-            if not getattr(t_info, "trade_allowed", True):
-                logger.warning(
-                    "[MT5-NATIVE] Terminal 'Algo Trading' is DISABLED in MT5 toolbar! Order %s cannot be executed natively. Please enable Algo Trading in MT5.",
-                    order_payload.get("id"),
-                )
-                return None
-
             symbol = str(order_payload.get("symbol") or "XAUUSD-VIP").strip()
             mt5.symbol_select(symbol, True)
             tick = mt5.symbol_info_tick(symbol)
@@ -489,7 +496,7 @@ class MT5BridgeManager:
             live_spread = round(abs(tick.ask - tick.bid), 2)
             exec_cfg = get_execution_settings()
             tf = str(order_payload.get("timeframe", "5M")).upper()
-            if getattr(exec_cfg, "spread_filter_enabled", True):
+            if getattr(exec_cfg, "spread_filter_enabled", True) and not order_payload.get("is_test", False):
                 if tf == "5M":
                     max_spread = float(getattr(exec_cfg, "max_spread_points_5m", 0.50))
                 else:
@@ -514,7 +521,7 @@ class MT5BridgeManager:
 
             # Idea 1: Entry Chase Guard (Prevent late market orders when price has already drifted far from Fib level)
             entry_target = float(order_payload.get("entry_price") or 0.0)
-            if getattr(exec_cfg, "chase_filter_enabled", True) and entry_target > 0:
+            if getattr(exec_cfg, "chase_filter_enabled", True) and entry_target > 0 and not order_payload.get("is_test", False):
                 max_chase = float(getattr(exec_cfg, "max_chase_points", 2.0))
                 gap = round(abs(price - entry_target), 2)
                 is_chasing = False
@@ -545,6 +552,14 @@ class MT5BridgeManager:
             lot = float(order_payload.get("lot_size") or 0.01)
             sl = float(order_payload.get("stop_loss") or 0.0)
             tp = float(order_payload.get("take_profit") or 0.0)
+            sl_pts = float(order_payload.get("sl_points") or 0.0)
+            tp_pts = float(order_payload.get("tp_points") or 0.0)
+
+            # If relative points provided, calculate valid broker SL & TP from live market price
+            if sl <= 0.0 and sl_pts > 0.0:
+                sl = round(price - sl_pts, 2) if is_buy else round(price + sl_pts, 2)
+            if tp <= 0.0 and tp_pts > 0.0:
+                tp = round(price + tp_pts, 2) if is_buy else round(price - tp_pts, 2)
 
             # Apply Spread Buffer to Stop Loss to prevent broker spread wick spikes
             spread_buffer = float(getattr(exec_cfg, "spread_buffer_points", 0.35) or 0.0)
@@ -553,13 +568,8 @@ class MT5BridgeManager:
                     sl = round(sl - spread_buffer, 2)
                 else:
                     sl = round(sl + spread_buffer, 2)
-                logger.info(
-                    "[MT5-NATIVE] Applied spread buffer %.2f pts to SL -> final MT5 SL: %.2f",
-                    spread_buffer,
-                    sl,
-                )
 
-            # Check broker filling mode
+            # Determine supported filling mode dynamically
             sym_info = mt5.symbol_info(symbol)
             filling = mt5.ORDER_FILLING_IOC
             if sym_info and hasattr(sym_info, "filling_mode"):
@@ -611,6 +621,15 @@ class MT5BridgeManager:
                 logger.debug("[MT5-NATIVE] Duplicate position check error: %s", pos_chk_err)
 
             res = mt5.order_send(request)
+            # If rejected due to filling mode (10030), retry with alternate filling modes
+            if res is not None and res.retcode == getattr(mt5, "TRADE_RETCODE_INVALID_FILL", 10030):
+                for alt_filling in (mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN, mt5.ORDER_FILLING_IOC):
+                    if alt_filling != filling:
+                        request["type_filling"] = alt_filling
+                        res = mt5.order_send(request)
+                        if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
+                            break
+
             if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
                 ticket = int(res.order)
                 logger.info("[MT5-NATIVE] OrderSend() executed successfully! Ticket #%d @ %.2f", ticket, res.price)
@@ -624,9 +643,25 @@ class MT5BridgeManager:
                 return {"ticket": ticket, "price": res.price, "status": "FILLED"}
             else:
                 err_msg = res.comment if res else str(mt5.last_error())
-                logger.warning("[MT5-NATIVE] OrderSend() failed: %s (retcode=%s)", err_msg, getattr(res, "retcode", None))
-                return None
+                retcode = getattr(res, "retcode", None)
+                logger.warning("[MT5-NATIVE] OrderSend() failed: %s (retcode=%s)", err_msg, retcode)
+                self.record_execution_report({
+                    "order_id": order_payload["id"],
+                    "ticket": 0,
+                    "status": "REJECTED",
+                    "fill_price": 0.0,
+                    "retcode": retcode,
+                    "error": err_msg,
+                })
+                return {
+                    "ticket": None,
+                    "status": "REJECTED_BY_BROKER",
+                    "retcode": retcode,
+                    "error": err_msg,
+                }
         except Exception as exc:
+            logger.debug("[MT5-NATIVE] Native MT5 execution skipped: %s", exc)
+            return None
             logger.debug("[MT5-NATIVE] Native MT5 execution skipped: %s", exc)
             return None
 
