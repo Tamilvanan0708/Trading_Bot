@@ -343,95 +343,10 @@ window.BreakoutStrategy = (function () {
           </div>
         </div>
 
-        <!-- ================= STRATEGY CONTROLS & LIVE CHART ================= -->
-        <div style="display:grid;grid-template-columns: 320px 1fr;gap:var(--sp-4);" id="main-strategy-grid">
-          
-          <!-- LEFT: Strategy Parameters Panel -->
-          <div class="card" style="box-shadow:var(--shadow);">
-            <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-weight:700;font-size:13px;letter-spacing:0.5px;">LIVE HYPERPARAMETERS</span>
-              <button id="btn-reset-params" class="btn btn-sm btn-ghost" style="padding:2px 6px;font-size:10px;">Reset</button>
-            </div>
-            <div class="card-body" style="display:flex;flex-direction:column;gap:12px;padding:var(--sp-4);">
-              
-              <!-- Feed Status Indicator -->
-              <div style="padding:8px 12px;background:rgba(34, 197, 94, 0.08);border:1px solid rgba(34, 197, 94, 0.25);border-radius:var(--r-md);font-size:11px;">
-                <div style="font-weight:700;color:var(--green-bright);margin-bottom:2px;display:flex;align-items:center;gap:6px;">
-                  <span class="live-beacon"></span>
-                  <span>AUTO-REFRESH 2S ACTIVE</span>
-                </div>
-                <div style="color:var(--text-dim);font-size:10px;">
-                  Live Ticker: <b id="side-live-tick" style="color:var(--text-bright);">$${live.price.toFixed(2)}</b>
-                </div>
-              </div>
-
-              <!-- S/R Sensitivity Slider -->
-              <div class="param-slider-group">
-                <div class="param-header">
-                  <span class="param-title">S/R Sensitivity</span>
-                  <span class="param-val" id="val-sr-sensitivity">${hp.srSensitivity}%</span>
-                </div>
-                <input type="range" class="breakout-slider" id="slider-sr-sensitivity" min="10" max="100" value="${hp.srSensitivity}" />
-                <div style="font-size:9.5px;color:var(--text-muted);display:flex;justify-content:space-between;">
-                  <span>Macro Levels (10%)</span>
-                  <span>Micro Swings (100%)</span>
-                </div>
-              </div>
-
-              <!-- Volume Surge Percentage Slider -->
-              <div class="param-slider-group">
-                <div class="param-header">
-                  <span class="param-title">Volume Surge Threshold</span>
-                  <span class="param-val" id="val-volume-surge">${hp.volumeSurgePct}%</span>
-                </div>
-                <input type="range" class="breakout-slider" id="slider-volume-surge" min="50" max="400" step="10" value="${hp.volumeSurgePct}" />
-                <div style="font-size:9.5px;color:var(--text-muted);display:flex;justify-content:space-between;">
-                  <span>Normal (50%)</span>
-                  <span>Extreme Spike (400%)</span>
-                </div>
-              </div>
-
-              <!-- Timeframe Selector -->
-              <div class="param-slider-group">
-                <div class="param-header">
-                  <span class="param-title">Active Timeframe</span>
-                  <span class="param-val" id="val-timeframe">${currentTimeframe}</span>
-                </div>
-                <select id="sel-timeframe" class="btn btn-sm btn-ghost" style="width:100%;padding:6px;background:var(--bg-1);margin-top:4px;">
-                  <option value="5m" ${currentTimeframe === "5m" ? "selected" : ""}>5 Minutes (Scalp Breakout)</option>
-                  <option value="15m" ${currentTimeframe === "15m" ? "selected" : ""}>15 Minutes (Fast Breakout)</option>
-                  <option value="30m" ${currentTimeframe === "30m" ? "selected" : ""}>30 Minutes (Momentum Breakout)</option>
-                  <option value="1h" ${currentTimeframe === "1h" ? "selected" : ""}>1 Hour (Intraday Trend Breakout)</option>
-                </select>
-              </div>
-
-              <!-- Confirmation Candles -->
-              <div class="param-slider-group">
-                <div class="param-header">
-                  <span class="param-title">Confirmation Candles</span>
-                  <span class="param-val" id="val-confirmation">${hp.confirmationCandles} Bars</span>
-                </div>
-                <input type="range" class="breakout-slider" id="slider-confirmation" min="1" max="5" value="${hp.confirmationCandles}" />
-              </div>
-
-              <!-- ATR Multiplier -->
-              <div class="param-slider-group">
-                <div class="param-header">
-                  <span class="param-title">Stop Loss ATR Factor</span>
-                  <span class="param-val" id="val-atr">${hp.atrMultiplier}x</span>
-                </div>
-                <input type="range" class="breakout-slider" id="slider-atr" min="1.0" max="3.5" step="0.1" value="${hp.atrMultiplier}" />
-              </div>
-
-              <button id="btn-save-params" class="btn btn-primary" style="margin-top:6px;font-size:12px;font-weight:700;">
-                💾 Apply Parameters
-              </button>
-
-            </div>
-          </div>
-
-          <!-- RIGHT: Real Live XAU/USD Candlestick Chart -->
-          <div class="breakout-chart-card" style="padding:16px;background:var(--panel-solid);">
+        <!-- ================= LIVE CHART FULL WIDTH ================= -->
+        <div style="display:flex;flex-direction:column;gap:var(--sp-4);" id="main-strategy-grid">
+          <!-- Real Live XAU/USD Candlestick Chart (Full Width) -->
+          <div class="breakout-chart-card" style="padding:16px;background:var(--panel-solid);width:100%;">
             
             <!-- Top Chart Controls Row -->
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
