@@ -271,6 +271,9 @@ window.BreakoutStrategy = (function () {
     const agent = window.BreakoutMockData.agent;
     const hp = agent.hyperparameters;
     const live = window.BreakoutDataService.getLiveState();
+    const isMasterActive = window.BreakoutDataService && typeof window.BreakoutDataService.isStrategyActive === "function"
+      ? window.BreakoutDataService.isStrategyActive()
+      : true;
 
     mount.innerHTML = `
       <div class="breakout-container">
@@ -292,10 +295,30 @@ window.BreakoutStrategy = (function () {
               </div>
             </div>
 
+            <!-- Master ON/OFF Switch & Strategy Controls -->
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;">
-              <div class="agent-status-badge ${isTraining ? 'agent-status-training' : 'agent-status-live'}" id="agent-status-pill">
-                <span class="${isTraining ? '' : 'live-beacon'}"></span>
-                <span>${isTraining ? 'TRAINING IN PROGRESS' : 'TRADINGVIEW LIVE STREAMING'}</span>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+                <!-- Breakout Strategy Master ON/OFF Switch -->
+                <div class="breakout-master-toggle-card ${isMasterActive ? 'is-active' : 'is-paused'}" id="breakout-master-card" title="Breakout Strategy Master Switch (Controls ONLY Breakout Strategy)">
+                  <div class="master-toggle-info">
+                    <span class="master-toggle-title">BREAKOUT ENGINE</span>
+                    <span class="master-toggle-status" id="master-toggle-status-text">
+                      <span class="status-dot"></span>
+                      <span>${isMasterActive ? 'ACTIVE (ON)' : 'PAUSED (OFF)'}</span>
+                    </span>
+                  </div>
+                  <button id="btn-master-strategy-toggle" class="master-switch-btn ${isMasterActive ? 'btn-switch-on' : 'btn-switch-off'}" type="button" role="switch" aria-checked="${isMasterActive}" title="Click to turn Breakout Strategy ${isMasterActive ? 'OFF' : 'ON'}">
+                    <span class="master-switch-slider">
+                      <span class="master-switch-knob"></span>
+                    </span>
+                    <span class="master-switch-label" id="master-switch-label">${isMasterActive ? 'ON' : 'OFF'}</span>
+                  </button>
+                </div>
+
+                <div class="agent-status-badge ${isTraining ? 'agent-status-training' : (isMasterActive ? 'agent-status-live' : 'agent-status-paused')}" id="agent-status-pill">
+                  <span class="${isTraining ? '' : (isMasterActive ? 'live-beacon' : 'paused-beacon')}"></span>
+                  <span id="agent-status-pill-text">${isTraining ? 'TRAINING IN PROGRESS' : (isMasterActive ? 'TRADINGVIEW LIVE STREAMING' : 'STRATEGY PAUSED (OFF)')}</span>
+                </div>
               </div>
               
               <div style="display:flex;gap:8px;">
@@ -363,8 +386,8 @@ window.BreakoutStrategy = (function () {
                 <div id="chart-live-delta" class="badge ${live.change >= 0 ? 'badge-green' : 'badge-red'}" style="font-family:var(--font-mono);font-weight:800;font-size:11px;padding:2px 7px;border-radius:4px;display:inline-flex;align-items:center;gap:3px;letter-spacing:0.3px;">
                   ${live.change >= 0 ? '▲ +' : '▼ -'}${Math.abs(live.open ? (live.price - live.open) : 0.50).toFixed(2)}
                 </div>
-                <div id="chart-stream-status" class="feed-status-pill feed-status-connected">
-                  <span class="live-beacon"></span><span>LIVE TV (AUTO 2s)</span>
+                <div id="chart-stream-status" class="feed-status-pill ${isMasterActive ? 'feed-status-connected' : 'feed-status-paused'}">
+                  <span class="${isMasterActive ? 'live-beacon' : 'paused-beacon'}"></span><span id="chart-stream-status-text">${isMasterActive ? 'LIVE TV (AUTO 2s)' : 'STRATEGY PAUSED (OFF)'}</span>
                 </div>
               </div>
 
@@ -639,6 +662,74 @@ window.BreakoutStrategy = (function () {
         if (window.UI && typeof window.UI.toast === "function") {
           window.UI.toast("Model Deployed", "Live Gold breakout inference pipeline activated for real-time order routing.", "success");
         }
+      });
+    }
+
+    // ⚡ Master Breakout Strategy ON/OFF Switch
+    const masterSwitchBtn = mount.querySelector("#btn-master-strategy-toggle");
+    function updateMasterSwitchUI(isActive) {
+      const card = mount.querySelector("#breakout-master-card");
+      const statusText = mount.querySelector("#master-toggle-status-text");
+      const label = mount.querySelector("#master-switch-label");
+      const agentPill = mount.querySelector("#agent-status-pill");
+      const chartStatus = mount.querySelector("#chart-stream-status");
+
+      if (card) {
+        card.classList.toggle("is-active", isActive);
+        card.classList.toggle("is-paused", !isActive);
+      }
+      if (masterSwitchBtn) {
+        masterSwitchBtn.classList.toggle("btn-switch-on", isActive);
+        masterSwitchBtn.classList.toggle("btn-switch-off", !isActive);
+        masterSwitchBtn.setAttribute("aria-checked", isActive ? "true" : "false");
+        masterSwitchBtn.title = `Click to turn Breakout Strategy ${isActive ? 'OFF' : 'ON'}`;
+      }
+      if (label) {
+        label.textContent = isActive ? "ON" : "OFF";
+      }
+      if (statusText) {
+        statusText.innerHTML = `<span class="status-dot"></span><span>${isActive ? 'ACTIVE (ON)' : 'PAUSED (OFF)'}</span>`;
+      }
+      if (agentPill && !isTraining) {
+        agentPill.className = `agent-status-badge ${isActive ? 'agent-status-live' : 'agent-status-paused'}`;
+        agentPill.innerHTML = `<span class="${isActive ? 'live-beacon' : 'paused-beacon'}"></span><span id="agent-status-pill-text">${isActive ? 'TRADINGVIEW LIVE STREAMING' : 'STRATEGY PAUSED (OFF)'}</span>`;
+      }
+      if (chartStatus) {
+        chartStatus.className = `feed-status-pill ${isActive ? 'feed-status-connected' : 'feed-status-paused'}`;
+        chartStatus.innerHTML = `<span class="${isActive ? 'live-beacon' : 'paused-beacon'}"></span><span id="chart-stream-status-text">${isActive ? 'LIVE TV (AUTO 2s)' : 'STRATEGY PAUSED (OFF)'}</span>`;
+      }
+    }
+
+    if (masterSwitchBtn) {
+      masterSwitchBtn.addEventListener("click", () => {
+        if (!window.BreakoutDataService) return;
+        const current = window.BreakoutDataService.isStrategyActive();
+        const next = !current;
+        window.BreakoutDataService.setStrategyActive(next);
+        updateMasterSwitchUI(next);
+
+        if (window.UI && typeof window.UI.toast === "function") {
+          if (next) {
+            window.UI.toast(
+              "🟢 Breakout Strategy Activated (ON)",
+              "Real-time tick scanning and automated 5-layer breakout execution resumed.",
+              "success"
+            );
+          } else {
+            window.UI.toast(
+              "⏸️ Breakout Strategy Paused (OFF)",
+              "Live tick scanning paused. No new breakout signals or trades will open.",
+              "warning"
+            );
+          }
+        }
+      });
+    }
+
+    // Subscribe to external master switch events if triggered from other components
+    if (window.BreakoutDataService && typeof window.BreakoutDataService.subscribeStrategyActive === "function") {
+      window.BreakoutDataService.subscribeStrategyActive((isActive) => {
+        updateMasterSwitchUI(isActive);
       });
     }
 

@@ -21,6 +21,39 @@ window.BreakoutDataService = (function () {
   let tvConsecutiveFailures = 0;
   const priceListeners = new Set();
   const signalListeners = new Set();
+  const strategyActiveListeners = new Set();
+
+  const STORAGE_KEY_STRATEGY_ACTIVE = "breakout_strategy_master_active";
+
+  /**
+   * ⚡ Master Strategy ON/OFF Control
+   * When OFF: Halts breakout tick scanning, suppresses automated signals, blocks new entries.
+   * Keeps existing open positions safely managed with their SL/TP brackets.
+   */
+  function isStrategyActive() {
+    try {
+      const val = localStorage.getItem(STORAGE_KEY_STRATEGY_ACTIVE);
+      return val === null ? true : val === "true";
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function setStrategyActive(active) {
+    const boolVal = !!active;
+    try {
+      localStorage.setItem(STORAGE_KEY_STRATEGY_ACTIVE, boolVal ? "true" : "false");
+    } catch (_) {}
+    strategyActiveListeners.forEach(fn => {
+      try { fn(boolVal); } catch (e) { console.error("Strategy active listener error:", e); }
+    });
+    return boolVal;
+  }
+
+  function subscribeStrategyActive(fn) {
+    strategyActiveListeners.add(fn);
+    return () => strategyActiveListeners.delete(fn);
+  }
 
   let liveState = {
     price: 3998.50,
@@ -447,6 +480,12 @@ window.BreakoutDataService = (function () {
   function checkLiveBreakoutAtPrice(price, volume) {
     if (!price || isNaN(price)) return;
     updateMtfStructures(price);
+
+    // 🛑 Breakout Strategy Master Switch Check: If strategy is paused (OFF), do not scan or generate breakout signals
+    if (!isStrategyActive()) {
+      return;
+    }
+
     const now = Date.now();
 
     // Global Circuit Breaker Check: If portfolio suffered 2 consecutive losses, halt automated entries
@@ -805,6 +844,9 @@ window.BreakoutDataService = (function () {
     updateMtfStructures,
     calibrateMtfStructuresFromCandles,
     simulateBreakoutStructure,
+    isStrategyActive,
+    setStrategyActive,
+    subscribeStrategyActive,
     subscribePrice: (fn) => priceListeners.add(fn),
     unsubscribePrice: (fn) => priceListeners.delete(fn),
     subscribeSignal: (fn) => signalListeners.add(fn),
@@ -1261,6 +1303,19 @@ window.BreakoutPaperTrading = (function () {
    */
   function canExecuteBreakoutTrade(order, currentPrice) {
     if (!order) return { allowed: false, reason: "Invalid order parameters" };
+
+    // 0. Master Strategy ON/OFF Check (Breakout Strategy specific)
+    const masterActive = window.BreakoutDataService && typeof window.BreakoutDataService.isStrategyActive === "function"
+      ? window.BreakoutDataService.isStrategyActive()
+      : isStrategyActive();
+    if (!order.manualForce && !masterActive) {
+      return {
+        allowed: false,
+        conflictType: "STRATEGY_DEACTIVATED",
+        reason: "Breakout Strategy is currently turned OFF. Toggle the master switch to ON to resume automated executions."
+      };
+    }
+
     const tf = order.timeframe || "15m";
     const dir = (order.direction || "BUY").toUpperCase();
     const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : {};
@@ -1612,6 +1667,9 @@ window.BreakoutPaperTrading = (function () {
     validateBreakoutSetup,
     resolveBreakoutDirectionConflict,
     canExecuteBreakoutTrade,
-    isCircuitBreakerActive
+    isCircuitBreakerActive,
+    isStrategyActive: () => (window.BreakoutDataService ? window.BreakoutDataService.isStrategyActive() : isStrategyActive()),
+    setStrategyActive: (val) => (window.BreakoutDataService ? window.BreakoutDataService.setStrategyActive(val) : setStrategyActive(val)),
+    subscribeStrategyActive: (fn) => (window.BreakoutDataService ? window.BreakoutDataService.subscribeStrategyActive(fn) : subscribeStrategyActive(fn))
   };
 })();

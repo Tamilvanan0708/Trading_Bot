@@ -458,6 +458,9 @@ window.SignalsModule = (function () {
     const isCbActive = (typeof window.BreakoutPaperTrading.isCircuitBreakerActive === "function") 
       ? window.BreakoutPaperTrading.isCircuitBreakerActive() 
       : false;
+    const masterActive = window.BreakoutDataService && typeof window.BreakoutDataService.isStrategyActive === "function"
+      ? window.BreakoutDataService.isStrategyActive()
+      : true;
 
     wrap.innerHTML = `
       <div class="paper-portfolio-card" style="border-color:${isPlus ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)'};">
@@ -475,6 +478,7 @@ window.SignalsModule = (function () {
                   ${isPlus ? '🟢 PROFIT' : '🔴 LOSS'} ${isPlus ? '+' : ''}$${acct.netPnlUsd.toFixed(2)} (${isPlus ? '+' : ''}${acct.netPnlPct.toFixed(2)}%)
                 </span>
                 ${isCbActive ? '<span class="badge badge-red" style="font-size:10.5px;font-weight:800;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;" title="Auto-trade paused: 2 consecutive SL hits detected in chop. Reset $10k or change market condition to resume.">🛑 CHOP CIRCUIT BREAKER PAUSE</span>' : ''}
+                ${!masterActive ? '<span class="badge badge-red" style="font-size:10.5px;font-weight:800;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;" title="Breakout Strategy Master Switch is turned OFF."><span class="paused-beacon"></span>STRATEGY ENGINE: OFF</span>' : ''}
               </div>
               <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">
                 Starting Capital: <b>$10,000.00</b> • Max Risk: <b>5.0% ($500.00 max loss per trade)</b> • Automated 5% Guard Active
@@ -640,6 +644,15 @@ window.SignalsModule = (function () {
     const btnAuto = wrap.querySelector("#btn-toggle-auto-execute");
     if (btnAuto) {
       btnAuto.addEventListener("click", () => {
+        const masterActive = window.BreakoutDataService && typeof window.BreakoutDataService.isStrategyActive === "function"
+          ? window.BreakoutDataService.isStrategyActive()
+          : true;
+        if (!masterActive) {
+          if (window.UI && typeof window.UI.toast === "function") {
+            window.UI.toast("Breakout Strategy is OFF", "Please turn ON the Breakout Strategy master switch at the top before enabling Auto-Trade.", "warning");
+          }
+          return;
+        }
         const next = !acct.autoExecute;
         window.BreakoutPaperTrading.setAutoExecute(next);
         renderPaperPortfolioHUD(container);
@@ -2113,6 +2126,12 @@ window.SignalsModule = (function () {
     // it executes immediately!
     if (!window.__breakoutMtfScanInterval) {
       window.__breakoutMtfScanInterval = setInterval(() => {
+        const masterActive = window.BreakoutDataService && typeof window.BreakoutDataService.isStrategyActive === "function"
+          ? window.BreakoutDataService.isStrategyActive()
+          : true;
+        if (!masterActive) {
+          return; // 🛑 Master Breakout Strategy is OFF; skip background scan & automated signals
+        }
         if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.getAccountSummary === "function") {
           const acct = window.BreakoutPaperTrading.getAccountSummary();
           if (acct.autoExecute && !isScanning) {
@@ -2129,6 +2148,12 @@ window.SignalsModule = (function () {
           }
         }
       }, 15000);
+    }
+
+    if (window.BreakoutDataService && typeof window.BreakoutDataService.subscribeStrategyActive === "function") {
+      window.BreakoutDataService.subscribeStrategyActive(() => {
+        renderPaperPortfolioHUD(container);
+      });
     }
 
     if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.subscribePortfolio === "function") {
