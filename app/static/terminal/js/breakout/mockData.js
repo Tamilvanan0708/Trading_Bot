@@ -181,7 +181,7 @@ window.BreakoutDataService = (function () {
         last.low = Math.min(last.low, liveState.price);
         liveState.lastCandle = last;
 
-        computeBreakoutZones(candles);
+        computeBreakoutZones(candles, 20, interval);
       }
 
       return candles;
@@ -194,7 +194,7 @@ window.BreakoutDataService = (function () {
   /**
    * Compute dynamic Breakout zones from real candles
    */
-  function computeBreakoutZones(candles, lookback = 20) {
+  function computeBreakoutZones(candles, lookback = 20, interval = "15m") {
     if (!candles || candles.length < 5) return;
     const slice = candles.slice(-lookback - 1, -1);
     if (slice.length === 0) return;
@@ -213,32 +213,37 @@ window.BreakoutDataService = (function () {
       sumClose += c.close;
     });
 
-    const atr = sumRange / slice.length;
+    const atr = Math.max(3.0, sumRange / slice.length);
     const avgVol = sumVol / slice.length;
     const trendEma = sumClose / slice.length;
 
-    liveState.resistance = parseFloat(highest.toFixed(2));
-    liveState.support = parseFloat(lowest.toFixed(2));
-    liveState.bullishTrigger = parseFloat((highest + 0.50).toFixed(2));
-    liveState.bearishTrigger = parseFloat((lowest - 0.50).toFixed(2));
-    liveState.atr = parseFloat(atr.toFixed(2));
-    liveState.avgVolume = parseFloat(avgVol.toFixed(2));
-    liveState.trendEma = parseFloat(trendEma.toFixed(2));
+    // Calibrate specific timeframe structure with real Donchian pivots
+    calibrateMtfStructuresFromCandles(interval, candles);
 
-    if (window.BreakoutMockData && window.BreakoutMockData.chartZones) {
-      window.BreakoutMockData.chartZones.currentPrice = liveState.price;
-      window.BreakoutMockData.chartZones.resistanceZone = {
-        min: liveState.resistance,
-        max: parseFloat((liveState.resistance + atr * 0.4).toFixed(2)),
-        label: `Dynamic ${lookback}-Bar Resistance`
-      };
-      window.BreakoutMockData.chartZones.supportZone = {
-        min: parseFloat((liveState.support - atr * 0.4).toFixed(2)),
-        max: liveState.support,
-        label: `Dynamic ${lookback}-Bar Support`
-      };
-      window.BreakoutMockData.chartZones.bullishTrigger = liveState.bullishTrigger;
-      window.BreakoutMockData.chartZones.bearishTrigger = liveState.bearishTrigger;
+    if (interval === "15m" || !liveState.resistance) {
+      liveState.resistance = parseFloat(highest.toFixed(2));
+      liveState.support = parseFloat(lowest.toFixed(2));
+      liveState.bullishTrigger = parseFloat((highest + 0.80).toFixed(2));
+      liveState.bearishTrigger = parseFloat((lowest - 0.80).toFixed(2));
+      liveState.atr = parseFloat(atr.toFixed(2));
+      liveState.avgVolume = parseFloat(avgVol.toFixed(2));
+      liveState.trendEma = parseFloat(trendEma.toFixed(2));
+
+      if (window.BreakoutMockData && window.BreakoutMockData.chartZones) {
+        window.BreakoutMockData.chartZones.currentPrice = liveState.price;
+        window.BreakoutMockData.chartZones.resistanceZone = {
+          min: liveState.resistance,
+          max: parseFloat((liveState.resistance + atr * 0.4).toFixed(2)),
+          label: `Dynamic ${lookback}-Bar Resistance`
+        };
+        window.BreakoutMockData.chartZones.supportZone = {
+          min: parseFloat((liveState.support - atr * 0.4).toFixed(2)),
+          max: liveState.support,
+          label: `Dynamic ${lookback}-Bar Support`
+        };
+        window.BreakoutMockData.chartZones.bullishTrigger = liveState.bullishTrigger;
+        window.BreakoutMockData.chartZones.bearishTrigger = liveState.bearishTrigger;
+      }
     }
   }
 
@@ -353,31 +358,77 @@ window.BreakoutDataService = (function () {
    * =========================================================================
    * MULTI-TIMEFRAME BREAKOUT STRUCTURE SCANNER (5m, 15m, 30m, 1h)
    * Institutional S/R Breakout Architecture with Anti-Chop & Anti-Wick Armor
+   * Anchored to Authentic Historical Donchian Candle Pivots
    * =========================================================================
    */
   const MTF_CONFIGS = {
-    "5m":  { name: "5m Scalp",    lookback: 15, atr: 3.5,  buffer: 0.60, tpMult: 2.00, slMult: 1.30, resOffset: 3.20,  supOffset: 3.20 },
-    "15m": { name: "15m Fast",     lookback: 20, atr: 6.0,  buffer: 0.80, tpMult: 2.20, slMult: 1.35, resOffset: 5.50,  supOffset: 5.50 },
-    "30m": { name: "30m Momentum", lookback: 25, atr: 9.0,  buffer: 1.10, tpMult: 2.40, slMult: 1.40, resOffset: 8.50,  supOffset: 8.50 },
-    "1h":  { name: "1h Trend",     lookback: 30, atr: 14.0, buffer: 1.50, tpMult: 2.60, slMult: 1.45, resOffset: 12.00, supOffset: 12.00 }
+    "5m":  { name: "5m Scalp",     lookback: 20, atr: 4.0,  buffer: 0.80, tpMult: 2.40, slMult: 1.80, minSlDistance: 8.00 },
+    "15m": { name: "15m Fast",      lookback: 20, atr: 7.0,  buffer: 1.20, tpMult: 2.50, slMult: 1.85, minSlDistance: 12.00 },
+    "30m": { name: "30m Momentum",  lookback: 20, atr: 11.0, buffer: 1.80, tpMult: 2.60, slMult: 1.90, minSlDistance: 16.00 },
+    "1h":  { name: "1h Trend",      lookback: 20, atr: 18.0, buffer: 2.50, tpMult: 2.70, slMult: 1.95, minSlDistance: 24.00 }
   };
 
   const mtfStructures = {
-    "5m":  { timeframe: "5m",  resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 3.5,  lastSignalTime: 0, status: "MONITORING" },
-    "15m": { timeframe: "15m", resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 6.0,  lastSignalTime: 0, status: "MONITORING" },
-    "30m": { timeframe: "30m", resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 9.0,  lastSignalTime: 0, status: "MONITORING" },
-    "1h":  { timeframe: "1h",  resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 14.0, lastSignalTime: 0, status: "MONITORING" }
+    "5m":  { timeframe: "5m",  resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 4.0,  avgVolume: 100, lastSignalTime: 0, status: "MONITORING" },
+    "15m": { timeframe: "15m", resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 7.0,  avgVolume: 100, lastSignalTime: 0, status: "MONITORING" },
+    "30m": { timeframe: "30m", resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 11.0, avgVolume: 100, lastSignalTime: 0, status: "MONITORING" },
+    "1h":  { timeframe: "1h",  resistance: 0, support: 0, bullishTrigger: 0, bearishTrigger: 0, trendEma: 0, atr: 18.0, avgVolume: 100, lastSignalTime: 0, status: "MONITORING" }
   };
+
+  /**
+   * Calibrates genuine Donchian resistance, support, and trend EMA from real candles
+   */
+  function calibrateMtfStructuresFromCandles(tf, candles) {
+    if (!tf || !candles || candles.length < 10) return;
+    const cfg = MTF_CONFIGS[tf] || MTF_CONFIGS["15m"];
+    const s = mtfStructures[tf];
+    if (!s) return;
+
+    const lookback = cfg.lookback || 20;
+    const slice = candles.slice(-lookback - 1, -1);
+    if (slice.length === 0) return;
+
+    let highest = -Infinity;
+    let lowest = Infinity;
+    let sumRange = 0;
+    let sumVol = 0;
+    let sumClose = 0;
+
+    slice.forEach(c => {
+      if (c.high > highest) highest = c.high;
+      if (c.low < lowest) lowest = c.low;
+      sumRange += (c.high - c.low);
+      sumVol += c.volume;
+      sumClose += c.close;
+    });
+
+    const atr = Math.max(cfg.atr, parseFloat((sumRange / slice.length).toFixed(2)));
+    const avgVol = parseFloat((sumVol / slice.length).toFixed(2));
+    const trendEma = parseFloat((sumClose / slice.length).toFixed(2));
+
+    s.resistance = parseFloat(highest.toFixed(2));
+    s.support = parseFloat(lowest.toFixed(2));
+    s.bullishTrigger = parseFloat((highest + cfg.buffer).toFixed(2));
+    s.bearishTrigger = parseFloat((lowest - cfg.buffer).toFixed(2));
+    s.atr = atr;
+    s.avgVolume = avgVol;
+    s.trendEma = trendEma;
+    s.consolidationWidth = parseFloat((highest - lowest).toFixed(2));
+
+    if (window.BreakoutMockData) {
+      window.BreakoutMockData.mtfStructures = { ...mtfStructures };
+    }
+  }
 
   function updateMtfStructures(price) {
     if (!price || isNaN(price)) return;
     Object.keys(MTF_CONFIGS).forEach(tf => {
       const cfg = MTF_CONFIGS[tf];
       const s = mtfStructures[tf];
-      // Dynamic structural swing calibration across 5m, 15m, 30m, 1h
-      if (!s.resistance || Math.abs(price - s.resistance) > (cfg.atr * 1.5) || Math.abs(price - s.support) > (cfg.atr * 1.5)) {
-        const baseRes = (tf === "15m" && liveState.resistance) ? liveState.resistance : (price + cfg.resOffset);
-        const baseSup = (tf === "15m" && liveState.support) ? liveState.support : (price - cfg.supOffset);
+      // Only set baseline fallback if real candle levels have not yet loaded
+      if (!s.resistance || s.resistance === 0) {
+        const baseRes = (tf === "15m" && liveState.resistance) ? liveState.resistance : (price + (cfg.buffer * 3));
+        const baseSup = (tf === "15m" && liveState.support) ? liveState.support : (price - (cfg.buffer * 3));
 
         s.resistance = parseFloat(baseRes.toFixed(2));
         s.support = parseFloat(baseSup.toFixed(2));
@@ -405,14 +456,14 @@ window.BreakoutDataService = (function () {
       }
     }
 
-    // Check all 4 timeframes for Breakout Structures: 5m, 15m, 30m, 1h
+    // Check all 4 timeframes for Institutional Breakout Structures: 5m, 15m, 30m, 1h
     ["5m", "15m", "30m", "1h"].forEach(tf => {
       const cfg = MTF_CONFIGS[tf];
       const s = mtfStructures[tf];
       if (!s || !s.resistance || !s.support) return;
 
-      // 90s (1.5-minute) responsive institutional cooldown per timeframe
-      if (now - (s.lastSignalTime || 0) < 90000) return;
+      // 120s (2-minute) disciplined institutional cooldown per timeframe
+      if (now - (s.lastSignalTime || 0) < 120000) return;
 
       // 🛡️ Per-Timeframe Active Trade Guard:
       // If timeframe already holds an active trade, keep status locked to that trade to prevent opposing signals
@@ -425,7 +476,7 @@ window.BreakoutDataService = (function () {
         }
       }
 
-      // 1. High-Conviction Breakout Displacement (Must decisively clear the buffer, not just wick)
+      // LAYER 1: Genuine Structural Level Penetration (Must clear the buffer decisively)
       const isBull = price >= s.bullishTrigger;
       const isBear = price <= s.bearishTrigger;
 
@@ -434,18 +485,59 @@ window.BreakoutDataService = (function () {
         return;
       }
 
-      // 2. High-Conviction Breakout Confirmation (Unbiased Buy & Sell Evaluation):
-      // Clearing bullish trigger confirms upside breakout; clearing bearish trigger confirms downside breakdown
-      s.lastSignalTime = now;
-      s.status = isBull ? "BULLISH_BREAKOUT" : "BEARISH_BREAKOUT";
+      // LAYER 2: Candle Body Displacement Filter (Anti-Wick rejection / Anti-Liquidity Sweep)
+      const lastCandle = liveState.lastCandle;
+      if (lastCandle) {
+        const candleRange = Math.max(0.1, lastCandle.high - lastCandle.low);
+        if (isBull) {
+          // Bullish breakout candle must close in upper range and be green
+          const isGreen = lastCandle.close >= (lastCandle.open - 0.20);
+          const closeInUpperRange = (lastCandle.close - lastCandle.low) >= (candleRange * 0.45);
+          if (!isGreen || !closeInUpperRange) {
+            return; // Rejected as a top-wick fakeout / shooting star
+          }
+        } else {
+          // Bearish breakdown candle must close in lower range and be red
+          const isRed = lastCandle.close <= (lastCandle.open + 0.20);
+          const closeInLowerRange = (lastCandle.high - lastCandle.close) >= (candleRange * 0.45);
+          if (!isRed || !closeInLowerRange) {
+            return; // Rejected as a bottom-wick fakeout / hammer
+          }
+        }
+      }
 
+      // LAYER 3: Multi-Timeframe Trend Confluence Filter (Zero Counter-Trend Trades!)
+      const trendEma = s.trendEma || liveState.trendEma;
+      if (trendEma) {
+        if (isBull && price < (trendEma - 0.50)) {
+          return; // Counter-trend buy rejected (bear market trap)
+        }
+        if (isBear && price > (trendEma + 0.50)) {
+          return; // Counter-trend sell rejected (bull market trap)
+        }
+      }
+
+      // LAYER 4: Noise-Immune Structural Stop Loss & Target Geometry
       const atr = s.atr || cfg.atr;
       const entry = price;
-      // High-Conviction Risk-to-Reward (TP: 2.6x-2.9x ATR, SL: 1.8x ATR for noise immunity)
-      const tp = isBull ? parseFloat((entry + atr * cfg.tpMult).toFixed(2)) : parseFloat((entry - atr * cfg.tpMult).toFixed(2));
-      const sl = isBull ? parseFloat((entry - atr * cfg.slMult).toFixed(2)) : parseFloat((entry + atr * cfg.slMult).toFixed(2));
-      const surgeRatio = Math.round(175 + Math.random() * 45);
-      const conf = Math.min(98.5, Math.max(90.0, parseFloat((92 + Math.random() * 6).toFixed(1))));
+      const minSl = cfg.minSlDistance || (tf === "5m" ? 8.0 : (tf === "15m" ? 12.0 : 16.0));
+      const slDist = Math.max(minSl, atr * cfg.slMult);
+
+      // Place SL safely BEHIND the broken pivot level to survive normal retest noise!
+      const sl = isBull
+        ? parseFloat(Math.min(entry - slDist, s.resistance - (atr * 0.75)).toFixed(2))
+        : parseFloat(Math.max(entry + slDist, s.support + (atr * 0.75)).toFixed(2));
+
+      // Precision Target (TP: minimum 1.65:1 Reward-to-Risk)
+      const tp = isBull
+        ? parseFloat((entry + Math.abs(entry - sl) * 1.65).toFixed(2))
+        : parseFloat((entry - Math.abs(entry - sl) * 1.65).toFixed(2));
+
+      const surgeRatio = Math.round(180 + Math.random() * 40);
+      const conf = Math.min(98.5, Math.max(90.0, parseFloat((93 + Math.random() * 5).toFixed(1))));
+
+      s.lastSignalTime = now;
+      s.status = isBull ? "BULLISH_BREAKOUT" : "BEARISH_BREAKOUT";
 
       const signal = {
         id: `SIG-${tf.toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -464,6 +556,14 @@ window.BreakoutDataService = (function () {
         pnlPct: "+0.00%"
       };
 
+      // 🛡️ Pre-Dispatch Institutional Auditor
+      if (window.BreakoutPaperTrading && typeof window.BreakoutPaperTrading.canExecuteBreakoutTrade === "function") {
+        const audit = window.BreakoutPaperTrading.canExecuteBreakoutTrade(signal, entry);
+        if (!audit.allowed) {
+          return; // Audited out: low score, whipsaw cooldown, or direction conflict
+        }
+      }
+
       if (window.BreakoutMockData && window.BreakoutMockData.signals) {
         window.BreakoutMockData.signals.unshift(signal);
       }
@@ -475,8 +575,8 @@ window.BreakoutDataService = (function () {
 
       if (window.UI && typeof window.UI.toast === "function") {
         window.UI.toast(
-          `⚡ ${tf.toUpperCase()} Breakout Structure Triggered!`,
-          `XAU/USD ${signal.signalType} (${tf}) @ $${entry.toFixed(2)} | Target: $${tp.toFixed(2)} | Confidence: ${conf}%`,
+          `⚡ ${tf.toUpperCase()} Institutional Breakout Confirmed!`,
+          `XAU/USD ${signal.direction} (${tf}) @ $${entry.toFixed(2)} | Target: $${tp.toFixed(2)} | SL: $${sl.toFixed(2)} | Confidence: ${conf}%`,
           "info"
         );
       }
@@ -703,6 +803,7 @@ window.BreakoutDataService = (function () {
     getLiveState: () => ({ ...liveState }),
     getMtfStructures: () => ({ ...mtfStructures }),
     updateMtfStructures,
+    calibrateMtfStructuresFromCandles,
     simulateBreakoutStructure,
     subscribePrice: (fn) => priceListeners.add(fn),
     unsubscribePrice: (fn) => priceListeners.delete(fn),
@@ -950,92 +1051,109 @@ window.BreakoutPaperTrading = (function () {
    * Completely prevents random entries, fakeout wicks, counter-trend traps, and consolidation noise.
    */
   function validateBreakoutSetup(order, currentPrice) {
+    if (!order) return { isConfirmed: false, score: 0, reason: "No order data" };
     const live = window.BreakoutDataService ? window.BreakoutDataService.getLiveState() : {};
     const tf = order.timeframe || "15m";
     const mtf = (window.BreakoutDataService && typeof window.BreakoutDataService.getMtfStructures === "function") 
       ? window.BreakoutDataService.getMtfStructures() 
       : {};
     const struct = mtf[tf] || {};
+    const cfg = MTF_CONFIGS[tf] || MTF_CONFIGS["15m"];
 
     const dir = (order.direction || "BUY").toUpperCase();
     const isBuy = dir === "BUY" || dir === "LONG";
-    const p = currentPrice || live.price || order.entryPrice || 4070.0;
+    const p = currentPrice || live.price || order.entryPrice || 4000.0;
 
-    // Use timeframe-specific Resistance, Support, and ATR if available
-    const res = struct.resistance || live.resistance || (p + 2.0);
-    const sup = struct.support || live.support || (p - 2.0);
-    const atr = struct.atr || live.atr || (tf === "5m" ? 4.5 : (tf === "15m" ? 8.5 : (tf === "30m" ? 14.0 : 24.0)));
-    const trendEma = struct.trendEma || live.trendEma || ((res + sup) / 2);
+    // Timeframe-specific Resistance, Support, ATR, and Trend EMA
+    const res = struct.resistance || live.resistance || (p + 3.0);
+    const sup = struct.support || live.support || (p - 3.0);
+    const atr = struct.atr || live.atr || cfg.atr || 7.0;
+    const trendEma = struct.trendEma || live.trendEma || p;
+    const buffer = cfg.buffer || 0.80;
 
     let score = 0;
     const checks = {
       levelClearance: false,
       trendAligned: false,
       volatilityActive: false,
-      structureValid: false
+      structureValid: false,
+      volumeSurge: false
     };
 
-    // 1. Level Clearance Confirmation (30 pts):
-    // For BUY: price MUST break out at or above resistance (p >= res - 0.10)
-    // For SELL: price MUST break down at or below support (p <= sup + 0.10)
-    if (isBuy && p >= (res - 0.10)) {
+    // 1. Decisive Level Clearance Gate (25 pts):
+    // Inside the range (p < res for BUY, p > sup for SELL), trade is STRICTLY PROHIBITED!
+    // Price MUST clear the breakout trigger decisively to avoid wick traps.
+    if (isBuy && p >= (res + buffer * 0.70)) {
       checks.levelClearance = true;
-      score += 30;
-    } else if (!isBuy && p <= (sup + 0.10)) {
+      score += 25;
+    } else if (!isBuy && p <= (sup - buffer * 0.70)) {
       checks.levelClearance = true;
-      score += 30;
+      score += 25;
     }
 
-    // 2. Trend & Market Structure Alignment (30 pts):
-    // Must NOT trade counter-trend on this timeframe!
-    if (isBuy && p >= (trendEma - 1.20)) {
+    // 2. Trend & Market Structure Alignment (25 pts):
+    // Strictly prevent counter-trend traps (e.g. shorting into a powerful bull wave)
+    if (isBuy && p >= (trendEma - 0.50)) {
       checks.trendAligned = true;
-      score += 30;
-    } else if (!isBuy && p <= (trendEma + 1.20)) {
+      score += 25;
+    } else if (!isBuy && p <= (trendEma + 0.50)) {
       checks.trendAligned = true;
-      score += 30;
+      score += 25;
     }
 
-    // 3. Volatility Expansion (20 pts):
-    // ATR must reflect genuine gold market volatility for the timeframe
-    const minAtr = tf === "5m" ? 2.5 : 3.0;
-    if (atr >= minAtr) {
-      checks.volatilityActive = true;
-      score += 20;
-    }
-
-    // 4. Mathematical Risk-to-Reward Ratio (20 pts):
-    // Reward / Risk must be >= 1.35:1
-    const tp = order.takeProfit || (isBuy ? p + atr * 2.2 : p - atr * 2.2);
-    const sl = order.stopLoss || (isBuy ? p - atr * 1.2 : p + atr * 1.2);
+    // 3. Volatility & Noise-Immune Geometry Gate (25 pts):
+    // Requires healthy gold ATR and favorable Reward-to-Risk (>= 1.35:1)
+    const minSl = cfg.minSlDistance || (tf === "5m" ? 8.0 : (tf === "15m" ? 12.0 : 16.0));
+    const tp = order.takeProfit || (isBuy ? p + atr * cfg.tpMult : p - atr * cfg.tpMult);
+    const sl = order.stopLoss || (isBuy ? p - Math.max(minSl, atr * cfg.slMult) : p + Math.max(minSl, atr * cfg.slMult));
     const rewardDist = Math.abs(tp - p);
     const riskDist = Math.abs(p - sl);
-    if (riskDist > 0 && (rewardDist / riskDist) >= 1.35) {
+
+    if (riskDist >= (minSl * 0.80) && (rewardDist / riskDist) >= 1.35) {
       checks.structureValid = true;
+      score += 25;
+    }
+
+    // 4. Volume Surge & Institutional Participation Gate (25 pts):
+    let currentVol = 0;
+    if (order.volumeSurge) {
+      const match = String(order.volumeSurge).match(/\+?(\d+)/);
+      if (match) currentVol = parseInt(match[1], 10);
+    }
+    const hasVolExpansion = currentVol >= 135 || (live.lastCandle && live.lastCandle.volume >= (struct.avgVolume || 100) * 1.30);
+    if (hasVolExpansion) {
+      checks.volumeSurge = true;
+      score += 25;
+    } else if (order.confidenceScore && order.confidenceScore >= 90) {
+      checks.volumeSurge = true;
       score += 20;
     }
 
-    // Credit strategy confidence if order is an audited breakout signal
-    if (order.confidenceScore && order.confidenceScore >= 80) {
-      score += 30;
-      checks.structureValid = true;
-    }
+    // Institutional Gate: Requires at least 85% Score AND genuine Level Clearance AND Trend Alignment
+    const isConfirmed = order.manualForce ? true : (score >= 85 && checks.levelClearance && checks.trendAligned);
+    if (order.manualForce) score = Math.max(score, 98);
 
-    // Gate: Requires at least 80% Confirmation AND genuine Level Clearance to pass
-    const isConfirmed = order.manualForce ? true : (score >= 80 && checks.levelClearance);
-    if (order.manualForce) score = Math.max(score, 95);
     let reason = "Authentic Breakout Confirmed";
-    if (!checks.levelClearance) reason = `Rejected: Price has not broken ${tf} Resistance/Support level`;
-    else if (!checks.trendAligned) reason = `Rejected: Setup opposes ${tf} Market Trend EMA`;
-    else if (!checks.volatilityActive) reason = `Rejected: Insufficient Volatility on ${tf}`;
-    else if (!checks.structureValid) reason = `Rejected: Unfavorable ${tf} Risk-to-Reward ratio`;
+    if (!checks.levelClearance) {
+      reason = isBuy 
+        ? `Rejected: Price ($${p.toFixed(2)}) is inside range and has not decisively cleared ${tf} Resistance ($${res.toFixed(2)})` 
+        : `Rejected: Price ($${p.toFixed(2)}) is inside range and has not decisively cleared ${tf} Support ($${sup.toFixed(2)})`;
+    } else if (!checks.trendAligned) {
+      reason = isBuy 
+        ? `Rejected: BUY setup opposes ${tf} Downtrend EMA ($${trendEma.toFixed(2)})` 
+        : `Rejected: SELL setup opposes ${tf} Uptrend EMA ($${trendEma.toFixed(2)})`;
+    } else if (!checks.structureValid) {
+      reason = `Rejected: Insufficient SL noise buffer or unfavorable Risk-to-Reward on ${tf}`;
+    } else if (!checks.volumeSurge) {
+      reason = `Rejected: Low institutional volume expansion on ${tf}`;
+    }
 
     return {
       isConfirmed,
       score,
       checks,
       reason,
-      details: `Confirmation Score: ${score}% (${checks.levelClearance ? '✓ Level' : '✗ Level'}, ${checks.trendAligned ? '✓ Trend' : '✗ Trend'}, ${checks.volatilityActive ? '✓ Volatility' : '✗ Volatility'}, ${checks.structureValid ? '✓ R:R' : '✗ R:R'})`
+      details: `Confirmation Score: ${score}% (${checks.levelClearance ? '✓ Level' : '✗ Level'}, ${checks.trendAligned ? '✓ Trend' : '✗ Trend'}, ${checks.structureValid ? '✓ Geometry' : '✗ Geometry'}, ${checks.volumeSurge ? '✓ Volume' : '✗ Volume'})`
     };
   }
 
@@ -1215,16 +1333,30 @@ window.BreakoutPaperTrading = (function () {
     }
 
     const confirmation = check.confirmation || validateBreakoutSetup(order, curP);
-    const atrMap = { "5m": 4.5, "15m": 8.5, "30m": 14.0, "1h": 24.0 };
-    const atr = atrMap[tf] || 8.5;
+    const cfg = MTF_CONFIGS[tf] || MTF_CONFIGS["15m"];
+    const minSl = cfg.minSlDistance || (tf === "5m" ? 8.0 : (tf === "15m" ? 12.0 : (tf === "30m" ? 16.0 : 22.0)));
+    const atr = cfg.atr || 7.0;
     const isBuy = dir === "BUY";
+    const s = mtfStructures[tf];
 
-    let tp = order.takeProfit || (isBuy ? parseFloat((curP + atr * 2.4).toFixed(2)) : parseFloat((curP - atr * 2.4).toFixed(2)));
-    let sl = order.stopLoss || (isBuy ? parseFloat((curP - atr * 1.8).toFixed(2)) : parseFloat((curP + atr * 1.8).toFixed(2)));
+    // Structural Noise-Immune Stop Loss Placement:
+    // Placed safely behind structural pivot with at least minSl distance to survive normal retest noise!
+    let sl = order.stopLoss;
+    if (!sl || Math.abs(curP - sl) < minSl) {
+      if (isBuy) {
+        const structuralBase = (s && s.resistance) ? Math.min(curP - minSl, s.resistance - (atr * 0.75)) : (curP - minSl);
+        sl = parseFloat(structuralBase.toFixed(2));
+      } else {
+        const structuralBase = (s && s.support) ? Math.max(curP + minSl, s.support + (atr * 0.75)) : (curP + minSl);
+        sl = parseFloat(structuralBase.toFixed(2));
+      }
+    }
 
-    // 🛡️ CRITICAL BREAKOUT GATE: SL CAN NEVER BE EQUAL OR NEAR ENTRY PRICE ON OPEN
-    if (Math.abs(curP - sl) < 2.0) {
-      sl = isBuy ? parseFloat((curP - atr * 1.8).toFixed(2)) : parseFloat((curP + atr * 1.8).toFixed(2));
+    // High Reward-to-Risk Target (>= 1.65:1):
+    let tp = order.takeProfit;
+    const actualSlDist = Math.abs(curP - sl);
+    if (!tp || Math.abs(curP - tp) < (actualSlDist * 1.35)) {
+      tp = isBuy ? parseFloat((curP + actualSlDist * 1.65).toFixed(2)) : parseFloat((curP - actualSlDist * 1.65).toFixed(2));
     }
 
     // Exact 5% Risk Lot Size Calculation (strictly capped at $500.00 max risk)
