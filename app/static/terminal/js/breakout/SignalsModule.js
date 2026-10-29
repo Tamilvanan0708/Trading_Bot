@@ -958,8 +958,10 @@ window.SignalsModule = (function () {
   }
 
   /* ==========================================================================
-     TRADE STRUCTURE MARKUP POPUP & HIGH-DEFINITION SVG GENERATOR
+     TRADE STRUCTURE MARKUP POPUP & REAL BINANCE LIVE CHART GENERATOR
      ========================================================================== */
+
+  let structureModalChart = null;
 
   function ensureStructureModal() {
     let modal = document.getElementById("trade-structure-modal");
@@ -989,263 +991,222 @@ window.SignalsModule = (function () {
     if (modal) {
       modal.classList.remove("active");
     }
+    if (structureModalChart) {
+      try {
+        structureModalChart.remove();
+      } catch (_) {}
+      structureModalChart = null;
+    }
   }
 
-  function generateTradeCandles(pos, minP, maxP, getY) {
-    const isBuy = pos.direction === "BUY";
-    const entry = pos.entryPrice;
-    const sl = pos.stopLoss;
-    const tp = pos.takeProfit;
-    const candles = [];
-
-    // 12 consolidation candles coiling between S/R
-    for (let i = 0; i < 12; i++) {
-      const cycle = Math.sin((i / 11) * Math.PI * 3);
-      const center = isBuy 
-        ? (sl + (entry - sl) * (0.35 + 0.35 * Math.sin(i))) 
-        : (entry + (sl - entry) * (0.35 + 0.35 * Math.sin(i)));
-      const open = center - 0.6 * cycle;
-      const close = center + 0.7 * cycle;
-      const high = Math.max(open, close) + 0.8 + Math.abs(Math.sin(i * 1.5)) * 0.7;
-      const low = Math.min(open, close) - 0.8 - Math.abs(Math.cos(i * 1.5)) * 0.7;
-      candles.push({ open, high, low, close, isBreakout: false, volPct: 0.25 + (i % 3) * 0.1 });
+  /**
+   * Renders real Binance live chart with authentic candles, entry/TP/SL lines and markers
+   */
+  async function renderRealTradeStructureChart(pos, mountEl) {
+    if (!mountEl) return;
+    if (structureModalChart) {
+      try { structureModalChart.remove(); } catch (_) {}
+      structureModalChart = null;
     }
 
-    // Candle 12: THE INSTITUTIONAL BREAKOUT CANDLE
-    if (isBuy) {
-      const open = entry - 2.2;
-      const low = open - 0.6;
-      const close = entry + 1.8;
-      const high = close + 0.8;
-      candles.push({ open, high, low, close, isBreakout: true, volPct: 1.0 });
-    } else {
-      const open = entry + 2.2;
-      const high = open + 0.6;
-      const close = entry - 1.8;
-      const low = close - 0.8;
-      candles.push({ open, high, low, close, isBreakout: true, volPct: 1.0 });
-    }
+    const tf = pos.timeframe || "15m";
+    const width = mountEl.clientWidth || 880;
+    const height = 430;
 
-    // Candle 13: Retest candle
-    if (isBuy) {
-      const open = entry + 1.8;
-      const low = entry - 0.3; // retest wick
-      const close = entry + 2.4;
-      const high = close + 0.6;
-      candles.push({ open, high, low, close, isBreakout: false, volPct: 0.65 });
-    } else {
-      const open = entry - 1.8;
-      const high = entry + 0.3; // retest wick
-      const close = entry - 2.4;
-      const low = close - 0.6;
-      candles.push({ open, high, low, close, isBreakout: false, volPct: 0.65 });
-    }
-
-    // Candle 14: Momentum continuation
-    if (isBuy) {
-      const open = entry + 2.4;
-      const low = open - 0.4;
-      const close = entry + (tp - entry) * 0.55;
-      const high = close + 0.7;
-      candles.push({ open, high, low, close, isBreakout: false, volPct: 0.75 });
-    } else {
-      const open = entry - 2.4;
-      const high = open + 0.4;
-      const close = entry - (entry - tp) * 0.55;
-      const low = close - 0.7;
-      candles.push({ open, high, low, close, isBreakout: false, volPct: 0.75 });
-    }
-
-    // Candle 15: Expansion towards Target
-    if (isBuy) {
-      const open = entry + (tp - entry) * 0.55;
-      const low = open - 0.5;
-      const close = entry + (tp - entry) * 0.85;
-      const high = close + 0.9;
-      candles.push({ open, high, low, close, isBreakout: false, volPct: 0.8 });
-    } else {
-      const open = entry - (entry - tp) * 0.55;
-      const high = open + 0.5;
-      const close = entry - (entry - tp) * 0.85;
-      const low = close - 0.9;
-      candles.push({ open, high, low, close, isBreakout: false, volPct: 0.8 });
-    }
-
-    return candles;
-  }
-
-  function generateTradeStructureSvg(pos) {
-    const isBuy = pos.direction === "BUY";
-    const entry = Number(pos.entryPrice) || 3998.50;
-    const tp = Number(pos.takeProfit) || (isBuy ? entry + 14 : entry - 14);
-    const sl = Number(pos.stopLoss) || (isBuy ? entry - 13 : entry + 13);
-
-    const minP = Math.min(sl, tp, entry) - 2.5;
-    const maxP = Math.max(sl, tp, entry) + 2.5;
-    const pRange = maxP - minP || 1;
-
-    const chartH = 260;
-    const topMargin = 50;
-
-    function getY(p) {
-      const clamped = Math.max(minP, Math.min(maxP, p));
-      return Math.round(topMargin + (1 - (clamped - minP) / pRange) * (chartH - 20));
-    }
-
-    const yEntry = getY(entry);
-    const yTp = getY(tp);
-    const ySl = getY(sl);
-
-    // Structural S/R boundary levels
-    const resLevel = isBuy ? (entry - 0.40) : (sl - 0.40);
-    const supLevel = isBuy ? (sl + 0.40) : (entry + 0.40);
-    const yRes = getY(resLevel);
-    const ySup = getY(supLevel);
-
-    const candles = generateTradeCandles(pos, minP, maxP, getY);
-    const xStart = 70;
-    const step = 42;
-
-    let candleMarkup = "";
-    let volMarkup = "";
-
-    let boX = xStart + 12 * step;
-    let boY = yEntry;
-
-    candles.forEach((c, i) => {
-      const cx = xStart + i * step;
-      const isGreen = c.close >= c.open;
-      const bodyColor = isGreen ? "#22c55e" : "#ef4444";
-      const wickColor = isGreen ? "#16a34a" : "#dc2626";
-
-      const yO = getY(c.open);
-      const yC = getY(c.close);
-      const yH = getY(c.high);
-      const yL = getY(c.low);
-
-      const bTop = Math.min(yO, yC);
-      const bBot = Math.max(yO, yC);
-      const bH = Math.max(3, bBot - bTop);
-
-      if (c.isBreakout) {
-        boX = cx;
-        boY = yC;
+    // Fetch REAL historical + live candles directly from Binance (PAXGUSDT / XAUUSD)
+    let candles = [];
+    try {
+      if (window.BreakoutDataService && typeof window.BreakoutDataService.fetchCandles === "function") {
+        candles = await window.BreakoutDataService.fetchCandles(tf, 90);
       }
+    } catch (e) {
+      console.warn("Could not fetch real candles for modal:", e);
+    }
 
-      // Candle
-      candleMarkup += `
-        <g class="candle-item">
-          <line x1="${cx}" y1="${yH}" x2="${cx}" y2="${yL}" stroke="${wickColor}" stroke-width="1.6" />
-          <rect x="${cx - 9}" y="${bTop}" width="18" height="${bH}" rx="1.5" fill="${bodyColor}" stroke="${c.isBreakout ? '#ffffff' : 'none'}" stroke-width="${c.isBreakout ? 1.5 : 0}" />
-        </g>
+    if (!candles || candles.length === 0) {
+      mountEl.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#ef4444;gap:8px;">
+          <span>⚠️ Could not load real Binance market stream. Please check connection.</span>
+        </div>
       `;
+      return;
+    }
 
-      // Volume bar
-      const volH = Math.round(15 + c.volPct * 50);
-      const volY = 420 - volH;
-      const volColor = c.isBreakout ? "#38bdf8" : (isGreen ? "rgba(34, 197, 94, 0.45)" : "rgba(239, 68, 68, 0.45)");
+    mountEl.innerHTML = ""; // Clear loading placeholder
 
-      volMarkup += `
-        <rect x="${cx - 8}" y="${volY}" width="16" height="${volH}" rx="2" fill="${volColor}" stroke="${c.isBreakout ? '#60a5fa' : 'none'}" stroke-width="${c.isBreakout ? 1.5 : 0}" />
-      `;
+    const isLight = document.documentElement.getAttribute("data-theme") === "light";
+    const bg = isLight ? "#ffffff" : "#080c14";
+    const textCol = isLight ? "#475569" : "#94a3b8";
+    const borderCol = isLight ? "#cbd5e1" : "rgba(255, 255, 255, 0.08)";
+
+    const chart = window.LightweightCharts.createChart(mountEl, {
+      width: width,
+      height: height,
+      layout: {
+        background: { color: bg },
+        textColor: textCol,
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: 11
+      },
+      grid: {
+        vertLines: { color: borderCol, style: window.LightweightCharts.LineStyle.Dotted },
+        horzLines: { color: borderCol, style: window.LightweightCharts.LineStyle.Dotted }
+      },
+      crosshair: {
+        mode: window.LightweightCharts.CrosshairMode.Normal
+      },
+      rightPriceScale: {
+        borderColor: borderCol,
+        scaleMargins: { top: 0.12, bottom: 0.22 }
+      },
+      timeScale: {
+        borderColor: borderCol,
+        timeVisible: true,
+        secondsVisible: false
+      }
     });
 
-    return `
-      <svg class="structure-chart-svg" viewBox="0 0 840 440" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="chart-bg-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="#0b111a" />
-            <stop offset="100%" stop-color="#070a0f" />
-          </linearGradient>
-        </defs>
+    structureModalChart = chart;
 
-        <!-- Background -->
-        <rect width="840" height="440" fill="url(#chart-bg-grad)" />
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderVisible: false,
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444"
+    });
 
-        <!-- Grid lines -->
-        <line x1="50" y1="50" x2="770" y2="50" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
-        <line x1="50" y1="120" x2="770" y2="120" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
-        <line x1="50" y1="190" x2="770" y2="190" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
-        <line x1="50" y1="260" x2="770" y2="260" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
-        <line x1="50" y1="330" x2="770" y2="330" stroke="rgba(255,255,255,0.12)" stroke-width="1" />
+    const volumeSeries = chart.addHistogramSeries({
+      color: "rgba(59, 130, 246, 0.35)",
+      priceFormat: { type: "volume" },
+      priceScaleId: "",
+      scaleMargins: { top: 0.82, bottom: 0 }
+    });
 
-        <!-- Top Watermark & Info -->
-        <text x="60" y="32" font-size="12" font-weight="800" fill="#94a3b8" letter-spacing="0.5" font-family="system-ui, sans-serif">
-          ${pos.symbol} · ${pos.timeframe} STRATEGY EXECUTION · TICKET #${pos.ticket}
-        </text>
-        <text x="760" y="32" text-anchor="end" font-size="11" font-weight="700" fill="${isBuy ? '#22c55e' : '#ef4444'}" font-family="system-ui, sans-serif">
-          ${isBuy ? '▲ BULLISH MOMENTUM BREAKOUT' : '▼ BEARISH STRUCTURAL BREAKDOWN'}
-        </text>
+    // Populate REAL candles and volume
+    candleSeries.setData(candles);
 
-        <!-- Resistance Zone Band -->
-        <rect x="50" y="${Math.min(yRes, yRes - 14)}" width="720" height="24" fill="rgba(239, 68, 68, 0.08)" stroke="rgba(239, 68, 68, 0.25)" stroke-dasharray="4,4" />
-        <text x="62" y="${yRes + 4}" font-size="9" font-weight="700" fill="#f87171" font-family="system-ui, sans-serif">
-          RESISTANCE ZONE · $${resLevel.toFixed(2)}
-        </text>
+    const volData = candles.map(c => ({
+      time: c.time,
+      value: c.volume,
+      color: c.close >= c.open ? "rgba(34, 197, 94, 0.35)" : "rgba(239, 68, 68, 0.35)"
+    }));
+    volumeSeries.setData(volData);
 
-        <!-- Support Zone Band -->
-        <rect x="50" y="${Math.min(ySup, ySup - 14)}" width="720" height="24" fill="rgba(34, 197, 94, 0.08)" stroke="rgba(34, 197, 94, 0.25)" stroke-dasharray="4,4" />
-        <text x="62" y="${ySup + 4}" font-size="9" font-weight="700" fill="#4ade80" font-family="system-ui, sans-serif">
-          DEMAND SUPPORT ZONE · $${supLevel.toFixed(2)}
-        </text>
+    const isBuy = pos.direction === "BUY";
+    const entry = Number(pos.entryPrice);
+    const tp = Number(pos.takeProfit);
+    const sl = Number(pos.stopLoss);
 
-        <!-- Take Profit Target Line -->
-        <line x1="50" y1="${yTp}" x2="770" y2="${yTp}" stroke="#22c55e" stroke-width="1.8" stroke-dasharray="5,4" />
-        <rect x="670" y="${yTp - 10}" width="100" height="20" rx="4" fill="#14532d" stroke="#22c55e" stroke-width="1" />
-        <text x="720" y="${yTp + 4}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#86efac" font-family="monospace">
-          TP $${tp.toFixed(2)}
-        </text>
+    // 1. Mark ENTRY on real chart
+    if (entry && !isNaN(entry)) {
+      candleSeries.createPriceLine({
+        price: entry,
+        color: "#3b82f6",
+        lineWidth: 2,
+        lineStyle: window.LightweightCharts.LineStyle.Solid,
+        axisLabelVisible: true,
+        title: `ENTRY @ $${entry.toFixed(2)}`
+      });
+    }
 
-        <!-- Entry Price Line -->
-        <line x1="50" y1="${yEntry}" x2="770" y2="${yEntry}" stroke="#3b82f6" stroke-width="2" />
-        <rect x="670" y="${yEntry - 10}" width="100" height="20" rx="4" fill="#1e3a8a" stroke="#3b82f6" stroke-width="1" />
-        <text x="720" y="${yEntry + 4}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#93c5fd" font-family="monospace">
-          ENTRY $${entry.toFixed(2)}
-        </text>
+    // 2. Mark TAKE PROFIT on real chart
+    if (tp && !isNaN(tp)) {
+      candleSeries.createPriceLine({
+        price: tp,
+        color: "#22c55e",
+        lineWidth: 2,
+        lineStyle: window.LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `TARGET (TP) @ $${tp.toFixed(2)}`
+      });
+    }
 
-        <!-- Stop Loss Line (5% Max Loss) -->
-        <line x1="50" y1="${ySl}" x2="770" y2="${ySl}" stroke="#ef4444" stroke-width="1.8" stroke-dasharray="5,4" />
-        <rect x="670" y="${ySl - 10}" width="100" height="20" rx="4" fill="#7f1d1d" stroke="#ef4444" stroke-width="1" />
-        <text x="720" y="${ySl + 4}" text-anchor="middle" font-size="9.5" font-weight="800" fill="#fca5a5" font-family="monospace">
-          SL $${sl.toFixed(2)} (5%)
-        </text>
+    // 3. Mark STOP LOSS on real chart
+    if (sl && !isNaN(sl)) {
+      candleSeries.createPriceLine({
+        price: sl,
+        color: "#ef4444",
+        lineWidth: 2,
+        lineStyle: window.LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: pos.isBreakEven ? `PROTECTED B/E @ $${sl.toFixed(2)}` : `STOP LOSS (SL) @ $${sl.toFixed(2)}`
+      });
+    }
 
-        <!-- Candlesticks rendering -->
-        ${candleMarkup}
+    // 4. Mark Breakout Level (Resistance or Support)
+    const struct = (window.BreakoutDataService && window.BreakoutDataService.getMtfStructures) 
+      ? window.BreakoutDataService.getMtfStructures()[tf] 
+      : null;
+    const boLevel = isBuy 
+      ? (struct && struct.resistance ? struct.resistance : entry - 0.80) 
+      : (struct && struct.support ? struct.support : entry + 0.80);
 
-        <!-- Volume Sub-chart baseline & text -->
-        <text x="60" y="348" font-size="9" font-weight="700" fill="#64748b" font-family="system-ui, sans-serif">
-          VOLUME OSCILLATOR & INSTITUTIONAL SURGE CONFIRMATION
-        </text>
-        <text x="${boX}" y="348" text-anchor="middle" font-size="9" font-weight="800" fill="#38bdf8" font-family="system-ui, sans-serif">
-          ▲ +185% SPIKE
-        </text>
-        <!-- Volume bars -->
-        ${volMarkup}
+    if (boLevel && !isNaN(boLevel)) {
+      candleSeries.createPriceLine({
+        price: boLevel,
+        color: "#f59e0b",
+        lineWidth: 1.5,
+        lineStyle: window.LightweightCharts.LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: isBuy ? `RESISTANCE BREAK @ $${boLevel.toFixed(2)}` : `SUPPORT BREAKDOWN @ $${boLevel.toFixed(2)}`
+      });
+    }
 
-        <!-- BREAKOUT CALLOUT SPEECH BOX & BEACON -->
-        <g transform="translate(${Math.max(200, boX - 250)}, ${isBuy ? Math.max(48, boY - 95) : Math.min(210, boY + 30)})">
-          <rect x="0" y="0" width="280" height="74" rx="8" fill="#0f172a" stroke="#f59e0b" stroke-width="1.8" />
-          <circle cx="20" cy="22" r="7" fill="#f59e0b" />
-          <text x="20" y="26" text-anchor="middle" font-size="11" font-weight="900" fill="#000">⚡</text>
-          <text x="35" y="24" font-size="11" font-weight="800" fill="#f59e0b" font-family="system-ui, sans-serif">BREAKOUT STRATEGY APPLIED HERE</text>
-          <text x="14" y="44" font-size="9.5" fill="#e2e8f0" font-family="system-ui, sans-serif">
-            ${isBuy ? '• Decisive Candle Close ABOVE Resistance' : '• Decisive Candle Close BELOW Support'}
-          </text>
-          <text x="14" y="60" font-size="9.5" fill="#38bdf8" font-family="system-ui, sans-serif">
-            • +185% Institutional Volume Surge Confirmed
-          </text>
-        </g>
+    // 5. Place native Arrow Marker on the real candle
+    let targetCandle = candles[candles.length - 1];
+    if (pos.openTimestamp) {
+      const tradeTs = Math.floor(Date.parse(pos.openTimestamp) / 1000);
+      const tolerance = tf === "5m" ? 300 : (tf === "15m" ? 900 : (tf === "30m" ? 1800 : 3600));
+      const found = candles.find(c => Math.abs(c.time - tradeTs) <= tolerance);
+      if (found) targetCandle = found;
+    }
 
-        <!-- Connector line & Beacon on Breakout Candle -->
-        <line x1="${boX - 20}" y1="${isBuy ? boY - 24 : boY + 24}" x2="${boX}" y2="${boY}" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="3,3" />
-        <circle cx="${boX}" cy="${boY}" r="5" fill="#f59e0b" stroke="#ffffff" stroke-width="1.5" />
-        <circle cx="${boX}" cy="${boY}" r="9" fill="none" stroke="#f59e0b" stroke-width="1.5" opacity="0.6">
-          <animate attributeName="r" values="6;14;6" dur="2s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.8;0;0.8" dur="2s" repeatCount="indefinite" />
-        </circle>
-      </svg>
-    `;
+    if (targetCandle) {
+      candleSeries.setMarkers([
+        {
+          time: targetCandle.time,
+          position: isBuy ? "belowBar" : "aboveBar",
+          color: isBuy ? "#22c55e" : "#ef4444",
+          shape: isBuy ? "arrowUp" : "arrowDown",
+          text: `${isBuy ? '▲ BUY BREAKOUT' : '▼ SELL BREAKDOWN'} @ $${entry.toFixed(2)}`
+        }
+      ]);
+    }
+
+    chart.timeScale().fitContent();
+
+    // Bind real screenshot export button
+    const snapBtn = document.getElementById("btn-snapshot-structure-chart");
+    if (snapBtn) {
+      snapBtn.onclick = () => {
+        try {
+          const canvas = chart.takeScreenshot();
+          if (canvas) {
+            const dataUrl = canvas.toDataURL("image/png");
+            const a = document.createElement("a");
+            a.href = dataUrl;
+            a.download = `Real_Binance_Chart_${pos.ticket}_${pos.symbol}_${tf}_${Date.now()}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            if (window.UI && typeof window.UI.toast === "function") {
+              window.UI.toast("📸 Real Chart Snapshot Saved", "Real Binance live chart screenshot with entry & levels downloaded!", "success");
+            }
+          }
+        } catch (err) {
+          console.error("Screenshot error:", err);
+        }
+      };
+    }
+
+    // Responsive auto-resizer
+    const ro = new ResizeObserver(entries => {
+      if (entries.length && chart) {
+        chart.applyOptions({ width: entries[0].contentRect.width });
+      }
+    });
+    ro.observe(mountEl);
   }
 
   function openTradeStructureModal(ticketOrId) {
@@ -1300,8 +1261,6 @@ window.SignalsModule = (function () {
     }
 
     const modal = ensureStructureModal();
-    const svgHtml = generateTradeStructureSvg(pos);
-
     const isBuy = pos.direction === "BUY";
     const isClosed = pos.status === "TP_HIT" || pos.status === "SL_HIT" || !!pos.closeTime;
 
@@ -1313,7 +1272,7 @@ window.SignalsModule = (function () {
             <span style="font-size:18px;">📸</span>
             <div>
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <span>Trade Structure & Breakout Strategy Markup</span>
+                <span>Real Live Chart Structure & Breakout Markup</span>
                 <span class="badge ${isBuy ? 'badge-green' : 'badge-red'}" style="font-weight:800;">
                   ${isBuy ? '▲ BUY BREAKOUT' : '▼ SELL BREAKDOWN'}
                 </span>
@@ -1328,9 +1287,33 @@ window.SignalsModule = (function () {
           <button class="structure-modal-close" id="btn-close-structure-modal" title="Close (Esc)">×</button>
         </div>
 
-        <!-- SVG Chart Screenshot Container -->
-        <div class="structure-chart-container">
-          ${svgHtml}
+        <!-- Real Binance Chart Mount Container -->
+        <div class="structure-chart-container" style="position:relative;background:#080c14;min-height:430px;padding:0;">
+          <!-- Live Overlay Header -->
+          <div style="position:absolute;top:10px;left:14px;z-index:10;display:flex;align-items:center;gap:8px;pointer-events:none;">
+            <span class="badge" style="background:rgba(34,197,94,0.18);border:1px solid rgba(34,197,94,0.4);color:#22c55e;font-weight:800;font-size:10px;display:inline-flex;align-items:center;gap:5px;padding:3px 8px;">
+              <span style="display:inline-block;width:6px;height:6px;background:#22c55e;border-radius:50%;box-shadow:0 0 6px #22c55e;"></span>
+              REAL BINANCE SPOT (PAXG/USDT · XAU/USD)
+            </span>
+            <span style="font-family:var(--font-mono);font-size:11px;color:#94a3b8;font-weight:700;">
+              ${pos.timeframe.toUpperCase()} CANDLES
+            </span>
+          </div>
+
+          <!-- Top-Right Screenshot Button -->
+          <div style="position:absolute;top:10px;right:14px;z-index:10;display:flex;align-items:center;gap:8px;">
+            <button id="btn-snapshot-structure-chart" class="btn btn-sm" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);color:#f1f5f9;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:5px;padding:4px 10px;cursor:pointer;border-radius:6px;" title="Save / Download Real Chart Screenshot">
+              📷 Save Screenshot
+            </button>
+          </div>
+
+          <!-- Real Chart Target Element -->
+          <div id="structure-real-chart-mount" style="width:100%;height:430px;">
+            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#64748b;gap:10px;">
+              <div class="spinner" style="width:28px;height:28px;border:3px solid rgba(59,130,246,0.2);border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+              <span style="font-size:12px;font-weight:600;">Loading Real Binance Live Chart (${pos.timeframe})...</span>
+            </div>
+          </div>
         </div>
 
         <!-- 4-Pillar Institutional Confirmation & Execution Audit -->
@@ -1379,7 +1362,7 @@ window.SignalsModule = (function () {
         <!-- Footer Actions -->
         <div style="padding:12px 18px;background:rgba(255,255,255,0.02);border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
           <span style="font-size:11px;color:var(--text-dim);">
-            ⚡ Technical structure markup captured at entry confirmation point.
+            ⚡ Real-time Binance spot candle stream markup with live institutional execution levels.
           </span>
           <div style="display:flex;gap:8px;align-items:center;">
             <button class="btn btn-sm btn-execute-paper" onclick="window.SignalsModule.executePaperTradeFromSignal('${pos.ticket}');window.SignalsModule.closeTradeStructureModal();" style="font-weight:700;">
@@ -1400,6 +1383,12 @@ window.SignalsModule = (function () {
 
     const dismissBtn = modal.querySelector("#btn-dismiss-structure-modal");
     if (dismissBtn) dismissBtn.onclick = closeTradeStructureModal;
+
+    // Render the REAL Binance chart into the mounted container!
+    setTimeout(() => {
+      const mount = modal.querySelector("#structure-real-chart-mount");
+      renderRealTradeStructureChart(pos, mount);
+    }, 60);
   }
 
   window.openTradeStructureModal = openTradeStructureModal;
