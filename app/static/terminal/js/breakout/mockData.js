@@ -356,10 +356,10 @@ window.BreakoutDataService = (function () {
    * =========================================================================
    */
   const MTF_CONFIGS = {
-    "5m":  { name: "5m Scalp",    lookback: 15, atr: 3.5,  buffer: 0.35, tpMult: 1.80, slMult: 1.15, resOffset: 1.80,  supOffset: 1.80 },
-    "15m": { name: "15m Fast",     lookback: 20, atr: 6.0,  buffer: 0.50, tpMult: 2.00, slMult: 1.25, resOffset: 3.20,  supOffset: 3.20 },
-    "30m": { name: "30m Momentum", lookback: 25, atr: 9.0,  buffer: 0.75, tpMult: 2.20, slMult: 1.35, resOffset: 4.80,  supOffset: 4.80 },
-    "1h":  { name: "1h Trend",     lookback: 30, atr: 14.0, buffer: 1.00, tpMult: 2.40, slMult: 1.45, resOffset: 6.50,  supOffset: 6.50 }
+    "5m":  { name: "5m Scalp",    lookback: 15, atr: 3.5,  buffer: 0.60, tpMult: 2.00, slMult: 1.30, resOffset: 3.20,  supOffset: 3.20 },
+    "15m": { name: "15m Fast",     lookback: 20, atr: 6.0,  buffer: 0.80, tpMult: 2.20, slMult: 1.35, resOffset: 5.50,  supOffset: 5.50 },
+    "30m": { name: "30m Momentum", lookback: 25, atr: 9.0,  buffer: 1.10, tpMult: 2.40, slMult: 1.40, resOffset: 8.50,  supOffset: 8.50 },
+    "1h":  { name: "1h Trend",     lookback: 30, atr: 14.0, buffer: 1.50, tpMult: 2.60, slMult: 1.45, resOffset: 12.00, supOffset: 12.00 }
   };
 
   const mtfStructures = {
@@ -976,12 +976,12 @@ window.BreakoutPaperTrading = (function () {
     };
 
     // 1. Level Clearance Confirmation (30 pts):
-    // For BUY: price clears resistance or is within breakout buffer
-    // For SELL: price clears support or is within breakdown buffer
-    if (isBuy && p >= (res - 0.80)) {
+    // For BUY: price MUST break out at or above resistance (p >= res - 0.10)
+    // For SELL: price MUST break down at or below support (p <= sup + 0.10)
+    if (isBuy && p >= (res - 0.10)) {
       checks.levelClearance = true;
       score += 30;
-    } else if (!isBuy && p <= (sup + 0.80)) {
+    } else if (!isBuy && p <= (sup + 0.10)) {
       checks.levelClearance = true;
       score += 30;
     }
@@ -1021,8 +1021,8 @@ window.BreakoutPaperTrading = (function () {
       checks.structureValid = true;
     }
 
-    // Gate: Requires at least 80% Confirmation to pass (or manual execution force)
-    const isConfirmed = order.manualForce ? true : (score >= 80);
+    // Gate: Requires at least 80% Confirmation AND genuine Level Clearance to pass
+    const isConfirmed = order.manualForce ? true : (score >= 80 && checks.levelClearance);
     if (order.manualForce) score = Math.max(score, 95);
     let reason = "Authentic Breakout Confirmed";
     if (!checks.levelClearance) reason = `Rejected: Price has not broken ${tf} Resistance/Support level`;

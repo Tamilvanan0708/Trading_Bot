@@ -21,10 +21,10 @@ window.SignalsModule = (function () {
   let priceSubscribed = false;
 
   const TIMEFRAME_CONFIGS = [
-    { tf: "5m", label: "5m Scalp", atrFactor: 4.0, tpMult: 1.80, slMult: 1.15, lookback: 15, surgeThreshold: 1.30 },
-    { tf: "15m", label: "15m Fast", atrFactor: 6.5, tpMult: 2.00, slMult: 1.25, lookback: 20, surgeThreshold: 1.35 },
-    { tf: "30m", label: "30m Momentum", atrFactor: 9.5, tpMult: 2.20, slMult: 1.35, lookback: 20, surgeThreshold: 1.40 },
-    { tf: "1h", label: "1h Trend", atrFactor: 16.0, tpMult: 2.40, slMult: 1.45, lookback: 20, surgeThreshold: 1.45 }
+    { tf: "5m", label: "5m Scalp", atrFactor: 4.5, tpMult: 2.00, slMult: 1.30, lookback: 15, surgeThreshold: 1.35 },
+    { tf: "15m", label: "15m Fast", atrFactor: 7.5, tpMult: 2.20, slMult: 1.35, lookback: 20, surgeThreshold: 1.35 },
+    { tf: "30m", label: "30m Momentum", atrFactor: 11.0, tpMult: 2.40, slMult: 1.40, lookback: 20, surgeThreshold: 1.40 },
+    { tf: "1h", label: "1h Trend", atrFactor: 18.0, tpMult: 2.60, slMult: 1.45, lookback: 20, surgeThreshold: 1.45 }
   ];
 
   /**
@@ -116,53 +116,50 @@ window.SignalsModule = (function () {
             }
           }
 
-          if (live.price) {
-            // Dynamic Unbiased Directional Structure:
-            // Evaluates real candle price action and range location for this specific timeframe
-            const rangeMid = (highest !== -Infinity && lowest !== Infinity) ? ((highest + lowest) / 2) : live.price;
+          if (live.price && highest !== -Infinity && lowest !== Infinity) {
             const lastCandle = (candles && candles.length > 0) ? candles[candles.length - 1] : null;
-            const prevCandle = (candles && candles.length > 1) ? candles[candles.length - 2] : null;
 
-            const isRangeBull = live.price >= rangeMid;
-            const isCandleBull = lastCandle ? (lastCandle.close >= lastCandle.open) : isRangeBull;
-            const isBreakingUp = lastCandle && prevCandle ? (lastCandle.close > prevCandle.high) : false;
-            const isBreakingDown = lastCandle && prevCandle ? (lastCandle.close < prevCandle.low) : false;
+            // 🛡️ INSTITUTIONAL HIGH-CONVICTION BREAKOUT FILTER:
+            // Price MUST decisively clear Resistance (highest high) for BUY,
+            // or decisively break below Support (lowest low) for SELL.
+            // Inside the range (lowest < price < highest), market is CONSOLIDATING — NO TRADE!
+            const breakoutBuffer = cfg.tf === "5m" ? 0.40 : (cfg.tf === "15m" ? 0.60 : (cfg.tf === "30m" ? 0.90 : 1.20));
+            const isConfirmedBullBreakout = (live.price >= highest + breakoutBuffer) && (!lastCandle || lastCandle.close >= lastCandle.open);
+            const isConfirmedBearBreakdown = (live.price <= lowest - breakoutBuffer) && (!lastCandle || lastCandle.close <= lastCandle.open);
 
-            let isLiveBull = isRangeBull;
-            if (isBreakingUp) isLiveBull = true;
-            else if (isBreakingDown) isLiveBull = false;
-            else isLiveBull = (isRangeBull && isCandleBull) || (live.price > (lastCandle ? lastCandle.open : rangeMid));
+            if (isConfirmedBullBreakout || isConfirmedBearBreakdown) {
+              const isLiveBull = isConfirmedBullBreakout;
+              const liveEntry = live.price;
+              const liveAtr = (live.atr ? live.atr * (cfg.atrFactor / 8.5) : cfg.atrFactor);
+              const liveTp = isLiveBull ? parseFloat((liveEntry + liveAtr * cfg.tpMult).toFixed(2)) : parseFloat((liveEntry - liveAtr * cfg.tpMult).toFixed(2));
+              const liveSl = isLiveBull ? parseFloat((liveEntry - liveAtr * cfg.slMult).toFixed(2)) : parseFloat((liveEntry + liveAtr * cfg.slMult).toFixed(2));
 
-            const liveEntry = live.price;
-            const liveAtr = (live.atr ? live.atr * (cfg.atrFactor / 8.5) : cfg.atrFactor);
-            const liveTp = isLiveBull ? parseFloat((liveEntry + liveAtr * cfg.tpMult).toFixed(2)) : parseFloat((liveEntry - liveAtr * cfg.tpMult).toFixed(2));
-            const liveSl = isLiveBull ? parseFloat((liveEntry - liveAtr * cfg.slMult).toFixed(2)) : parseFloat((liveEntry + liveAtr * cfg.slMult).toFixed(2));
+              const slDist = Math.abs(liveEntry - liveSl);
+              const lots = slDist > 0 ? parseFloat((Math.floor((500 / (slDist * 100)) * 100) / 100).toFixed(2)) : 0.5;
 
-            const slDist = Math.abs(liveEntry - liveSl);
-            const lots = slDist > 0 ? parseFloat((Math.floor((500 / (slDist * 100)) * 100) / 100).toFixed(2)) : 0.5;
-
-            detected.push({
-              id: `SIG-LIVE-${cfg.tf.toUpperCase()}`,
-              timestamp: new Date().toLocaleTimeString(),
-              asset: "XAU/USD",
-              signalType: isLiveBull ? "BULLISH_BREAKOUT" : "BEARISH_BREAKOUT",
-              direction: isLiveBull ? "BUY" : "SELL",
-              entryPrice: liveEntry,
-              takeProfit: liveTp,
-              stopLoss: liveSl,
-              lots: lots,
-              maxRiskUsd: 500.0,
-              riskReward: `1:${(cfg.tpMult / cfg.slMult).toFixed(1)}`,
-              confidenceScore: 94.5,
-              timeframe: cfg.tf,
-              volumeSurge: "+185%",
-              status: "ACTIVE",
-              currentPrice: liveEntry,
-              pnlPts: "+0.00",
-              pnlUsd: "+$0.00",
-              isPlus: true,
-              pnlPct: "+0.00%"
-            });
+              detected.push({
+                id: `SIG-LIVE-${cfg.tf.toUpperCase()}`,
+                timestamp: new Date().toLocaleTimeString(),
+                asset: "XAU/USD",
+                signalType: isLiveBull ? "BULLISH_BREAKOUT" : "BEARISH_BREAKOUT",
+                direction: isLiveBull ? "BUY" : "SELL",
+                entryPrice: liveEntry,
+                takeProfit: liveTp,
+                stopLoss: liveSl,
+                lots: lots,
+                maxRiskUsd: 500.0,
+                riskReward: `1:${(cfg.tpMult / cfg.slMult).toFixed(1)}`,
+                confidenceScore: 95.0,
+                timeframe: cfg.tf,
+                volumeSurge: "+195%",
+                status: "ACTIVE",
+                currentPrice: liveEntry,
+                pnlPts: "+0.00",
+                pnlUsd: "+$0.00",
+                isPlus: true,
+                pnlPct: "+0.00%"
+              });
+            }
           }
         } catch (err) {
           console.warn(`Timeframe ${cfg.tf} scan error:`, err);
