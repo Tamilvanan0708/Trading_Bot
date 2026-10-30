@@ -342,14 +342,17 @@ class MT5BridgeManager:
             except Exception:
                 pass
         with self._lock:
-            hb_bal = self._heartbeat.get("balance")
-            if hb_bal is not None and float(hb_bal) > 0:
-                return round(float(hb_bal), 2)
+            import time
+            last_seen = float(self._heartbeat.get("timestamp") or 0.0)
+            if (time.time() - last_seen) < 60.0:
+                hb_bal = self._heartbeat.get("balance")
+                if hb_bal is not None and float(hb_bal) > 0 and float(hb_bal) != 1000.0:
+                    return round(float(hb_bal), 2)
         # Fallback to connected account in status
         try:
             st = self.get_status()
             conn_bal = st.get("connected_account", {}).get("balance")
-            if conn_bal is not None and float(conn_bal) > 0:
+            if conn_bal is not None and float(conn_bal) > 0 and float(conn_bal) != 1000.0:
                 return round(float(conn_bal), 2)
         except Exception:
             pass

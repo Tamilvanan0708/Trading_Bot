@@ -7037,7 +7037,7 @@ Routes["/settings"] = async (mount) => {
               </label>
               <div style="background:#181e29;padding:9px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);font-size:12.5px;font-weight:600;color:var(--text)">
                 <span id="mt5-account-display">${mt5Acct.login ? `${mt5Acct.login} (${mt5Acct.server || 'VTMarkets-Demo'})` : 'VT Markets Demo (1305493)'}</span>
-                <span style="font-size:11px;color:#81c784;display:block;margin-top:2px" id="mt5-balance-display">Balance: ${mt5Acct.balance != null ? `$${Number(mt5Acct.balance).toFixed(2)}` : '$1,000.00 USD'} • 1:${mt5Acct.leverage || 500}</span>
+                <span style="font-size:11px;color:#81c784;display:block;margin-top:2px" id="mt5-balance-display">Balance: ${mt5Acct.balance != null ? `$${Number(mt5Acct.balance).toFixed(2)}` : '--'} • 1:${mt5Acct.leverage || 500}</span>
               </div>
             </div>
           </div>

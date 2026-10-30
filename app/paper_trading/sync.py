@@ -136,10 +136,21 @@ def _get_hybrid_broker_info(
             tkt = mgr.get_ticket_for_paper_trade(paper_trade_id)
 
         bal = mgr.get_account_balance()
-        if bal is None or bal <= 0:
+        if bal is None or bal <= 0 or bal == 1000.0:
             st = mgr.get_status()
-            bal = st.get("connected_account", {}).get("balance")
-        bal_str = f"${bal:,.2f} USD" if bal is not None else "$10,425.74 USD"
+            conn_bal = st.get("connected_account", {}).get("balance")
+            if conn_bal and float(conn_bal) > 0 and float(conn_bal) != 1000.0:
+                bal = float(conn_bal)
+            else:
+                bal = None
+
+        exec_cfg = get_execution_settings()
+        if bal is None or bal <= 0:
+            bal = float(getattr(exec_cfg, "account_balance", 10000.0) or 10000.0)
+
+        curr_sym = "₹" if getattr(exec_cfg, "account_currency", "usd") == "cent" else "$"
+        curr_label = "INR" if getattr(exec_cfg, "account_currency", "usd") == "cent" else "USD"
+        bal_str = f"{curr_sym}{bal:,.2f} {curr_label}"
 
         if tkt:
             return "VT Markets MT5", f"#{tkt}", bal_str
