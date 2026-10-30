@@ -285,9 +285,9 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
 
     if exec_cfg.mt5_bridge_enabled and mt5_bal is not None and mt5_mgr.is_online:
         balance = mt5_bal
-        initial_balance = mt5_bal
+        initial_balance = round(mt5_bal - effective_pnl, 2) if (mt5_bal - effective_pnl) > 0 else exec_cfg.account_balance
         equity = mt5_eq if mt5_eq is not None else round(mt5_bal + unrealized_pnl, 2)
-        net_profit = 0.0
+        net_profit = effective_pnl
     else:
         equity = round(balance + unrealized_pnl, 2)
 

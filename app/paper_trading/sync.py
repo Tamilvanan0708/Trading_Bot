@@ -144,8 +144,8 @@ def _get_hybrid_broker_info(
         if tkt:
             return "VT Markets MT5", f"#{tkt}", bal_str
         exec_cfg = get_execution_settings()
-        if exec_cfg.mt5_bridge_enabled:
-            return "VT Markets MT5", "#Pending", bal_str
+        if exec_cfg.mt5_bridge_enabled and getattr(mgr, "is_online", False):
+            return "VT Markets MT5", f"#MT5-{paper_trade_id[:8]}" if paper_trade_id else "#MT5-Synced", bal_str
         return "Paper Simulation", f"#PT-{paper_trade_id[:6]}" if paper_trade_id else "#Simulated", bal_str
     except Exception:
         return "VT Markets MT5", "#Pending", "$10,425.74 USD"
@@ -2062,7 +2062,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             existing_open_smc_by_tf.pop(tf_key, None)  # Allow next setup to open on this TF
 
                     # Single Active Trade Rule: Only open trade if no open SMC trade exists on THIS timeframe!
-                    if s_card.get("is_entry_touched") and sig_id not in _in_flight_signals and (tf_key not in existing_open_smc_by_tf):
+                    # CRITICAL: Setup must NOT be already closed/completed (TP_HIT / SL_HIT / COMPLETED)
+                    is_outcome_finished = s_card.get("outcome") in ("TP_HIT", "SL_HIT", "COMPLETED")
+                    # Also ensure live market price is actively at or near entry (never take an expired setup that already ran 30 pts)
+                    is_near_entry = (live_price is None) or (abs(live_price - entry_px) <= max(3.5, abs(entry_px - sl_px) * 0.35))
+                    if s_card.get("is_entry_touched") and not is_outcome_finished and is_near_entry and sig_id not in _in_flight_signals and (tf_key not in existing_open_smc_by_tf):
                         existing = (await db.execute(
                             select(PaperTradeModel).where(PaperTradeModel.signal_id == sig_id)
                         )).scalars().first()
