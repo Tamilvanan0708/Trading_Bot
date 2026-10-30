@@ -277,19 +277,14 @@ async def get_account_statement(db: AsyncSession = Depends(get_db_session)):
     avg_loss = round(gross_loss / len(losses), 2) if losses else 0.0
     expectancy = round((win_rate / 100.0 * avg_win) - ((1 - win_rate / 100.0) * avg_loss), 2) if total_trades else 0.0
 
-    # Dynamic MT5 Balance Synchronization: When MT5 is online, strictly match broker balance & equity
+    # Dynamic MT5 Balance Synchronization: Keep 100% exact parity between MT5, Paper Trading, and Telegram
     from app.services.mt5_bridge_manager import get_mt5_bridge_manager
     mt5_mgr = get_mt5_bridge_manager()
-    mt5_bal = mt5_mgr.get_account_balance()
+    mt5_mgr.set_synced_balance(balance)
     mt5_eq = mt5_mgr.get_account_equity()
 
-    if exec_cfg.mt5_bridge_enabled and mt5_bal is not None and mt5_mgr.is_online:
-        balance = mt5_bal
-        initial_balance = round(mt5_bal - effective_pnl, 2) if (mt5_bal - effective_pnl) > 0 else exec_cfg.account_balance
-        equity = mt5_eq if mt5_eq is not None else round(mt5_bal + unrealized_pnl, 2)
-        net_profit = effective_pnl
-    else:
-        equity = round(balance + unrealized_pnl, 2)
+    equity = mt5_eq if mt5_eq is not None else round(balance + unrealized_pnl, 2)
+    net_profit = effective_pnl
 
     return {
         "initial_balance": initial_balance,

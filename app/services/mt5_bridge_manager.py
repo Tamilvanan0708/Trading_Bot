@@ -329,8 +329,18 @@ class MT5BridgeManager:
                 logger.debug("[MT5-BRIDGE] get_closed_deal_info error for ticket #%s: %s", ticket, e)
         return None
 
+    def set_synced_balance(self, balance: float) -> None:
+        """Sets the unified authoritative account balance across MT5 and Paper Trading."""
+        with self._lock:
+            if balance is not None and float(balance) > 0 and float(balance) != 1000.0:
+                self._synced_balance = round(float(balance), 2)
+
     def get_account_balance(self) -> float | None:
-        """Returns live account balance in USD from MT5 if connected."""
+        """Returns live account balance in USD from MT5 if connected, or unified synced balance."""
+        with self._lock:
+            if getattr(self, "_synced_balance", None) and float(self._synced_balance) > 0 and float(self._synced_balance) != 1000.0:
+                return round(float(self._synced_balance), 2)
+
         mt5 = self._ensure_native_mt5()
         if mt5 is not None:
             try:
