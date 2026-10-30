@@ -260,6 +260,10 @@ class MT5BridgeManager:
                 candidates.extend(["XAUUSD-VIP", "XAUUSD", "GOLD"])
 
                 for sym in candidates:
+                    try:
+                        mt5.symbol_select(sym, True)
+                    except Exception:
+                        pass
                     tick = mt5.symbol_info_tick(sym)
                     if tick and getattr(tick, "ask", 0) > 0 and getattr(tick, "bid", 0) > 0:
                         mid = round((float(tick.ask) + float(tick.bid)) / 2.0, 2)
@@ -269,6 +273,16 @@ class MT5BridgeManager:
                             "bid": float(tick.bid),
                             "ask": float(tick.ask),
                             "time": int(getattr(tick, "time", time.time())),
+                        }
+                    s_info = mt5.symbol_info(sym)
+                    if s_info and getattr(s_info, "ask", 0) > 0 and getattr(s_info, "bid", 0) > 0:
+                        mid = round((float(s_info.ask) + float(s_info.bid)) / 2.0, 2)
+                        return {
+                            "symbol": sym,
+                            "price": mid,
+                            "bid": float(s_info.ask),
+                            "ask": float(s_info.bid),
+                            "time": int(time.time()),
                         }
             except Exception as e:
                 logger.debug("[MT5-LIVE-TICK] Error fetching tick: %s", e)
@@ -1165,3 +1179,5 @@ class MT5BridgeManager:
 # Global singleton helper
 def get_mt5_bridge_manager() -> MT5BridgeManager:
     return MT5BridgeManager()
+
+get_mt5_bridge = get_mt5_bridge_manager

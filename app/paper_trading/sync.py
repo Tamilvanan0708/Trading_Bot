@@ -2531,7 +2531,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             new_trade = PaperTradeModel(
                                 id=str(uuid.uuid4()),
                                 signal_id=sig_id,
-                                strategy="Breakout Strategy",
+                                symbol="XAUUSD",
                                 direction=dir_str,
                                 target_entry=entry_px,
                                 actual_entry=entry_px,
@@ -2540,9 +2540,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 take_profit_2=tp_px,
                                 take_profit_3=tp_px,
                                 lot_size=trade_lot,
+                                risk_amount=round(trade_lot * abs(entry_px - sl_px) * 100.0, 2),
                                 state="OPEN",
                                 opened_at=datetime.now(timezone.utc),
-                                state_logs=[{"event": "BREAKOUT_TRIGGERED", "tf": tf_str, "entry": entry_px, "sl": sl_px, "tp": tp_px}],
+                                state_logs=[{"event": "BREAKOUT_TRIGGERED", "tf": tf_str, "entry": entry_px, "sl": sl_px, "tp": tp_px, "strategy": "BREAKOUT_STRATEGY"}],
                             )
                             db.add(new_trade)
                             await db.commit()

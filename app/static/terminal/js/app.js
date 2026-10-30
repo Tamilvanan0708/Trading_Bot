@@ -3764,7 +3764,8 @@ function renderPaperTradeRows(trades, currSym = "₹", leverage = 500) {
   }
   return trades.map(t => {
     const entry = t.entry_price || t.actual_entry || t.target_entry || 0;
-    const isClosed = t.status === "CLOSED" || t.state === "CLOSED";
+    const isCancelled = t.status === "CANCELLED" || t.state === "CANCELLED" || (t.exit_reason && String(t.exit_reason).toUpperCase().includes("REJECTED"));
+    const isClosed = isCancelled || t.status === "CLOSED" || t.state === "CLOSED";
     const curPx = isClosed ? (t.exit_price || t.current_price || entry) : (t.current_price || t.exit_price || entry);
     const pts = Number(t.running_pts != null ? t.running_pts : 0);
     const pnl = Number(t.pnl_usd != null ? t.pnl_usd : (t.unrealized_pnl != null ? t.unrealized_pnl : (t.realized_pnl || 0)));
@@ -3823,7 +3824,14 @@ function renderPaperTradeRows(trades, currSym = "₹", leverage = 500) {
     // Outcome status pill & row accent
     let statusBadge = '';
     let outcomeRowClass = '';
-    if (!isClosed) {
+    if (isCancelled) {
+      const reason = String(t.exit_reason || "").toUpperCase();
+      const isChase = reason.includes("CHASE");
+      const isSpread = reason.includes("SPREAD");
+      const label = isChase ? "🚫 REJECTED (CHASE GUARD)" : (isSpread ? "⚠️ SPREAD GUARD" : "❌ CANCELLED");
+      statusBadge = `<span class="badge" style="background:rgba(239,68,68,0.18);color:#ef4444;border:1px solid rgba(239,68,68,0.35);font-size:10px;font-weight:700">${label}</span>`;
+      outcomeRowClass = 'row-outcome-cancelled';
+    } else if (!isClosed) {
       statusBadge = '<span class="status-pill-open"><span class="pulse-dot live" style="width:6px;height:6px;display:inline-block;margin-right:4px"></span>LIVE OPEN</span>';
       outcomeRowClass = 'row-outcome-open';
     } else {
@@ -4109,7 +4117,7 @@ Routes["/paper"] = (mount) => {
     const winTrades = closedTrades.filter(t => Number(t.pnl_usd != null ? t.pnl_usd : (t.realized_pnl || 0)) > 0);
     const lossTrades = closedTrades.filter(t => Number(t.pnl_usd != null ? t.pnl_usd : (t.realized_pnl || 0)) < 0);
     const winRate = closedTrades.length ? Math.round((winTrades.length / closedTrades.length) * 100) : 0;
-    const openTrades = currentTrades.filter(t => t.status !== "CLOSED" && t.state !== "CLOSED");
+    const openTrades = currentTrades.filter(t => (t.status === "OPEN" || t.state === "OPEN") && !String(t.exit_reason || "").toUpperCase().includes("REJECTED") && t.status !== "CANCELLED" && t.state !== "CANCELLED");
 
     // Strategy counts
     const retCount = currentTrades.filter(t => {
