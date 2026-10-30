@@ -93,6 +93,7 @@ const API = {
   saveExecutionSettings: (settings) => API.post("/settings/execution", settings),
   resetPaperTrades: () => API.post("/paper-trades/reset"),
   closePaperTrade: (id) => API.post(`/paper-trades/${id}/close`),
+  breakevenPaperTrade: (id) => API.post(`/paper-trades/${id}/breakeven`),
   // MT5 Bridge
   getMT5Status: () => API.get("/api/mt5/status"),
   sendMT5TestTrade: (payload) => API.post("/api/mt5/test-trade", payload),

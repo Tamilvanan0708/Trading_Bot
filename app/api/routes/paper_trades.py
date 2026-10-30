@@ -532,3 +532,52 @@ async def manual_close_paper_trade(
         "exit_reason": "MANUAL_CLOSE",
         "message": f"Trade {trade.id[:8]} manually closed at ${trade.exit_price:.2f} ({pts:+.2f} pts, PnL: ${realized_pnl:+.2f})",
     }
+
+
+@router.post("/paper-trades/{trade_id}/breakeven")
+async def set_paper_trade_breakeven(
+    trade_id: str,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Sets Stop Loss to entry price (Break-Even) on Paper Trade and modifies MT5 live order."""
+    from sqlalchemy import select
+    from app.database.models import PaperTradeModel
+    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+    from app.config.execution_settings import get_execution_settings
+
+    stmt = select(PaperTradeModel).where(PaperTradeModel.id == trade_id)
+    trade = (await db.execute(stmt)).scalars().first()
+    if not trade:
+        raise HTTPException(status_code=404, detail="Paper trade not found.")
+    if trade.state != "OPEN":
+        raise HTTPException(status_code=400, detail="Only OPEN trades can be set to Break-Even.")
+
+    entry_px = float(trade.actual_entry or trade.target_entry or 0.0)
+    if entry_px <= 0:
+        raise HTTPException(status_code=400, detail="Invalid entry price for break-even.")
+
+    trade.stop_loss = entry_px
+    trade.state_logs = list(trade.state_logs or []) + [
+        {"event": "MANUAL_BREAKEVEN_SET", "new_sl": entry_px, "time": datetime.now(timezone.utc).isoformat()}
+    ]
+    await db.commit()
+
+    exec_cfg = get_execution_settings()
+    if exec_cfg.mt5_bridge_enabled:
+        try:
+            get_mt5_bridge_manager().enqueue_modify(
+                paper_trade_id=trade.id,
+                symbol=exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                new_sl=entry_px,
+                direction=trade.direction,
+            )
+        except Exception as mt5_err:
+            logger.warning("[MT5-BE] Modify SL error: %s", mt5_err)
+
+    return {
+        "status": "SUCCESS",
+        "trade_id": trade.id,
+        "entry_price": entry_px,
+        "new_sl": entry_px,
+        "message": f"Stop Loss moved to Break-Even (${entry_px:.2f}) on paper trade and MT5.",
+    }

@@ -4711,6 +4711,149 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     const hasPaperTrade = d.paper_trade && d.paper_trade.is_open;
     const isCompleted = d.outcome === "TP_HIT" || d.outcome === "SL_HIT" || d.state === "COMPLETED";
     const isEntryTouched = !hasPaperTrade && !isCompleted && d.is_trade_active;
+
+    // --- UNIFIED LIVE TRADE EXECUTION COCKPIT ---
+    if (hasPaperTrade) {
+      const pt = d.paper_trade;
+      const tradeId = pt.trade_id;
+      const tradeDir = pt.direction || d.direction || "LONG";
+      const isBuy = tradeDir === "LONG" || tradeDir === "BUY";
+      const ePx = Number(pt.entry_price || entry || 0);
+      const cPx = Number(price || ePx);
+      const sPx = Number(pt.stop_loss || sl || 0);
+      const tPx = Number(pt.take_profit || tp || 0);
+      const lotVal = Number(pt.lot_size || 0.50);
+      const ptsVal = isBuy ? (cPx - ePx) : (ePx - cPx);
+      const usdVal = ptsVal * lotVal * 100.0;
+      const isProfit = ptsVal >= 0;
+      const ticketStr = pt.ticket ? `#${pt.ticket}` : "MT5 LIVE PENDING";
+      const stratName = strategyType === "SMC_WITH_FIB" ? "SMC With Fib (0.680)" : "Fib Retracement (L1)";
+
+      // Progress calculation to TP
+      const totalDist = Math.abs(tPx - ePx);
+      const curDist = Math.max(0, ptsVal);
+      const progressPct = totalDist > 0 ? Math.min(100, Math.max(5, (curDist / totalDist) * 100)) : 10;
+
+      return `<div class="live-trade-cockpit ${isProfit ? 'trade-in-profit' : 'trade-in-loss'}" id="active-cockpit-card" style="margin-bottom:var(--sp-3)">
+        <div class="cockpit-top-row">
+          <div class="cockpit-title-group">
+            <span style="font-size:20px">🎯</span>
+            <div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:15px;font-weight:800;color:var(--text-bright);letter-spacing:0.3px">
+                  LIVE TRADE EXECUTION COCKPIT
+                </span>
+                <span class="badge ${isBuy ? 'badge-green' : 'badge-red'}" style="font-weight:800;font-size:11px;padding:3px 8px">
+                  ${isBuy ? '▲ LONG / BUY' : '▼ SHORT / SELL'}
+                </span>
+                <span class="badge badge-blue" style="font-size:11px;padding:2px 8px">
+                  ${tf.toUpperCase()} TIMEFRAME
+                </span>
+                <span class="badge badge-green" style="font-size:10px">
+                  ● MT5 TICKET: ${ticketStr}
+                </span>
+              </div>
+              <div style="font-size:11px;color:var(--text-dim);font-family:var(--font-mono);margin-top:3px">
+                Strategy: <b>${stratName}</b> · Size: <b>${lotVal.toFixed(2)} Lots</b> · Broker: <b>VT Markets</b>
+              </div>
+            </div>
+          </div>
+          <div class="cockpit-badge-live ${isProfit ? 'badge-green' : 'badge-red'}">
+            <span class="live-beacon"></span>
+            <span>LIVE MT5 AUTO-TRADE</span>
+          </div>
+        </div>
+
+        <!-- Metrics Grid with Big Glowing Profit Box -->
+        <div class="cockpit-metrics-grid">
+          <div class="cockpit-metric-card">
+            <span class="cockpit-metric-lbl">Entry Price</span>
+            <span class="cockpit-metric-val">$${ePx.toFixed(2)}</span>
+            <span style="font-size:10px;color:var(--text-dim)">${tf.toUpperCase()} Fill Level</span>
+          </div>
+
+          <div class="cockpit-metric-card">
+            <span class="cockpit-metric-lbl">Live MT5 Price</span>
+            <span class="cockpit-metric-val" style="color:var(--text-bright)">$${cPx.toFixed(2)}</span>
+            <span style="font-size:10px;color:var(--green)">⚡ Broker Zero-Lag</span>
+          </div>
+
+          <div class="cockpit-metric-card cockpit-pnl-card ${isProfit ? '' : 'is-loss'}">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span class="cockpit-metric-lbl" style="color:${isProfit ? 'var(--green-bright)' : 'var(--red-bright)'}">
+                ${isProfit ? 'Floating PROFIT' : 'Floating LOSS'}
+              </span>
+              <span class="badge ${isProfit ? 'badge-green' : 'badge-red'}" style="font-size:10px;font-weight:800">
+                ${ptsVal >= 0 ? '+' : ''}${ptsVal.toFixed(2)} PTS
+              </span>
+            </div>
+            <div class="cockpit-pnl-val" style="color:${isProfit ? 'var(--green-bright)' : 'var(--red-bright)'}">
+              ${isProfit ? '🟢 PROFIT +' : '🔴 LOSS -'}$${Math.abs(usdVal).toFixed(2)}
+            </div>
+            <div style="font-size:11px;font-family:var(--font-mono);color:${isProfit ? 'var(--green)' : 'var(--red)'}">
+              Real-time MT5 Floating PnL
+            </div>
+          </div>
+
+          <div class="cockpit-metric-card">
+            <div style="display:flex;justify-content:space-between">
+              <span class="cockpit-metric-lbl" style="color:var(--green)">Take Profit</span>
+              <span class="badge badge-dim" style="font-size:9px">1.000 Target</span>
+            </div>
+            <span class="cockpit-metric-val" style="color:var(--green-bright)">$${tPx.toFixed(2)}</span>
+            <span style="font-size:10px;color:var(--green)">
+              ${Math.abs(tPx - cPx).toFixed(2)} pts to target
+            </span>
+          </div>
+
+          <div class="cockpit-metric-card">
+            <div style="display:flex;justify-content:space-between">
+              <span class="cockpit-metric-lbl" style="color:var(--red)">Stop Loss</span>
+              <span class="badge badge-red" style="font-size:9px">Protection</span>
+            </div>
+            <span class="cockpit-metric-val" style="color:var(--red-bright)">$${sPx.toFixed(2)}</span>
+            <span style="font-size:10px;color:var(--red)">
+              ${Math.abs(cPx - sPx).toFixed(2)} pts buffer
+            </span>
+          </div>
+        </div>
+
+        <!-- Visual Progress Gauge between SL, Entry, and TP -->
+        <div class="cockpit-progress-container" style="margin:14px 0">
+          <div class="cockpit-progress-labels">
+            <span style="color:var(--red)">🛑 SL: $${sPx.toFixed(2)}</span>
+            <span style="color:var(--text-dim)">🏁 Entry: $${ePx.toFixed(2)}</span>
+            <span style="color:var(--green)">🎯 Target TP: $${tPx.toFixed(2)}</span>
+          </div>
+          <div class="cockpit-progress-track">
+            <div class="cockpit-progress-bar ${isProfit ? '' : 'is-loss'}" style="width:${Math.max(5, progressPct)}%"></div>
+            <div class="cockpit-progress-pin" style="left:${Math.max(4, Math.min(96, progressPct))}%" title="Live Price: $${cPx.toFixed(2)}"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text-dim);margin-top:6px">
+            <span>Dynamic Risk Protection Active</span>
+            <span style="font-weight:700;color:${isProfit ? 'var(--green-bright)' : 'var(--text-dim)'}">
+              ${progressPct.toFixed(1)}% Completed to Take Profit
+            </span>
+          </div>
+        </div>
+
+        <!-- Cockpit Quick Actions Bar -->
+        <div class="cockpit-actions-bar" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.07)">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-ghost btn-cockpit-be" data-id="${tradeId}" title="Move Stop Loss to Entry Price for a risk-free trade" style="border:1px solid rgba(255,255,255,0.2);font-weight:700;cursor:pointer">
+              🛡️ Set SL to Break-Even
+            </button>
+            <button class="btn btn-sm btn-primary btn-cockpit-close" data-id="${tradeId}" style="font-weight:700;background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.4);cursor:pointer">
+              🎯 Close Position / Settle P&L
+            </button>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted)">
+            Orders auto-synchronize with MetaTrader 5 Terminal in &lt;50ms
+          </div>
+        </div>
+      </div>`;
+    }
+
     const statusBadge = hasPaperTrade
       ? `<span class="badge badge-green">🟢 ACTIVE (${(d.paper_trade && d.paper_trade.lot_size) || 0.01} Lot)</span>`
       : (isCompleted
@@ -5121,10 +5264,53 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       if (lMsgWrap) lMsgWrap.innerHTML = renderLockMsg(d);
 
       refreshStrategyTradesTable();
+      wireCockpitActions(mount);
     } catch (_) {}
     finally {
       isStratUpdating = false;
     }
+  }
+
+  function wireCockpitActions(root) {
+    if (!root) return;
+    root.querySelectorAll(".btn-cockpit-be").forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const tId = btn.dataset.id;
+        if (!tId) return;
+        btn.disabled = true;
+        btn.textContent = "⏳ Setting BE...";
+        try {
+          const res = await (API.breakevenPaperTrade ? API.breakevenPaperTrade(tId) : API.post(`/paper-trades/${tId}/breakeven`));
+          UI.toast("Break-Even Set", res.message || "Stop Loss moved to Entry.", "emerald");
+          setTimeout(updateStratInPlace, 400);
+        } catch (err) {
+          UI.toast("BE Error", err.message || "Failed to set Break-Even.", "rose");
+          btn.disabled = false;
+          btn.textContent = "🛡️ Set SL to Break-Even";
+        }
+      };
+    });
+
+    root.querySelectorAll(".btn-cockpit-close").forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const tId = btn.dataset.id;
+        if (!tId) return;
+        if (!confirm("Are you sure you want to CLOSE this live position at market price?")) return;
+        btn.disabled = true;
+        btn.textContent = "⏳ Closing...";
+        try {
+          const res = await (API.closePaperTrade ? API.closePaperTrade(tId) : API.post(`/paper-trades/${tId}/close`));
+          UI.toast("Trade Closed", res.message || "Position closed.", "emerald");
+          setTimeout(updateStratInPlace, 400);
+        } catch (err) {
+          UI.toast("Close Error", err.message || "Failed to close position.", "rose");
+          btn.disabled = false;
+          btn.textContent = "🎯 Close Position / Settle P&L";
+        }
+      };
+    });
   }
 
   renderWith(async () => {

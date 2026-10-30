@@ -698,6 +698,12 @@ async def get_fib_retracement_dashboard(
                         tf = part.lower()
                         break
             if tf:
+                tkt = None
+                try:
+                    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                    tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(ot.id, timeframe=tf)
+                except Exception:
+                    pass
                 open_paper_trades_by_tf[tf] = {
                     "is_open": True,
                     "trade_id": ot.id,
@@ -709,6 +715,7 @@ async def get_fib_retracement_dashboard(
                     "take_profit": ot.take_profit_1,
                     "opened_at": _iso_utc(ot.opened_at),
                     "timeframe": tf.upper(),
+                    "ticket": tkt,
                 }
     except Exception as pt_err:
         logger.warning("[STRATEGY] Error querying open paper trades for Fib: %s", pt_err)
@@ -825,6 +832,12 @@ async def get_smc_fib_dashboard(
                         tf = part.lower()
                         break
             if tf:
+                tkt = None
+                try:
+                    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                    tkt = get_mt5_bridge_manager().get_ticket_for_paper_trade(ot.id, timeframe=tf)
+                except Exception:
+                    pass
                 open_paper_trades_by_tf[tf] = {
                     "is_open": True,
                     "trade_id": ot.id,
@@ -835,6 +848,8 @@ async def get_smc_fib_dashboard(
                     "stop_loss": ot.stop_loss,
                     "take_profit": ot.take_profit_1,
                     "opened_at": _iso_utc(ot.opened_at),
+                    "timeframe": tf.upper(),
+                    "ticket": tkt,
                 }
     except Exception as pt_err:
         logger.warning("[STRATEGY] Error querying open paper trades for SMC: %s", pt_err)
