@@ -65,7 +65,10 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
     if not tf:
         tf = "5M"
 
-    if "FIB_TREND" in sig or "TREND" in sig or "TREND" in logs_str:
+    if "BREAKOUT" in sig or "BREAKOUT" in logs_str or "BO_" in sig:
+        strat_name = "BREAKOUT STRATEGY"
+        layer_name = "Breakout Bar"
+    elif "FIB_TREND" in sig or "TREND" in sig or "TREND" in logs_str:
         strat_name = "FIB GO WITH TREND"
         layer_name = "Breakout (0.618)"
     elif "SMC_FIB" in sig or "SMC" in sig or "SMC" in logs_str:
@@ -77,6 +80,22 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
     else:
         strat_name = "FIB RETRACEMENT"
         layer_name = "L1 (0.618)"
+
+    # Look for MT5 ticket
+    ticket = None
+    if t.state_logs and isinstance(t.state_logs, list):
+        for log in t.state_logs:
+            if isinstance(log, dict) and log.get("ticket"):
+                ticket = str(log["ticket"])
+                break
+    if not ticket:
+        try:
+            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+            tkt_val = get_mt5_bridge_manager().get_ticket_for_paper_trade(t.id, timeframe=tf)
+            if tkt_val:
+                ticket = str(tkt_val)
+        except Exception:
+            pass
 
     target_tp = float(t.take_profit_2 or t.take_profit_1 or 0.0) if "TREND" in strat_name else float(t.take_profit_1 or 0.0)
     risk_pts = (float(t.risk_amount or 0.0) / max(0.01, lots * 100.0)) if (t.risk_amount and t.risk_amount > 1.0) else abs(entry - float(t.stop_loss or 0.0))
@@ -106,6 +125,7 @@ def _serialize_trade(t, live_price: float | None = None) -> dict:
         "realized_pnl": t.realized_pnl,
         "pnl_usd": t.realized_pnl if t.state == "CLOSED" else unrealized_pnl,
         "pnl_r": t.realized_r if t.state == "CLOSED" else (round(running_pts / max(0.1, abs(entry - float(t.stop_loss or 0.0))), 2) if t.stop_loss else 0.0),
+        "ticket": ticket,
         "stop_loss": t.stop_loss,
         "take_profit_1": t.take_profit_1,
         "take_profit_2": t.take_profit_2,

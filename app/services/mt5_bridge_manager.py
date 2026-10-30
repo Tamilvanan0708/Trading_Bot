@@ -327,6 +327,7 @@ class MT5BridgeManager:
         strat_upper = strat.upper()
 
         exec_cfg = get_execution_settings()
+
         allowed_strat = getattr(exec_cfg, "mt5_allowed_strategy", "ALL")
         if allowed_strat and allowed_strat != "ALL" and allowed_strat.upper() not in strat_upper:
             logger.info(
@@ -336,8 +337,18 @@ class MT5BridgeManager:
             )
             return {
                 "status": "filtered",
-                "reason": f"Strategy '{strat}' is disabled for MT5 live execution (Fib Retracement only).",
+                "reason": f"Strategy '{strat}' is disabled for MT5 live execution ({allowed_strat} only).",
             }
+
+        # Check individual strategy master toggle
+        if ("FIB RETRACEMENT" in strat_upper or "RETR" in strat_upper) and not getattr(exec_cfg, "strategy_fib_retracement", True):
+            return {"status": "disabled", "reason": "Fib Retracement strategy is toggled OFF."}
+        if ("SMC" in strat_upper) and not getattr(exec_cfg, "strategy_smc_fib", True):
+            return {"status": "disabled", "reason": "SMC With Fib strategy is toggled OFF."}
+        if ("BREAKOUT" in strat_upper) and not getattr(exec_cfg, "strategy_breakout", True):
+            return {"status": "disabled", "reason": "Breakout Strategy is toggled OFF."}
+        if ("TREND" in strat_upper) and not getattr(exec_cfg, "strategy_fib_trend", False):
+            return {"status": "disabled", "reason": "Fib Go With Trend strategy is toggled OFF."}
         if not exec_cfg.mt5_bridge_enabled and not order_data.get("is_test", False):
             logger.info("[MT5-BRIDGE] MT5 bridge is disabled in Execution Settings; skipping order.")
             return {
@@ -569,10 +580,65 @@ class MT5BridgeManager:
                 else:
                     sl = round(sl + spread_buffer, 2)
 
-            # Determine supported filling mode dynamically
+            # Determine supported filling mode and symbol parameters dynamically
             sym_info = mt5.symbol_info(symbol)
+            if sym_info is None:
+                logger.warning("[MT5-NATIVE] Failed to get symbol_info for %s", symbol)
+                return None
+
+            # 1. Market Closed / Session Guard (Prevents Retcode 10018: Market closed)
+            if getattr(sym_info, "trade_mode", 4) == 0:
+                logger.warning(
+                    "[MT5-NATIVE] Trading disabled on symbol %s (trade_mode=0). Order %s BLOCKED.",
+                    symbol,
+                    order_payload.get("id"),
+                )
+                return {
+                    "ticket": None,
+                    "price": 0.0,
+                    "status": "REJECTED_BY_BROKER",
+                    "retcode": getattr(mt5, "TRADE_RETCODE_MARKET_CLOSED", 10018),
+                    "error": "Market closed (Broker session inactive)",
+                }
+
+            # 2. Daily Broker Rollover Break Guard (21:45 to 22:15 UTC / 02:45 to 03:15 AM IST)
+            utc_now = datetime.now(timezone.utc)
+            if not order_payload.get("is_test", False) and ((utc_now.hour == 21 and utc_now.minute >= 45) or (utc_now.hour == 22 and utc_now.minute <= 15)):
+                logger.warning(
+                    "[MT5-NATIVE] Broker daily rollover maintenance window active (21:45-22:15 UTC). Order %s BLOCKED.",
+                    order_payload.get("id"),
+                )
+                return {
+                    "ticket": None,
+                    "price": 0.0,
+                    "status": "REJECTED_BY_BROKER",
+                    "retcode": getattr(mt5, "TRADE_RETCODE_MARKET_CLOSED", 10018),
+                    "error": "Market closed (Daily broker rollover maintenance)",
+                }
+
+            # 3. Broker Stops Level & Bid/Ask Distance Auto-Clamp (Prevents Retcode 10016: Invalid stops)
+            point = float(getattr(sym_info, "point", 0.01) or 0.01)
+            stops_level_pts = float(getattr(sym_info, "trade_stops_level", 0) or 0) * point
+            min_stop_distance = max(stops_level_pts, live_spread, 1.50)
+
+            if sl > 0:
+                if is_buy:
+                    if sl >= (tick.bid - min_stop_distance):
+                        sl = round(tick.bid - min_stop_distance, 2)
+                else:
+                    if sl <= (tick.ask + min_stop_distance):
+                        sl = round(tick.ask + min_stop_distance, 2)
+
+            if tp > 0:
+                if is_buy:
+                    if tp <= (tick.ask + min_stop_distance):
+                        tp = round(tick.ask + min_stop_distance, 2)
+                else:
+                    if tp >= (tick.bid - min_stop_distance):
+                        tp = round(tick.bid - min_stop_distance, 2)
+
             filling = mt5.ORDER_FILLING_IOC
-            if sym_info and hasattr(sym_info, "filling_mode"):
+            if hasattr(sym_info, "filling_mode"):
                 fm = sym_info.filling_mode
                 if fm & 2:
                     filling = mt5.ORDER_FILLING_IOC

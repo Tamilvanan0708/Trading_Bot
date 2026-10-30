@@ -255,6 +255,96 @@ window.BreakoutStrategy = (function () {
     }
   }
 
+  function renderBreakoutMt5TradesHud() {
+    return `
+      <div class="card" style="margin-top:var(--sp-3);margin-bottom:var(--sp-3);border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.015)">
+        <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-weight:700;font-size:13px;color:var(--text-bright)">📈 Breakout Strategy — Dedicated Paper & MT5 Live Trades</span>
+            <span class="badge badge-green" style="font-size:10px">● MT5 Synced</span>
+            <span id="breakout-dedicated-trades-count" class="badge badge-dim" style="font-size:10px">...</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim)">Execution logs with real MT5 ticket numbers and auto-sync</div>
+        </div>
+        <div class="card-body" style="padding:0">
+          <div class="table-wrap" style="max-height:360px;overflow-y:auto">
+            <table class="term" style="margin:0;font-size:12px">
+              <thead>
+                <tr>
+                  <th>Opened Time (IST)</th>
+                  <th>Strategy / TF / Ticket</th>
+                  <th>Dir</th>
+                  <th>Lots & Margin</th>
+                  <th class="num">Entry Price</th>
+                  <th class="num">Live / Exit</th>
+                  <th class="num">Points</th>
+                  <th class="num">PnL ($)</th>
+                  <th class="num">R:R</th>
+                  <th>SL / TP</th>
+                  <th>Status</th>
+                  <th style="text-align:center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="breakout-dedicated-trades-tbody">
+                <tr><td colspan="12" style="text-align:center;padding:18px;color:var(--text-dim);font-size:12px">Loading breakout trades...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function refreshBreakoutTrades(mount) {
+    const root = mount || document;
+    const tbody = root.querySelector("#breakout-dedicated-trades-tbody");
+    const countEl = root.querySelector("#breakout-dedicated-trades-count");
+    if (!tbody) return;
+    try {
+      const raw = await (window.API && window.API.paperTrades ? window.API.paperTrades() : fetch("/paper-trades").then(r => r.json()));
+      const trades = Array.isArray(raw) ? raw : (raw && raw.database_trades) || [];
+      const filtered = trades.filter(t => {
+        const s = String(t.strategy || "").toUpperCase();
+        const sig = String(t.signal_id || "").toUpperCase();
+        return s.includes("BREAKOUT") || sig.includes("BREAKOUT") || sig.includes("BO_");
+      });
+
+      if (countEl) countEl.textContent = `${filtered.length} Trades`;
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--text-dim);font-size:12px">No paper or MT5 trades recorded yet for Breakout Strategy. Breakout bar confirmations trigger auto-execution on MT5.</td></tr>`;
+        return;
+      }
+
+      if (typeof window.renderPaperTradeRows === "function") {
+        tbody.innerHTML = window.renderPaperTradeRows(filtered, "$", 500);
+      }
+
+      tbody.querySelectorAll(".btn-pt-close").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const tradeId = btn.dataset.id;
+          if (!tradeId) return;
+          if (!confirm("Are you sure you want to MANUALLY CLOSE this open trade at market price?")) return;
+          try {
+            btn.disabled = true;
+            btn.textContent = "...";
+            if (window.API && window.API.closePaperTrade) {
+              await window.API.closePaperTrade(tradeId);
+            } else {
+              await fetch(`/paper-trades/${tradeId}/close`, { method: "POST" });
+            }
+            if (window.UI && window.UI.toast) window.UI.toast("Trade Closed", "Trade closed successfully.", "emerald");
+            refreshBreakoutTrades(mount);
+          } catch (err) {
+            if (window.UI && window.UI.toast) window.UI.toast("Close Error", err.message || "Failed to close trade.", "rose");
+            btn.disabled = false;
+            btn.textContent = "✕ Close";
+          }
+        });
+      });
+    } catch (_) {}
+  }
+
   function renderView(mount) {
     if (!mount) return;
 
@@ -460,7 +550,8 @@ window.BreakoutStrategy = (function () {
             </button>
           </div>
 
-          <div id="submodule-signals-container" style="display:${activeTab === 'overview' || activeTab === 'signals' ? 'block' : 'none'};margin-bottom:var(--sp-4);">
+          <div id="submodule-signals-container" style="display:${activeTab === 'overview' || activeTab === 'signals' || activeTab === 'paper' ? 'block' : 'none'};margin-bottom:var(--sp-4);">
+            ${renderBreakoutMt5TradesHud()}
             ${window.SignalsModule.buildHtml({ standalone: false })}
           </div>
 
@@ -477,9 +568,17 @@ window.BreakoutStrategy = (function () {
     const chartContainer = mount.querySelector("#breakout-tv-chart-container");
     renderChartArea(chartContainer);
 
+    setTimeout(() => refreshBreakoutTrades(mount), 120);
+
+    let _lastTradePoll = 0;
     // Global price subscriber: continuously updates live DOM elements on every single tick!
     window.BreakoutDataService.subscribePrice((st) => {
       updateLiveStats(st);
+      const now = Date.now();
+      if (now - _lastTradePoll > 5000) {
+        _lastTradePoll = now;
+        refreshBreakoutTrades(mount);
+      }
       if (chartMode === "engine" && candleSeries && st.lastCandle) {
         candleSeries.update(st.lastCandle);
         if (volumeSeries) {

@@ -3853,9 +3853,11 @@ function renderPaperTradeRows(trades, currSym = "₹", leverage = 500) {
 
     const rrStr = t.risk_reward ? `1:${Number(t.risk_reward).toFixed(1)}` : '1:1.8';
 
+    const tktBadge = t.ticket ? `<span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);font-size:9.5px;padding:1px 5px;margin-left:4px" title="MT5 Real Ticket #${t.ticket}">🎫 #${t.ticket}</span>` : '';
+
     return `<tr class="${trancheClass} ${outcomeRowClass}">
       <td>${UI.fmtTs(t.opened_at || t.created_at)}</td>
-      <td>${stratBadge} ${tfBadge} <span class="badge badge-dim" style="font-size:10px">${t.layer || ''}</span></td>
+      <td>${stratBadge} ${tfBadge} <span class="badge badge-dim" style="font-size:10px">${t.layer || ''}</span>${tktBadge}</td>
       <td>${UI.dirBadge(t.direction)}</td>
       <td class="num font-mono" style="font-weight:600">
         <div>${lotVal.toFixed(2)} Lot</div>
@@ -3877,6 +3879,7 @@ function renderPaperTradeRows(trades, currSym = "₹", leverage = 500) {
     </tr>`;
   }).join("");
 }
+window.renderPaperTradeRows = renderPaperTradeRows;
 
 /* ================= PAPER TRADING ================= */
 Routes["/paper"] = (mount) => {
@@ -3906,7 +3909,8 @@ Routes["/paper"] = (mount) => {
     const settings = d.execSet || {};
 
     const stratFibRetr = settings.strategy_fib_retracement !== false;
-    const stratSmcFib = settings.strategy_smc_fib === true;
+    const stratSmcFib = settings.strategy_smc_fib !== false;
+    const stratBreakout = settings.strategy_breakout !== false;
     const stratFibTrend = settings.strategy_fib_trend === true;
     const activeRiskPct = settings.risk_percent != null ? settings.risk_percent : 1.0;
 
@@ -4116,6 +4120,26 @@ Routes["/paper"] = (mount) => {
     const trendCount = currentTrades.filter(t => String(t.strategy || "").toUpperCase().includes("TREND")).length;
 
     setTimeout(() => {
+      // Wire interactive strategy toggles
+      mount.querySelectorAll(".strat-toggle-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const field = btn.dataset.field;
+          const currVal = btn.dataset.active === "true";
+          const nextVal = !currVal;
+          btn.style.opacity = "0.5";
+          btn.disabled = true;
+          try {
+            await API.post("/market/settings/execution", { [field]: nextVal });
+            UI.toast("Strategy Updated", `${btn.dataset.name} set to ${nextVal ? 'ON (ACTIVE)' : 'OFF (STANDBY)'}`, nextVal ? "green" : "amber");
+            setTimeout(() => location.reload(), 400);
+          } catch (e) {
+            UI.toast("Error", e.message || "Failed to update strategy", "red");
+            btn.style.opacity = "1";
+            btn.disabled = false;
+          }
+        });
+      });
+
       // Wire strategy pills
       mount.querySelectorAll(".pt-pill").forEach(pill => {
         pill.addEventListener("click", () => {
@@ -4256,17 +4280,20 @@ Routes["/paper"] = (mount) => {
         </div>
       </div>
 
-      <!-- 1.5 Live Strategy & Risk Hub (Suggestion A) -->
+      <!-- 1.5 Live Strategy & Risk Hub (Interactive 1-Click Toggles) -->
       <div style="background:rgba(17,24,39,0.7);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <span style="font-size:11px;font-weight:800;color:var(--text-dim);letter-spacing:0.5px">STRATEGIES:</span>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-size:11px;font-weight:800;color:var(--text-dim);letter-spacing:0.5px">STRATEGY TOGGLES:</span>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span class="badge ${stratFibRetr ? 'badge-green' : 'badge-red'}" style="padding:4px 9px;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;gap:5px">
-              ${stratFibRetr ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 🎯 Fib Retracement: ${stratFibRetr ? 'ACTIVE' : 'OFF'}
-            </span>
-            <span class="badge" style="padding:4px 9px;font-size:11.5px;font-weight:700;display:inline-flex;align-items:center;gap:5px;${stratSmcFib ? 'background:rgba(0,230,118,0.15);color:#00e676;border:1px solid #00e676' : 'color:#ff5252;border:1px solid rgba(255,82,82,0.3);background:rgba(255,82,82,0.08)'}">
-              ${stratSmcFib ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 💎 SMC With Fib: ${stratSmcFib ? 'ACTIVE' : 'STANDBY'}
-            </span>
+            <button type="button" class="btn btn-xs strat-toggle-btn ${stratFibRetr ? 'btn-success' : 'btn-outline'}" data-field="strategy_fib_retracement" data-name="Fib Retracement" data-active="${stratFibRetr}" style="padding:4px 10px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:5px;cursor:pointer;border-radius:6px;${stratFibRetr ? 'background:rgba(34,197,94,0.18);color:#22c55e;border:1px solid #22c55e;' : 'background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.4);'}">
+              ${stratFibRetr ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 🎯 Fib Retracement: <b>${stratFibRetr ? 'ON' : 'OFF'}</b>
+            </button>
+            <button type="button" class="btn btn-xs strat-toggle-btn ${stratSmcFib ? 'btn-success' : 'btn-outline'}" data-field="strategy_smc_fib" data-name="SMC With Fib" data-active="${stratSmcFib}" style="padding:4px 10px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:5px;cursor:pointer;border-radius:6px;${stratSmcFib ? 'background:rgba(0,230,118,0.18);color:#00e676;border:1px solid #00e676;' : 'background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.4);'}">
+              ${stratSmcFib ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 💎 SMC With Fib: <b>${stratSmcFib ? 'ON' : 'OFF'}</b>
+            </button>
+            <button type="button" class="btn btn-xs strat-toggle-btn ${stratBreakout ? 'btn-success' : 'btn-outline'}" data-field="strategy_breakout" data-name="Breakout Strategy" data-active="${stratBreakout}" style="padding:4px 10px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:5px;cursor:pointer;border-radius:6px;${stratBreakout ? 'background:rgba(56,189,248,0.18);color:#38bdf8;border:1px solid #38bdf8;' : 'background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.4);'}">
+              ${stratBreakout ? '<span class="dot dot-green" style="animation:pulse 1.5s infinite"></span>' : '⚪'} 📈 Breakout Strategy: <b>${stratBreakout ? 'ON' : 'OFF'}</b>
+            </button>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:14px;font-size:12px">
@@ -4900,6 +4927,96 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
     </div>`;
   }
 
+  async function refreshStrategyTradesTable() {
+    const tbody = document.getElementById("strat-dedicated-trades-tbody");
+    const countEl = document.getElementById("strat-dedicated-trades-count");
+    if (!tbody) return;
+    try {
+      const raw = await API.paperTrades();
+      const trades = Array.isArray(raw) ? raw : (raw && raw.database_trades) || [];
+      const isSMC = strategyType === "SMC_WITH_FIB";
+      const isFibTrend = strategyType === "FIB_GO_WITH_TREND";
+      const isFibRetr = strategyType === "FIB_WITH_RETRACEMENT";
+
+      const filtered = trades.filter(t => {
+        const s = String(t.strategy || "").toUpperCase();
+        const sig = String(t.signal_id || "").toUpperCase();
+        if (isSMC) return s.includes("SMC") || sig.includes("SMC");
+        if (isFibTrend) return s.includes("TREND") || sig.includes("TREND");
+        if (isFibRetr) return (s.includes("RETRACEMENT") || sig.includes("RETR")) && !s.includes("SMC") && !s.includes("TREND") && !s.includes("BREAKOUT");
+        return false;
+      });
+
+      if (countEl) countEl.textContent = `${filtered.length} Trades`;
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--text-dim);font-size:12px">No paper or MT5 trades recorded yet for ${strategyName}. Trades trigger auto-execution when setup levels are hit.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = renderPaperTradeRows(filtered, "$", 500);
+
+      tbody.querySelectorAll(".btn-pt-close").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const tradeId = btn.dataset.id;
+          if (!tradeId) return;
+          if (!confirm("Are you sure you want to MANUALLY CLOSE this open trade at market price?")) return;
+          try {
+            btn.disabled = true;
+            btn.textContent = "...";
+            await (API.closePaperTrade ? API.closePaperTrade(tradeId) : API.post(`/paper-trades/${tradeId}/close`));
+            UI.toast("Trade Closed", "Trade closed successfully.", "emerald");
+            refreshStrategyTradesTable();
+          } catch (err) {
+            UI.toast("Close Error", err.message || "Failed to close trade.", "rose");
+            btn.disabled = false;
+            btn.textContent = "✕ Close";
+          }
+        });
+      });
+    } catch (_) {}
+  }
+
+  function renderStrategyDedicatedTradesTable(stratType, stratTitle) {
+    setTimeout(refreshStrategyTradesTable, 60);
+
+    return `<div class="card" style="margin-bottom:var(--sp-3);border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.015)">
+      <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-weight:700;font-size:13px;color:var(--text-bright)">📊 ${stratTitle} — Dedicated Paper & MT5 Live Trades</span>
+          <span class="badge badge-green" style="font-size:10px">● MT5 Synced</span>
+          <span id="strat-dedicated-trades-count" class="badge badge-dim" style="font-size:10px">...</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim)">Execution logs with real MT5 ticket numbers and auto-sync</div>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap" style="max-height:360px;overflow-y:auto">
+          <table class="term" style="margin:0;font-size:12px">
+            <thead>
+              <tr>
+                <th>Opened Time (IST)</th>
+                <th>Strategy / TF / Ticket</th>
+                <th>Dir</th>
+                <th>Lots & Margin</th>
+                <th class="num">Entry Price</th>
+                <th class="num">Live / Exit</th>
+                <th class="num">Points</th>
+                <th class="num">PnL ($)</th>
+                <th class="num">R:R</th>
+                <th>SL / TP</th>
+                <th>Status</th>
+                <th style="text-align:center">Action</th>
+              </tr>
+            </thead>
+            <tbody id="strat-dedicated-trades-tbody">
+              <tr><td colspan="12" style="text-align:center;padding:18px;color:var(--text-dim);font-size:12px">Loading strategy trades...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function renderLockMsg(d) {
     // Only show ACTIVE banner for timeframes where BOTH:
     //   (a) a paper trade is open in DB, AND
@@ -4994,6 +5111,8 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
 
       const lMsgWrap = document.getElementById("strat-lock-msg-wrap");
       if (lMsgWrap) lMsgWrap.innerHTML = renderLockMsg(d);
+
+      refreshStrategyTradesTable();
     } catch (_) {}
     finally {
       isStratUpdating = false;
@@ -5105,9 +5224,14 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <!-- METRICS & FIBONACCI TABLE -->
       <div id="strat-points-metrics-wrap">${renderPointsMetrics(tfData)}</div>
 
-      <div class="grid grid-2">
+      <div class="grid grid-2" style="margin-bottom:var(--sp-3)">
         <div id="strat-levels-table-wrap">${renderLevelsTable(tfData.levels)}</div>
         <div id="strat-structure-status-wrap" class="card">${renderSmcStatus(tfData, selectedTf)}</div>
+      </div>
+
+      <!-- DEDICATED STRATEGY TRADES TABLE (MT5 SYNCED) -->
+      <div id="strat-dedicated-trades-wrap" style="margin-bottom:var(--sp-3)">
+        ${renderStrategyDedicatedTradesTable(strategyType, strategyName)}
       </div>
 
       <!-- EMBEDDED STRATEGY SIGNALS FEED -->
@@ -6325,7 +6449,8 @@ Routes["/settings"] = async (mount) => {
     const fixedLotSize = exec.fixed_lot_size !== undefined ? exec.fixed_lot_size : 0.01;
     const accountLeverage = exec.account_leverage !== undefined ? exec.account_leverage : 500;
     const stratFibRetr = exec.strategy_fib_retracement !== false;
-    const stratSmcFib = exec.strategy_smc_fib === true;
+    const stratSmcFib = exec.strategy_smc_fib !== false;
+    const stratBreakout = exec.strategy_breakout !== false;
     const stratFibTrend = exec.strategy_fib_trend === true;
     const activeTfs = exec.fib_retracement_timeframes || ["5m", "15m", "30m", "1h"];
     const smartShield = exec.smart_shield_enabled !== false;
@@ -6580,6 +6705,21 @@ Routes["/settings"] = async (mount) => {
               </div>
               <div style="font-size:11px;color:var(--text-dim);line-height:1.5">
                 Smart Money Concepts order block sweeps and 0.680 discount entries with liquidity hunting.
+              </div>
+            </div>
+
+            <!-- STRATEGY 3: BREAKOUT STRATEGY -->
+            <div style="background:#181e29;border:1px solid ${stratBreakout ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.08)'};border-radius:8px;padding:14px 16px" id="card-strat-breakout">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <label style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;cursor:pointer;color:#fff;margin:0">
+                  <input type="checkbox" id="strat-cb-breakout" ${stratBreakout ? 'checked' : ''} style="cursor:pointer"> 📈 Breakout Strategy
+                </label>
+                <span id="badge-strat-breakout" class="badge ${stratBreakout ? 'badge-green' : 'badge-yellow'}" style="font-size:10px">
+                  ${stratBreakout ? 'ACTIVE & TRADING' : 'STANDBY / OFF'}
+                </span>
+              </div>
+              <div style="font-size:11px;color:var(--text-dim);line-height:1.5">
+                Multi-timeframe 20-bar Donchian channel breakout with 50 EMA trend armor and dynamic ATR profit targets.
               </div>
             </div>
           </div>
@@ -7105,7 +7245,8 @@ Routes["/settings"] = async (mount) => {
       const smartShieldLvl = "0.618";
 
       const stratFibRetr = mount.querySelector("#strat-cb-fib-retr")?.checked ?? true;
-      const stratSmcFib = mount.querySelector("#strat-cb-smc-fib")?.checked ?? false;
+      const stratSmcFib = mount.querySelector("#strat-cb-smc-fib")?.checked ?? true;
+      const stratBreakout = mount.querySelector("#strat-cb-breakout")?.checked ?? true;
       const stratFibTrend = mount.querySelector("#strat-cb-fib-trend")?.checked ?? false;
 
       const tfs = [];
@@ -7120,7 +7261,7 @@ Routes["/settings"] = async (mount) => {
 
       try {
         const mt5Enabled = mount.querySelector("#set-mt5-bridge-enabled")?.checked ?? false;
-        const mt5Sym = mount.querySelector("#set-mt5-symbol")?.value || "XAUUSD";
+        const mt5Sym = mount.querySelector("#set-mt5-symbol")?.value || "XAUUSD-VIP";
 
         const payload = {
           account_currency: cur,
@@ -7134,6 +7275,7 @@ Routes["/settings"] = async (mount) => {
           account_leverage: leverage,
           strategy_fib_retracement: stratFibRetr,
           strategy_smc_fib: stratSmcFib,
+          strategy_breakout: stratBreakout,
           strategy_fib_trend: stratFibTrend,
           fib_retracement_timeframes: tfs.length > 0 ? tfs : ["5m", "15m", "30m", "1h"],
           smart_shield_enabled: smartShield,
@@ -7144,7 +7286,7 @@ Routes["/settings"] = async (mount) => {
           mt5_bridge_enabled: mt5Enabled,
           mt5_symbol: mt5Sym,
           mt5_magic_number: 777888,
-          mt5_allowed_strategy: "Fib Retracement",
+          mt5_allowed_strategy: "ALL",
           sync_paper_baseline: true,
         };
 

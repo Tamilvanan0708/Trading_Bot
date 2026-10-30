@@ -144,8 +144,11 @@ def _build_hybrid_open_msg(
     sl_px: float,
     tp_px: float,
     paper_trade_id: str | None = None,
+    ticket_override: int | str | None = None,
 ) -> str:
     broker_name, ticket_str, balance_str = _get_hybrid_broker_info(paper_trade_id)
+    if ticket_override:
+        ticket_str = f"#{ticket_override} (VT Markets Live)"
     dir_badge = "BUY / LONG ▲" if direction in ("LONG", "BUY") else "SELL / SHORT ▼"
     sl_dist = abs(entry_px - sl_px)
     tp_dist = abs(tp_px - entry_px)
@@ -166,6 +169,28 @@ def _build_hybrid_open_msg(
         f"🎯 *Take Profit:* ${tp_px:,.2f} (+{tp_dist:.1f} PTS)\n"
         f"⚖️ *Risk:Reward:* 1:{rr_ratio:.1f}\n"
         f"💼 *MT5 Balance:* {balance_str}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+
+
+def _build_hybrid_rejected_msg(
+    strategy_name: str,
+    symbol_tf: str,
+    direction: str,
+    reason: str,
+    entry_px: float,
+) -> str:
+    ist_time = _format_ist_time()
+    dir_badge = "BUY / LONG ▲" if direction in ("LONG", "BUY") else "SELL / SHORT ▼"
+    return (
+        f"⚠️ *MT5 BROKER ORDER REJECTED*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *Strategy:* {strategy_name}\n"
+        f"🪙 *Symbol:* {symbol_tf}\n"
+        f"📈 *Direction:* {dir_badge} @ ${entry_px:,.2f}\n"
+        f"🛑 *Rejection Reason:* {reason}\n"
+        f"🕒 *Time (IST):* {ist_time}\n"
+        f"🛡️ *Action:* Paper trade blocked to preserve MT5 synchronization.\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -1325,27 +1350,46 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         })
 
                                         trade_logs = list(new_trade.state_logs or [])
+                                        tkt_override = None
                                         # Synchronize actual_entry and lot_size with real MT5 execution
                                         if mt5_res and mt5_res.get("status") == "filled_native":
+                                            tkt_override = mt5_res.get("ticket")
                                             fill_px = float(mt5_res.get("price") or entry_px)
                                             new_trade.actual_entry = fill_px
                                             if mt5_res.get("payload", {}).get("lot_size"):
                                                 new_trade.lot_size = float(mt5_res["payload"]["lot_size"])
                                             trade_logs.append({
                                                 "event": "MT5_FILLED",
-                                                "ticket": mt5_res.get("ticket"),
+                                                "ticket": tkt_override,
                                                 "price": fill_px,
                                                 "lot_size": new_trade.lot_size,
                                                 "comment": trade_comment,
                                                 "time": datetime.now(timezone.utc).isoformat(),
                                             })
-                                        elif mt5_res and mt5_res.get("status") in ("blocked_chase", "blocked_spread"):
+                                        elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled"):
+                                            rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
+                                            new_trade.state = "CANCELLED"
+                                            new_trade.exit_reason = f"MT5_REJECTED: {rej_reason}"
                                             trade_logs.append({
-                                                "event": "MT5_BLOCKED",
+                                                "event": "MT5_REJECTED",
                                                 "status": mt5_res.get("status"),
-                                                "reason": mt5_res.get("reason"),
+                                                "reason": rej_reason,
                                                 "time": datetime.now(timezone.utc).isoformat(),
                                             })
+                                            new_trade.state_logs = trade_logs
+                                            await db.commit()
+                                            try:
+                                                rej_msg = _build_hybrid_rejected_msg(
+                                                    strategy_name=f"Fib Retracement ({l_key})",
+                                                    symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                                    direction=f_state.direction,
+                                                    reason=rej_reason,
+                                                    entry_px=entry_px,
+                                                )
+                                                _dispatch_tg_alert(tg.send_raw_alert(rej_msg))
+                                            except Exception:
+                                                pass
+                                            continue
                                         else:
                                             trade_logs.append({
                                                 "event": "MT5_DISPATCHED",
@@ -1368,6 +1412,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             sl_px=sl_px,
                                             tp_px=tp_px,
                                             paper_trade_id=new_trade.id,
+                                            ticket_override=tkt_override,
                                         )
                                         _dispatch_tg_alert(tg.send_raw_alert(msg))
                                     except Exception as tg_err:  # noqa: BLE001
@@ -2081,6 +2126,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 existing_open_smc = new_trade
                                 logger.info("[PAPER-AUTO] AI-APPROVED: Opened trade %s (SMC %s %s) @ %.2f", sig_id, tf_key.upper(), dir_str, entry_px)
 
+                                trade_logs = list(new_trade.state_logs or [])
+                                tkt_override = None
                                 # MT5 Live Order Dispatch for SMC With Fib
                                 if exec_cfg.mt5_bridge_enabled:
                                     try:
@@ -2090,7 +2137,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         trade_comment = f"{new_trade.id[:6]}_SMC_{tf_key.upper()}_{open_time_ist}"[:31]
                                         sl_dist = round(abs(entry_px - sl_px), 2) if sl_px > 0 else 3.0
                                         tp_dist = round(abs(tp_px - entry_px), 2) if tp_px > 0 else 3.0
-                                        get_mt5_bridge_manager().enqueue_order({
+                                        mt5_res = get_mt5_bridge_manager().enqueue_order({
                                             "id": f"mt5-{new_trade.id[:8]}",
                                             "paper_trade_id": new_trade.id,
                                             "strategy": "SMC with Fib",
@@ -2106,6 +2153,46 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             "tp_points": tp_dist,
                                             "comment": trade_comment,
                                         })
+                                        if mt5_res and mt5_res.get("status") == "filled_native":
+                                            tkt_override = mt5_res.get("ticket")
+                                            fill_px = float(mt5_res.get("price") or entry_px)
+                                            new_trade.actual_entry = fill_px
+                                            if mt5_res.get("payload", {}).get("lot_size"):
+                                                new_trade.lot_size = float(mt5_res["payload"]["lot_size"])
+                                            trade_logs.append({
+                                                "event": "MT5_FILLED",
+                                                "ticket": tkt_override,
+                                                "price": fill_px,
+                                                "lot_size": new_trade.lot_size,
+                                                "comment": trade_comment,
+                                                "time": datetime.now(timezone.utc).isoformat(),
+                                            })
+                                        elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled"):
+                                            rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
+                                            new_trade.state = "CANCELLED"
+                                            new_trade.exit_reason = f"MT5_REJECTED: {rej_reason}"
+                                            trade_logs.append({
+                                                "event": "MT5_REJECTED",
+                                                "status": mt5_res.get("status"),
+                                                "reason": rej_reason,
+                                                "time": datetime.now(timezone.utc).isoformat(),
+                                            })
+                                            new_trade.state_logs = trade_logs
+                                            await db.commit()
+                                            try:
+                                                rej_msg = _build_hybrid_rejected_msg(
+                                                    strategy_name=f"SMC With Fib ({tf_key.upper()})",
+                                                    symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                                    direction=dir_str,
+                                                    reason=rej_reason,
+                                                    entry_px=entry_px,
+                                                )
+                                                _dispatch_tg_alert(tg.send_raw_alert(rej_msg))
+                                            except Exception:
+                                                pass
+                                            continue
+                                        new_trade.state_logs = trade_logs
+                                        await db.commit()
                                     except Exception as mt5_err:
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch SMC trade to MT5: %s", mt5_err)
 
@@ -2120,6 +2207,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         sl_px=sl_px,
                                         tp_px=tp_px,
                                         paper_trade_id=new_trade.id,
+                                        ticket_override=tkt_override,
                                     )
                                     _dispatch_tg_alert(tg.send_raw_alert(msg))
                                 except Exception as tg_err:  # noqa: BLE001
@@ -2300,6 +2388,150 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 _in_flight_signals.discard(sig_id)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[PAPER-SYNC] Fib Trend sync error: %s", exc)
+
+        # 3.5. Breakout Strategy: Multi-Timeframe (5M, 15M, 30M, 1H)
+        if getattr(exec_cfg, "strategy_breakout", True):
+            try:
+                from app.backtesting.data_loader import fetch_historical_candles
+                existing_open_bo = (await db.execute(
+                    select(PaperTradeModel).where(
+                        PaperTradeModel.state == "OPEN",
+                        PaperTradeModel.signal_id.like("BREAKOUT_%"),
+                    )
+                )).scalars().first()
+
+                if not existing_open_bo:
+                    bo_tfs = ["5m", "15m", "30m", "1h"]
+                    bo_cfg = {
+                        "5m":  {"lookback": 20, "atr": 3.5, "buffer": 0.60, "tp_mult": 2.5, "sl_mult": 1.5},
+                        "15m": {"lookback": 25, "atr": 6.0, "buffer": 0.90, "tp_mult": 2.5, "sl_mult": 1.5},
+                        "30m": {"lookback": 30, "atr": 9.0, "buffer": 1.20, "tp_mult": 2.6, "sl_mult": 1.5},
+                        "1h":  {"lookback": 35, "atr": 15.0, "buffer": 1.80, "tp_mult": 2.8, "sl_mult": 1.5},
+                    }
+                    now_utc = datetime.now(timezone.utc)
+                    start_w = now_utc - timedelta(hours=8)
+                    for tf_str in bo_tfs:
+                        clist = await fetch_historical_candles("XAUUSD", tf_str, start_w, now_utc)
+                        cfg = bo_cfg[tf_str]
+                        lb = cfg["lookback"]
+                        if len(clist) < lb + 5:
+                            continue
+                        recent = clist[-(lb + 1):-1]
+                        last_c = clist[-1]
+                        highest = max(c.high for c in recent)
+                        lowest = min(c.low for c in recent)
+                        closes = [c.close for c in clist[-50:]]
+                        ema50 = sum(closes) / len(closes) if closes else last_c.close
+                        tr_list = [max(c.high - c.low, abs(c.high - clist[i-1].close) if i > 0 else c.high - c.low) for i, c in enumerate(clist[-14:])]
+                        calc_atr = max(sum(tr_list) / len(tr_list), 1.0) if tr_list else cfg["atr"]
+
+                        bullish_trig = highest + cfg["buffer"]
+                        bearish_trig = lowest - cfg["buffer"]
+
+                        is_bull = (last_c.close >= bullish_trig or last_c.high >= bullish_trig) and last_c.close >= ema50
+                        is_bear = (last_c.close <= bearish_trig or last_c.low <= bearish_trig) and last_c.close <= ema50
+
+                        if is_bull or is_bear:
+                            dir_str = "LONG" if is_bull else "SHORT"
+                            entry_px = round(last_c.close, 2)
+                            tp_px = round(entry_px + (calc_atr * cfg["tp_mult"]), 2) if is_bull else round(entry_px - (calc_atr * cfg["tp_mult"]), 2)
+                            sl_px = round(entry_px - (calc_atr * cfg["sl_mult"]), 2) if is_bull else round(entry_px + (calc_atr * cfg["sl_mult"]), 2)
+                            sig_id = f"BREAKOUT_{tf_str.upper()}_{dir_str}_{int(last_c.timestamp.timestamp())}"
+
+                            compounded_bal = await _get_compounded_paper_balance(db, exec_cfg.account_balance)
+                            trade_lot = calculate_lot_size(
+                                balance=compounded_bal,
+                                entry_price=entry_px,
+                                sl_price=sl_px,
+                                settings=exec_cfg,
+                            )
+                            new_trade = PaperTradeModel(
+                                id=str(uuid.uuid4()),
+                                signal_id=sig_id,
+                                strategy="Breakout Strategy",
+                                direction=dir_str,
+                                target_entry=entry_px,
+                                actual_entry=entry_px,
+                                stop_loss=sl_px,
+                                take_profit_1=tp_px,
+                                take_profit_2=tp_px,
+                                take_profit_3=tp_px,
+                                lot_size=trade_lot,
+                                state="OPEN",
+                                opened_at=datetime.now(timezone.utc),
+                                state_logs=[{"event": "BREAKOUT_TRIGGERED", "tf": tf_str, "entry": entry_px, "sl": sl_px, "tp": tp_px}],
+                            )
+                            db.add(new_trade)
+                            await db.commit()
+
+                            tkt_override = None
+                            if exec_cfg.mt5_bridge_enabled:
+                                try:
+                                    from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                    sl_dist = round(abs(entry_px - sl_px), 2)
+                                    tp_dist = round(abs(tp_px - entry_px), 2)
+                                    mt5_res = get_mt5_bridge_manager().enqueue_order({
+                                        "id": f"mt5-{new_trade.id[:8]}",
+                                        "paper_trade_id": new_trade.id,
+                                        "strategy": "Breakout Strategy",
+                                        "timeframe": tf_str.upper(),
+                                        "direction": dir_str,
+                                        "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                        "lot_size": trade_lot,
+                                        "entry_price": entry_px,
+                                        "stop_loss": sl_px,
+                                        "take_profit_1": tp_px,
+                                        "sl_points": sl_dist,
+                                        "tp_points": tp_dist,
+                                        "comment": f"{new_trade.id[:6]}_BO_{tf_str.upper()}"[:31],
+                                    })
+                                    if mt5_res and mt5_res.get("status") == "filled_native":
+                                        tkt_override = mt5_res.get("ticket")
+                                        fill_px = float(mt5_res.get("price") or entry_px)
+                                        new_trade.actual_entry = fill_px
+                                        if mt5_res.get("payload", {}).get("lot_size"):
+                                            new_trade.lot_size = float(mt5_res["payload"]["lot_size"])
+                                        new_trade.state_logs.append({"event": "MT5_FILLED", "ticket": tkt_override, "price": fill_px})
+                                        await db.commit()
+                                    elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled"):
+                                        rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
+                                        new_trade.state = "CANCELLED"
+                                        new_trade.exit_reason = f"MT5_REJECTED: {rej_reason}"
+                                        new_trade.state_logs.append({"event": "MT5_REJECTED", "reason": rej_reason})
+                                        await db.commit()
+                                        try:
+                                            rej_msg = _build_hybrid_rejected_msg(
+                                                strategy_name=f"Breakout Strategy ({tf_str.upper()})",
+                                                symbol_tf=f"XAU/USD ({tf_str.upper()})",
+                                                direction=dir_str,
+                                                reason=rej_reason,
+                                                entry_px=entry_px,
+                                            )
+                                            _dispatch_tg_alert(tg.send_raw_alert(rej_msg))
+                                        except Exception:
+                                            pass
+                                        continue
+                                except Exception as mt5_err:
+                                    logger.warning("[MT5-BRIDGE] Breakout MT5 dispatch error: %s", mt5_err)
+
+                            try:
+                                msg = _build_hybrid_open_msg(
+                                    strategy_name="Breakout Strategy",
+                                    symbol_tf=f"XAU/USD ({tf_str.upper()})",
+                                    direction=dir_str,
+                                    lot_size=trade_lot,
+                                    entry_px=entry_px,
+                                    sl_px=sl_px,
+                                    tp_px=tp_px,
+                                    paper_trade_id=new_trade.id,
+                                    ticket_override=tkt_override,
+                                )
+                                _dispatch_tg_alert(tg.send_raw_alert(msg))
+                            except Exception:
+                                pass
+                            break
+            except Exception as bo_err:
+                logger.warning("[PAPER-SYNC] Breakout sync error: %s", bo_err)
 
         # 4. Monitor OPEN trades against live price and resolve TP / SL
         # CRITICAL: effective_live_price MUST be a valid, realistic Gold price (> $1000)
@@ -2549,7 +2781,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         except Exception:
                             pass
                         try:
-                            if is_trend:
+                            if "BREAKOUT" in (t.signal_id or "") or t.strategy == "Breakout Strategy":
+                                strat_name = "Breakout Strategy"
+                            elif is_trend:
                                 strat_name = "Fib Go With Trend (Breakout)"
                             elif "FIB_RETR" in (t.signal_id or ""):
                                 strat_base = "Fib Retracement"

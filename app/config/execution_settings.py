@@ -85,8 +85,12 @@ class ExecutionSettings(BaseModel):
         description="Enable Fib With Retracement strategy execution"
     )
     strategy_smc_fib: bool = Field(
-        default=False,
+        default=True,
         description="Enable SMC With Fib strategy execution"
+    )
+    strategy_breakout: bool = Field(
+        default=True,
+        description="Enable Breakout Strategy execution"
     )
     strategy_fib_trend: bool = Field(
         default=False,
