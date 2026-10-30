@@ -1842,7 +1842,10 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         if exec_cfg.strategy_smc_fib:
             try:
                 smc_svc = get_smc_fib_multi_tf_service("XAUUSD")
-                smc_states = await smc_svc.advance(db)
+                try:
+                    smc_states = await smc_svc.advance(db, live_price=live_price)
+                except TypeError:
+                    smc_states = await smc_svc.advance(db)
 
                 # Check if any open trades exist for SMC_WITH_FIB across any timeframe
                 open_smc_trades = (await db.execute(

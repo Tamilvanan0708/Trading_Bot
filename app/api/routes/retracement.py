@@ -782,28 +782,17 @@ async def get_smc_fib_dashboard(
     TIMEFRAMES_ORDER = ["5m", "15m", "30m", "1h"]
     smc_multi = get_smc_fib_multi_tf_service(symbol)
     try:
-        states = await asyncio.wait_for(smc_multi.advance(db), timeout=4.0)
+        states = await asyncio.wait_for(smc_multi.advance(db, live_price=live_price), timeout=4.0)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[SMC-FIB] multi-tf advance timeout/error: %s", exc)
         states = {tf: smc_multi.slots[tf].engine.to_dict(live_price) for tf in TIMEFRAMES_ORDER}
 
-    active_trade_tf = None
-    # 1. First find if ANY timeframe already has a running active trade
-    for tf in TIMEFRAMES_ORDER:
-        card = states.get(tf) or {}
-        if card.get("is_trade_active"):
-            active_trade_tf = tf
-            break
-
-    # 2. Enforce 1-Trade Policy: If an active trade is running, put other timeframes on STANDBY
+    # Multi-Slot Parallel Execution: Keep all timeframes active and scanning concurrently
     for tf in TIMEFRAMES_ORDER:
         card = states.get(tf)
         if card:
-            card["is_locked_by_cascade"] = (active_trade_tf is not None and active_trade_tf != tf)
-            if card.get("is_locked_by_cascade") and not card.get("is_trade_active"):
-                card["cascade_status"] = f"STANDBY (Locked by {active_trade_tf.upper()})"
-            else:
-                card["cascade_status"] = "ACTIVE" if active_trade_tf else "SCANNING"
+            card["is_locked_by_cascade"] = False
+            card["cascade_status"] = "ACTIVE" if card.get("is_trade_active") else "SCANNING"
 
     # Query live open paper trades for SMC With Fib
     open_paper_trades_by_tf = {}

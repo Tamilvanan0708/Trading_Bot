@@ -91,7 +91,11 @@ class SMCFibMultiTFMonitor:
             return None
 
     async def _bootstrap_from_history(self) -> dict[str, list]:
-        """Load historical Binance candles via Binance REST directly."""
+        """Load real historical candles via MT5 / Binance REST provider."""
+        import os
+        if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("APP_ENV") == "test":
+            return {}
+
         import time
         now = time.time()
         if getattr(self, "_cached_hist_candles", None) and (now - getattr(self, "_last_bootstrap_ts", 0) < 120.0):
@@ -99,8 +103,31 @@ class SMCFibMultiTFMonitor:
 
         try:
             from app.config.settings import get_settings
+            from app.config.execution_settings import get_execution_settings
+            from app.data.live.service import get_live_service
             from app.data.live.binance_history import BinanceHistoryProvider
-            provider = BinanceHistoryProvider(get_settings())
+
+            settings = get_settings()
+            exec_cfg = get_execution_settings()
+            is_mt5 = (settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+
+            provider = None
+            if is_mt5:
+                live_svc = get_live_service()
+                provider = getattr(live_svc, "_mt5_provider", None)
+                if provider is None or not getattr(provider, "_connected", False):
+                    from app.data.mt5_provider import MT5DataProvider
+                    provider = MT5DataProvider(settings)
+                    try:
+                        await provider.connect_async()
+                    except Exception as exc:
+                        logger.warning("[SMC-FIB-MULTI] MT5 connect in bootstrap failed: %s", exc)
+            elif not is_mt5:
+                provider = BinanceHistoryProvider(settings)
+
+            if provider is None:
+                return getattr(self, "_cached_hist_candles", {})
+
             result = {}
             for tf in self.timeframes:
                 try:
@@ -117,15 +144,25 @@ class SMCFibMultiTFMonitor:
             logger.error("[SMC-FIB-MULTI] historical bootstrap failed: %s", exc)
             return getattr(self, "_cached_hist_candles", {})
 
-    async def advance(self, db) -> dict[str, Any]:
+    async def advance(self, db, live_price: float | None = None) -> dict[str, Any]:
         async with self._lock:
+            if live_price is not None and live_price > 0:
+                self.live_price = live_price
             snap = await self._snapshot()
+            if self.live_price is None and snap is not None and snap.current_price:
+                self.live_price = snap.current_price
+
             snap_key = (
                 snap.timestamp if snap else None,
                 len(snap.m15) if (snap and hasattr(snap, "m15")) else 0,
-                snap.current_price if snap else None,
+                self.live_price,
             )
             if snap is not None and getattr(self, "_last_snap_key", None) == snap_key and getattr(self, "_last_advance_results", None) is not None:
+                if self.live_price:
+                    for tf in self.timeframes:
+                        slot = self.slots[tf]
+                        slot.engine.update_live_price(self.live_price)
+                        self._last_advance_results[tf] = slot.engine.to_dict(self.live_price)
                 return self._last_advance_results
 
             raw_results: dict[str, Any] = {}
@@ -133,13 +170,13 @@ class SMCFibMultiTFMonitor:
             # Check if any engine has already been seeded
             engines_seeded = any(slot.last_processed_ts is not None for slot in self.slots.values())
 
-            # Bootstrap from real Binance historical candles ONLY when engines have never been seeded
+            # Bootstrap from real historical candles ONLY when engines have never been seeded
             needs_bootstrap = not engines_seeded
 
             hist_candles: dict[str, list] = {}
             if needs_bootstrap:
                 logger.info(
-                    "[SMC-FIB-MULTI] Seeding engines from Binance REST history bootstrap.",
+                    "[SMC-FIB-MULTI] Seeding engines from MT5/Historical bootstrap.",
                 )
                 hist_candles = await self._bootstrap_from_history()
 
@@ -186,61 +223,18 @@ class SMCFibMultiTFMonitor:
                             slot.engine.process_candle(c)
                         slot.last_processed_ts = new_candles[-1].timestamp
 
+                if self.live_price:
+                    slot.engine.update_live_price(self.live_price)
+
                 raw_results[tf] = slot.engine.to_dict(self.live_price)
 
-            # Step 2: WINNER-TAKES-ALL MASTER TRIGGER DETECTION
-            active_trade_tf = None
-            for tf in self.timeframes:
-                card = raw_results.get(tf) or {}
-                if card.get("is_trade_active"):
-                    active_trade_tf = tf
-                    break
-
-            # Step 3: OUTPUT SELECTION
+            # Step 2: Multi-Slot Parallel Execution — each timeframe maintains its own active slot
             final_results: dict[str, Any] = {}
             for tf in self.timeframes:
                 card = raw_results.get(tf) or {}
-
-                if active_trade_tf is not None:
-                    # An active trade is running -> Only winner shows active, others standby
-                    if tf == active_trade_tf:
-                        card["is_locked_by_cascade"] = False
-                        card["cascade_status"] = "ACTIVE"
-                        final_results[tf] = card
-                    else:
-                        final_results[tf] = {
-                            "strategy": "SMC_WITH_FIB",
-                            "symbol": self.symbol,
-                            "timeframe": tf,
-                            "state": "NO_SETUP",
-                            "direction": card.get("direction", "LONG"),
-                            "has_live_data": card.get("has_live_data", False),
-                            "is_entry_ready": False,
-                            "is_entry_touched": False,
-                            "is_trade_active": False,
-                            "is_locked_by_cascade": True,
-                            "cascade_status": f"STANDBY (Locked by {active_trade_tf.upper()})",
-                            "entry": {"price": None, "touched": False},
-                            "sl": {"price": None},
-                            "tp": {"price": None, "dynamic": None, "locked": None, "is_locked": False},
-                            "point_1": {"price": None},
-                            "point_2": {"price": None},
-                            "bos": {"price": None},
-                            "levels": {},
-                            "metrics": {
-                                "total_range_pts": 0.0,
-                                "entry_to_tp_pts": 0.0,
-                                "entry_to_sl_pts": 0.0,
-                                "rr_ratio": 2.83,
-                                "current_movement_pts": 0.0,
-                            },
-                            "smc": card.get("smc", {}),
-                        }
-                else:
-                    # No trade is active yet -> Show each timeframe's current setup & Fibonacci levels so user can see the setups!
-                    card["is_locked_by_cascade"] = False
-                    card["cascade_status"] = "SCANNING"
-                    final_results[tf] = card
+                card["is_locked_by_cascade"] = False
+                card["cascade_status"] = "ACTIVE" if card.get("is_trade_active") else "SCANNING"
+                final_results[tf] = card
 
             self._last_snap_key = snap_key
             self._last_advance_results = final_results

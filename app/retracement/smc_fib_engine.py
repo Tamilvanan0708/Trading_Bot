@@ -88,6 +88,35 @@ class SMCFibEngine:
         self._events: list[RetracementEvent] = []
         self._history: list[Candle] = []
 
+    def _max_span_for_tf(self) -> float:
+        """Maximum allowable dealing range (points) before anchor rolling is triggered."""
+        tf = str(self.timeframe).lower()
+        if tf == "1m":
+            return 15.0
+        if tf == "3m":
+            return 25.0
+        if tf == "5m":
+            return 35.0
+        if tf == "15m":
+            return 50.0
+        if tf == "30m":
+            return 75.0
+        return 100.0
+
+    def update_live_price(self, live_price: float | None) -> None:
+        """Update dynamic target TP (0.000) and fibonacci levels in real time as live price moves."""
+        if live_price is None or live_price <= 0:
+            return
+        if self.state in (RetracementState.TP_DYNAMIC, RetracementState.FIB_ACTIVE) and not self.entry_touched:
+            if self.direction == SignalDirection.LONG:
+                if self.target_tp_price is not None and live_price > self.target_tp_price:
+                    self.target_tp_price = round(live_price, 2)
+                    self._recompute_fib_levels()
+            elif self.direction == SignalDirection.SHORT:
+                if self.target_tp_price is not None and live_price < self.target_tp_price:
+                    self.target_tp_price = round(live_price, 2)
+                    self._recompute_fib_levels()
+
     def _anchor_lookback_bars(self) -> int:
         """Timeframe-aware anchor lookback.
 
@@ -353,6 +382,30 @@ class SMCFibEngine:
                 self.target_tp_price = candle.high
                 self.target_tp_ts = candle.timestamp
                 self._recompute_fib_levels()
+            # Guard against hyper-extended stale setups: Anchor Rolling
+            max_span = self._max_span_for_tf()
+            current_span = abs((self.target_tp_price or 0.0) - (self.point_2_price or 0.0))
+            if not self.entry_touched and current_span > max_span and len(self._history) >= 15:
+                recent_candles = self._history[-30:-2]
+                valid_lows = [
+                    c for c in recent_candles
+                    if c.low > (self.point_2_price or 0.0)
+                    and 5.0 <= ((self.target_tp_price or 0.0) - c.low) <= max_span
+                ]
+                if valid_lows:
+                    best_low_c = min(valid_lows, key=lambda c: c.low)
+                    logger.info(
+                        "[SMC-FIB] Rolling anchor for %s %s from %.2f to %.2f (span reduced from %.2f to %.2f)",
+                        self.symbol, self.timeframe, self.point_2_price, best_low_c.low, current_span, self.target_tp_price - best_low_c.low
+                    )
+                    self.point_2_price = best_low_c.low
+                    self.point_2_ts = best_low_c.timestamp
+                    self._recompute_fib_levels()
+                elif current_span > max_span * 1.5:
+                    self.state = RetracementState.INVALIDATED
+                    self.invalidation_reason = f"Dealing range exceeded {max_span*1.5:.1f} pts without pullback."
+                    return
+
             # Single Entry at 0.680 Golden Pocket (0.01 lots) - Instant Touch Execution
             if self.entry_price is not None and candle.low <= self.entry_price:
                 if self.sl_price is not None and candle.low <= self.sl_price:
@@ -369,6 +422,30 @@ class SMCFibEngine:
                 self.target_tp_price = candle.low
                 self.target_tp_ts = candle.timestamp
                 self._recompute_fib_levels()
+            # Guard against hyper-extended stale setups: Anchor Rolling
+            max_span = self._max_span_for_tf()
+            current_span = abs((self.point_2_price or 0.0) - (self.target_tp_price or 0.0))
+            if not self.entry_touched and current_span > max_span and len(self._history) >= 15:
+                recent_candles = self._history[-30:-2]
+                valid_highs = [
+                    c for c in recent_candles
+                    if c.high < (self.point_2_price or 0.0)
+                    and 5.0 <= (c.high - (self.target_tp_price or 0.0)) <= max_span
+                ]
+                if valid_highs:
+                    best_high_c = max(valid_highs, key=lambda c: c.high)
+                    logger.info(
+                        "[SMC-FIB] Rolling anchor for %s %s from %.2f to %.2f (span reduced from %.2f to %.2f)",
+                        self.symbol, self.timeframe, self.point_2_price, best_high_c.high, current_span, best_high_c.high - self.target_tp_price
+                    )
+                    self.point_2_price = best_high_c.high
+                    self.point_2_ts = best_high_c.timestamp
+                    self._recompute_fib_levels()
+                elif current_span > max_span * 1.5:
+                    self.state = RetracementState.INVALIDATED
+                    self.invalidation_reason = f"Dealing range exceeded {max_span*1.5:.1f} pts without pullback."
+                    return
+
             # Single Entry at 0.680 Golden Pocket (0.01 lots) - Instant Touch Execution
             if self.entry_price is not None and candle.high >= self.entry_price:
                 if self.sl_price is not None and candle.high >= self.sl_price:
@@ -443,7 +520,8 @@ class SMCFibEngine:
         rr = round(e2tp / e2sl, 2) if e2sl > 0 else 2.83
 
         curr_move = 0.0
-        if live_price is not None and entry_val is not None:
+        # Only compute active movement if entry was touched or trade is active
+        if (self.entry_touched or self.state == RetracementState.TRADE_ACTIVE) and live_price is not None and entry_val is not None:
             curr_move = round(live_price - entry_val, 2) if self.direction == SignalDirection.LONG else round(entry_val - live_price, 2)
 
         return {
