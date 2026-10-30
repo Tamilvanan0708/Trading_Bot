@@ -5221,6 +5221,21 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <!-- BIG ACTIVE SIGNAL BOX -->
       <div id="strat-signal-box-wrap">${renderActiveSignalBox(tfData, price, selectedTf)}</div>
 
+      <!-- LIVE MT5 CANDLESTICK & FIBONACCI CHART -->
+      <div class="card" style="margin-bottom:var(--sp-3);padding:14px">
+        <div class="row-between" style="margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-weight:700;font-size:13px;color:#fff">📊 ${strategyName} — LIVE MT5 CANDLESTICK CHART</span>
+            <span class="badge badge-green" style="font-size:10px">⚡ MT5 BROKER SYNC (XAUUSD-VIP)</span>
+            <span class="badge badge-blue" style="font-size:10px">${selectedTf.toUpperCase()}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted)">
+            Real-time MetaTrader 5 Terminal Candlesticks & Fibonacci Confluence Levels
+          </div>
+        </div>
+        <div id="strat-fib-chart-container" style="width:100%;height:420px;border-radius:6px;overflow:hidden;background:#0d1117;position:relative"></div>
+      </div>
+
       <!-- METRICS & FIBONACCI TABLE -->
       <div id="strat-points-metrics-wrap">${renderPointsMetrics(tfData)}</div>
 
@@ -5238,9 +5253,16 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <div id="strat-signals-history-wrap">${renderStrategySignalsFeed(strategyType, strategyName)}</div>
     </div>`;
   }, mount).then(() => {
+    // Initial draw of MT5 candlestick chart
+    setTimeout(() => {
+      drawFibChart("strat-fib-chart-container", selectedTf, strategyType);
+    }, 60);
+
     if (_stratTimer) clearInterval(_stratTimer);
     _stratTimer = setInterval(() => {
       updateStratInPlace();
+      // Keep MT5 candlestick chart updated with latest live bars
+      drawFibChart("strat-fib-chart-container", selectedTf, strategyType);
     }, AutoRefresh.speed || 4000);
 
     window.__viewCleanup = () => {
@@ -5842,7 +5864,10 @@ Routes["/backtest"] = (mount) => {
     const now = new Date();
     const padZero = (n) => String(n).padStart(2, '0');
     const todayStr = `${now.getFullYear()}-${padZero(now.getMonth() + 1)}-${padZero(now.getDate())}`;
-    const defaultFromDate = window.__btFromDate || '2026-01-01';
+    const d2yDef = new Date(now);
+    d2yDef.setFullYear(d2yDef.getFullYear() - 2);
+    const twoYearsAgoStr = `${d2yDef.getFullYear()}-${padZero(d2yDef.getMonth() + 1)}-${padZero(d2yDef.getDate())}`;
+    const defaultFromDate = window.__btFromDate || twoYearsAgoStr;
     const defaultToDate = window.__btToDate || todayStr;
 
     let summaryHtml = "";
@@ -6025,6 +6050,7 @@ Routes["/backtest"] = (mount) => {
             <button type="button" class="btn btn-xs ${window.__btPreset === '30d' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="30d" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">Last 30 Days</button>
             <button type="button" class="btn btn-xs ${window.__btPreset === 'this_month' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="this_month" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">This Month</button>
             <button type="button" class="btn btn-xs ${window.__btPreset === 'ytd' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="ytd" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px">2026 YTD</button>
+            <button type="button" class="btn btn-xs ${window.__btPreset === '2yr' ? 'btn-primary' : 'btn-outline'} bt-preset-btn" data-preset="2yr" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;border-color:#00e676;color:#69f0ae">⚡ Last 2 Years (MT5 2YR)</button>
           </div>
         </div>
         <div class="card-body">
@@ -6090,12 +6116,12 @@ Routes["/backtest"] = (mount) => {
 
             <div style="flex:1;min-width:120px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">FROM DATE</label>
-              <input type="date" id="bt-from-date" class="form-input" min="2025-12-11" max="${todayStr}" value="${defaultFromDate}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+              <input type="date" id="bt-from-date" class="form-input" min="2022-01-01" max="${todayStr}" value="${defaultFromDate}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div style="flex:1;min-width:120px">
               <label class="input-label" style="font-size:11px;font-weight:700;color:var(--text-dim);display:block;margin-bottom:4px">TO DATE</label>
-              <input type="date" id="bt-to-date" class="form-input" min="2025-12-11" max="${todayStr}" value="${defaultToDate}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
+              <input type="date" id="bt-to-date" class="form-input" min="2022-01-01" max="${todayStr}" value="${defaultToDate}" style="width:100%;padding:7px 10px;background:#181e29;border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:6px;font-size:12px">
             </div>
 
             <div>
@@ -6292,7 +6318,12 @@ Routes["/backtest"] = (mount) => {
         let fDate = tStr;
         let tDate = tStr;
 
-        if (preset === "today") {
+        if (preset === "2yr") {
+          const d2y = new Date(n);
+          d2y.setFullYear(d2y.getFullYear() - 2);
+          fDate = `${d2y.getFullYear()}-${p(d2y.getMonth() + 1)}-${p(d2y.getDate())}`;
+          tDate = tStr;
+        } else if (preset === "today") {
           fDate = tStr;
           tDate = tStr;
         } else if (preset === "yesterday") {

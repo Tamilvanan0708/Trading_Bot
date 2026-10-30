@@ -293,11 +293,24 @@ class MT5BridgeManager:
             try:
                 ai = mt5.account_info()
                 if ai is not None and getattr(ai, "balance", None) is not None:
-                    return round(float(ai.balance), 2)
+                    bal_val = float(ai.balance)
+                    if bal_val > 0:
+                        return round(bal_val, 2)
             except Exception:
                 pass
         with self._lock:
-            return self._heartbeat.get("balance")
+            hb_bal = self._heartbeat.get("balance")
+            if hb_bal is not None and float(hb_bal) > 0:
+                return round(float(hb_bal), 2)
+        # Fallback to connected account in status
+        try:
+            st = self.get_status()
+            conn_bal = st.get("connected_account", {}).get("balance")
+            if conn_bal is not None and float(conn_bal) > 0:
+                return round(float(conn_bal), 2)
+        except Exception:
+            pass
+        return None
 
     def get_account_equity(self) -> float | None:
         """Returns live account equity in USD from MT5 if connected."""
@@ -329,7 +342,7 @@ class MT5BridgeManager:
         exec_cfg = get_execution_settings()
 
         allowed_strat = getattr(exec_cfg, "mt5_allowed_strategy", "ALL")
-        if allowed_strat and allowed_strat != "ALL" and allowed_strat.upper() not in strat_upper:
+        if allowed_strat and allowed_strat.strip().upper() not in ("ALL", "ALL STRATEGIES", "*") and allowed_strat.upper() not in strat_upper:
             logger.info(
                 "[MT5-BRIDGE] Strategy '%s' filtered out by configuration (%s).",
                 strat,

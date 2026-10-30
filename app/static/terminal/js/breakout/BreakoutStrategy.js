@@ -67,7 +67,7 @@ window.BreakoutStrategy = (function () {
     container.innerHTML = `
       <div class="chart-live-legend">
         <div class="chart-live-legend-title">
-          <span>🟡 XAU/USD (Official TradingView Feed)</span>
+          <span>🟡 XAU/USD (MetaTrader 5 Live Feed)</span>
         </div>
         <div class="chart-live-legend-stats">
           <span id="chart-live-open">O: --</span>
@@ -140,7 +140,7 @@ window.BreakoutStrategy = (function () {
     const statusBadge = document.getElementById("chart-stream-status");
     if (statusBadge) {
       statusBadge.className = "feed-status-pill feed-status-connecting";
-      statusBadge.innerHTML = `<span class="dot dot-amber"></span><span>SYNCING TRADINGVIEW...</span>`;
+      statusBadge.innerHTML = `<span class="dot dot-amber"></span><span>SYNCING MT5 CANDLES...</span>`;
     }
 
     const candles = await window.BreakoutDataService.fetchCandles(timeframe, 120);
@@ -443,7 +443,7 @@ window.BreakoutStrategy = (function () {
             </div>
             <div>
               <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Live Feed Source</div>
-              <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-bright);margin-top:3px;">TradingView (OANDA)</div>
+              <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-bright);margin-top:3px;">MetaTrader 5 (VT Markets Live)</div>
             </div>
             <div>
               <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Auto-Refresh Speed</div>
@@ -521,7 +521,7 @@ window.BreakoutStrategy = (function () {
 
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-dim);border-top:1px solid var(--border);padding-top:10px;margin-top:10px;">
               <div style="display:flex;gap:16px;">
-                <span>Source: <b style="color:var(--accent)">TradingView Scanner API (OANDA:XAUUSD)</b></span>
+                <span>Source: <b style="color:var(--accent)">MetaTrader 5 Native Bridge (XAUUSD-VIP)</b></span>
                 <span>Refresh: <b style="color:var(--green)">⚡ High-Speed 1s Sync (Zero-Delay)</b></span>
                 <span>Parity: <b style="color:var(--green-bright)">100% Exact Match</b></span>
               </div>

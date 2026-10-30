@@ -74,11 +74,26 @@ window.BreakoutDataService = (function () {
   };
 
   /**
-   * Fetches official live price directly from TradingView Scanner API.
-   * Uses simple CORS request without custom Content-Type header to bypass preflight.
+   * Fetches official live price directly from MetaTrader 5 (MT5 Live Feed).
+   * Falls back to TradingView scanner if MT5 terminal offline.
    */
   async function fetchTradingViewLiveQuote() {
     const timestamp = Date.now();
+
+    // 0. Primary: Live MT5 quote from backend bridge
+    try {
+      const mt5Res = await fetch(`/market/live-price?_t=${timestamp}`);
+      if (mt5Res.ok) {
+        const mt5Data = await mt5Res.json();
+        const px = parseFloat(mt5Data.price || mt5Data.live_price || 0);
+        if (px > 1000) {
+          tvAnchorPrice = px;
+          tvConsecutiveFailures = 0;
+          updateStateWithPrice(px, px, px, px, 100, 0.0, "MT5_LIVE");
+          return liveState;
+        }
+      }
+    } catch (_) {}
 
     // 1. TradingView Scanner API with cache-buster query parameter
     try {
@@ -175,14 +190,49 @@ window.BreakoutDataService = (function () {
   }
 
   /**
-   * Fetches real OHLCV candlestick data and calibrates to exact TradingView live price
+   * Fetches real OHLCV candlestick data directly from MetaTrader 5 (MT5 Live Feed).
+   * Falls back to Binance REST only if MT5 backend is offline.
    */
   async function fetchCandles(interval = "15m", limit = 100) {
     try {
-      // 1. Fetch current TradingView live price
+      // 0. Primary: Fetch real MT5 candles directly from backend chart endpoint
+      try {
+        const mt5Url = `/retracement/chart/XAUUSD/${interval.toLowerCase()}?limit=${limit}&_t=${Date.now()}`;
+        const mt5Res = await fetch(mt5Url);
+        if (mt5Res.ok) {
+          const mt5Data = await mt5Res.json();
+          if (mt5Data && mt5Data.candles && mt5Data.candles.length >= 10) {
+            const candles = mt5Data.candles.map(c => ({
+              time: typeof c.time === "number" ? c.time : Math.floor(new Date(c.time || c.timestamp).getTime() / 1000),
+              open: parseFloat(Number(c.open).toFixed(2)),
+              high: parseFloat(Number(c.high).toFixed(2)),
+              low: parseFloat(Number(c.low).toFixed(2)),
+              close: parseFloat(Number(c.close).toFixed(2)),
+              volume: parseFloat(c.volume || 100)
+            }));
+
+            if (mt5Data.live_price && mt5Data.live_price > 1000) {
+              liveState.price = parseFloat(mt5Data.live_price);
+            }
+            if (candles.length > 0 && liveState.price) {
+              const last = candles[candles.length - 1];
+              last.close = liveState.price;
+              last.high = Math.max(last.high, liveState.price);
+              last.low = Math.min(last.low, liveState.price);
+              liveState.lastCandle = last;
+            }
+            computeBreakoutZones(candles, 20, interval);
+            return candles;
+          }
+        }
+      } catch (mt5FetchErr) {
+        console.warn("[MT5-CANDLES] MT5 chart fetch fallback:", mt5FetchErr);
+      }
+
+      // 1. Fetch current live quote fallback
       await fetchTradingViewLiveQuote();
 
-      // 2. Fetch candles from Binance
+      // 2. Fallback to Binance if MT5 endpoint fails
       const url = `${BINANCE_REST_BASE}/klines?symbol=${BINANCE_SYMBOL}&interval=${interval}&limit=${limit}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);

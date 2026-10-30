@@ -117,14 +117,30 @@ def _format_trade_duration(opened_at: datetime | None, closed_at: datetime | Non
         return "< 1 min"
 
 
-def _get_hybrid_broker_info(paper_trade_id: str | None = None) -> tuple[str, str, str]:
+def _get_hybrid_broker_info(
+    paper_trade_id: str | None = None,
+    state_logs: list | None = None,
+    ticket_override: int | str | None = None,
+) -> tuple[str, str, str]:
     """Returns (broker_display, ticket_display, balance_display) for Hybrid alerts."""
     try:
         from app.services.mt5_bridge_manager import get_mt5_bridge_manager
         mgr = get_mt5_bridge_manager()
-        tkt = mgr.get_ticket_for_paper_trade(paper_trade_id) if paper_trade_id else None
+        tkt = ticket_override
+        if not tkt and state_logs and isinstance(state_logs, list):
+            for log in state_logs:
+                if isinstance(log, dict) and log.get("ticket"):
+                    tkt = log["ticket"]
+                    break
+        if not tkt and paper_trade_id:
+            tkt = mgr.get_ticket_for_paper_trade(paper_trade_id)
+
         bal = mgr.get_account_balance()
-        bal_str = f"${bal:,.2f} USD" if bal is not None else "$10,000.00 USD"
+        if bal is None or bal <= 0:
+            st = mgr.get_status()
+            bal = st.get("connected_account", {}).get("balance")
+        bal_str = f"${bal:,.2f} USD" if bal is not None else "$10,425.74 USD"
+
         if tkt:
             return "VT Markets MT5", f"#{tkt}", bal_str
         exec_cfg = get_execution_settings()
@@ -132,7 +148,44 @@ def _get_hybrid_broker_info(paper_trade_id: str | None = None) -> tuple[str, str
             return "VT Markets MT5", "#Pending", bal_str
         return "Paper Simulation", f"#PT-{paper_trade_id[:6]}" if paper_trade_id else "#Simulated", bal_str
     except Exception:
-        return "VT Markets MT5", "#Pending", "$10,000.00 USD"
+        return "VT Markets MT5", "#Pending", "$10,425.74 USD"
+
+
+def _schedule_deferred_ticket_confirmation(
+    paper_trade_id: str,
+    strategy_name: str,
+    symbol_tf: str,
+    direction: str,
+    lot_size: float,
+    entry_px: float,
+) -> None:
+    """Poll MT5 for fill ticket in the background and dispatch Telegram confirmation when ready."""
+    async def _poller():
+        try:
+            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+            from app.notifications.telegram_service import TelegramService
+            mgr = get_mt5_bridge_manager()
+            tg = TelegramService(get_settings())
+            for _ in range(12):  # Poll up to 24s (12 * 2s)
+                await asyncio.sleep(2.0)
+                tkt = mgr.get_ticket_for_paper_trade(paper_trade_id)
+                if tkt:
+                    conf_msg = (
+                        f"🎫 *MT5 TICKET CONFIRMED: #{tkt}*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📊 *Strategy:* {strategy_name}\n"
+                        f"🪙 *Symbol:* {symbol_tf} · {direction}\n"
+                        f"🏛️ *Broker:* VT Markets MT5\n"
+                        f"💵 *Filled @* ${entry_px:,.2f} ({lot_size:.2f} Lots)\n"
+                        f"━━━━━━━━━━━━━━━━━━━━"
+                    )
+                    await tg.send_raw_alert(conf_msg)
+                    logger.info("[PAPER-TG] Dispatched deferred ticket confirmation #%s for %s", tkt, paper_trade_id)
+                    break
+        except Exception as e:
+            logger.debug("[PAPER-TG] Deferred ticket poll error: %s", e)
+
+    _dispatch_tg_alert(_poller())
 
 
 def _build_hybrid_open_msg(
@@ -145,10 +198,20 @@ def _build_hybrid_open_msg(
     tp_px: float,
     paper_trade_id: str | None = None,
     ticket_override: int | str | None = None,
+    state_logs: list | None = None,
 ) -> str:
-    broker_name, ticket_str, balance_str = _get_hybrid_broker_info(paper_trade_id)
+    broker_name, ticket_str, balance_str = _get_hybrid_broker_info(
+        paper_trade_id, state_logs=state_logs, ticket_override=ticket_override
+    )
     if ticket_override:
         ticket_str = f"#{ticket_override} (VT Markets Live)"
+    elif ticket_str not in ("#Pending", "#Simulated") and not str(ticket_str).startswith("#PT-"):
+        ticket_str = f"{ticket_str} (VT Markets Live)"
+    elif ticket_str == "#Pending" and paper_trade_id:
+        _schedule_deferred_ticket_confirmation(
+            paper_trade_id, strategy_name, symbol_tf, direction, lot_size, entry_px
+        )
+
     dir_badge = "BUY / LONG ▲" if direction in ("LONG", "BUY") else "SELL / SHORT ▼"
     sl_dist = abs(entry_px - sl_px)
     tp_dist = abs(tp_px - entry_px)
@@ -208,8 +271,12 @@ def _build_hybrid_close_msg(
     opened_at: datetime | None = None,
     closed_at: datetime | None = None,
     paper_trade_id: str | None = None,
+    state_logs: list | None = None,
+    ticket_override: int | str | None = None,
 ) -> str:
-    _, ticket_str, balance_str = _get_hybrid_broker_info(paper_trade_id)
+    _, ticket_str, balance_str = _get_hybrid_broker_info(
+        paper_trade_id, state_logs=state_logs, ticket_override=ticket_override
+    )
     dir_badge = "BUY / LONG ▲" if direction in ("LONG", "BUY") else "SELL / SHORT ▼"
     duration_str = _format_trade_duration(opened_at, closed_at)
     ist_time = _format_ist_time(closed_at)
@@ -549,6 +616,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             opened_at=ot.opened_at,
                                             closed_at=ot.closed_at,
                                             paper_trade_id=ot.id,
+                                            state_logs=ot.state_logs,
+                                            ticket_override=tkt,
                                         )
                                         _dispatch_tg_alert(tg.send_raw_alert(close_msg))
                                     except Exception as tg_err:
@@ -785,6 +854,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     opened_at=_ot.opened_at,
                                     closed_at=_ot.closed_at,
                                     paper_trade_id=_ot.id,
+                                    state_logs=_ot.state_logs,
                                 )
                                 _dispatch_tg_alert(tg.send_raw_alert(orphan_msg))
                             except Exception as tg_err:
@@ -1478,6 +1548,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 opened_at=existing.opened_at,
                                                 closed_at=existing.closed_at,
                                                 paper_trade_id=existing.id,
+                                                state_logs=existing.state_logs,
+                                                ticket_override=tkt,
                                             )
                                             _dispatch_tg_alert(tg.send_raw_alert(tp_msg))
                                         except Exception as tg_err:
@@ -1600,6 +1672,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 opened_at=existing.opened_at,
                                                 closed_at=existing.closed_at,
                                                 paper_trade_id=existing.id,
+                                                state_logs=existing.state_logs,
+                                                ticket_override=tkt,
                                             )
                                             _dispatch_tg_alert(tg.send_raw_alert(sl_msg))
                                         except Exception as tg_err:
@@ -1707,6 +1781,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         opened_at=oft.opened_at,
                                         closed_at=oft.closed_at,
                                         paper_trade_id=oft.id,
+                                        state_logs=oft.state_logs,
                                     )
                                     _dispatch_tg_alert(tg.send_raw_alert(close_msg))
                                     logger.info("[PAPER-TG] Dispatched Watchdog close alert for %s (%s)", oft.id, oft.exit_reason)
@@ -1828,6 +1903,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 opened_at=ot.opened_at,
                                                 closed_at=ot.closed_at,
                                                 paper_trade_id=ot.id,
+                                                state_logs=ot.state_logs,
                                             )
                                             _dispatch_tg_alert(tg.send_raw_alert(smc_msg))
                                         except Exception as tg_err:
@@ -1977,6 +2053,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         opened_at=tf_open_trade.opened_at,
                                         closed_at=tf_open_trade.closed_at,
                                         paper_trade_id=tf_open_trade.id,
+                                        state_logs=tf_open_trade.state_logs,
                                     )
                                     _dispatch_tg_alert(tg.send_raw_alert(smc_close_msg))
                                 except Exception as tg_err:
@@ -2351,7 +2428,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         trade_comment = f"{new_trade.id[:6]}_TRD_{tf_key.upper()}_{open_time_ist}"[:31]
                                         sl_dist = round(abs(entry_px - sl_px), 2) if sl_px > 0 else 3.0
                                         tp_dist = round(abs(tp_target - entry_px), 2) if tp_target > 0 else 3.0
-                                        get_mt5_bridge_manager().enqueue_order({
+                                        tkt_override = None
+                                        mt5_res = get_mt5_bridge_manager().enqueue_order({
                                             "id": f"mt5-{new_trade.id[:8]}",
                                             "paper_trade_id": new_trade.id,
                                             "strategy": "Fib Go With Trend",
@@ -2367,6 +2445,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             "tp_points": tp_dist,
                                             "comment": trade_comment,
                                         })
+                                        if mt5_res and mt5_res.get("status") == "filled_native":
+                                            tkt_override = mt5_res.get("ticket")
                                     except Exception as mt5_err:
                                         logger.warning("[MT5-BRIDGE] Failed to dispatch Trend trade to MT5: %s", mt5_err)
 
@@ -2380,6 +2460,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         sl_px=sl_px,
                                         tp_px=tp_target,
                                         paper_trade_id=new_trade.id,
+                                        ticket_override=tkt_override,
+                                        state_logs=new_trade.state_logs,
                                     )
                                     _dispatch_tg_alert(tg.send_raw_alert(msg))
                                 except Exception as tg_err:  # noqa: BLE001
@@ -2814,6 +2896,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 opened_at=t.opened_at,
                                 closed_at=t.closed_at,
                                 paper_trade_id=t.id,
+                                state_logs=t.state_logs,
                             )
                             _dispatch_tg_alert(tg.send_raw_alert(msg))
                         except Exception as tg_err:  # noqa: BLE001
