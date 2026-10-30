@@ -494,6 +494,12 @@ async def get_cached_market_data(symbol: str, timeframe: str = "15m"):
     }
 
 
+@router.get("/live-price")
+async def get_live_price_endpoint(symbol: str = "XAUUSD"):
+    """Returns real-time price quote from native MT5 or active feed."""
+    return await get_quote(symbol)
+
+
 @router.get("/{symbol}/quote")
 async def get_quote(symbol: str):
     """Lightweight latest-quote endpoint (price/bid/ask/status) for the topbar.
@@ -508,30 +514,58 @@ async def get_quote(symbol: str):
     bid = None
     ask = None
     status = "OFFLINE"
+
+    # 1. Prefer native MT5 live tick directly
     try:
-        price = await service.get_latest_price(symbol)
-    except Exception:  # noqa: BLE001
+        from app.services.mt5_bridge_manager import get_mt5_bridge
+        mt5_bridge = get_mt5_bridge()
+        tk = mt5_bridge.get_live_tick(symbol)
+        if tk and tk.get("price", 0) > 1000.0:
+            price = float(tk["price"])
+            bid = float(tk["bid"])
+            ask = float(tk["ask"])
+            status = "HEALTHY"
+            service._live_price = price
+    except Exception:
         pass
-    try:
-        tick = await service.registry.latest_tick(symbol)
-        if tick is not None:
-            bid = tick.bid
-            ask = tick.ask
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        if service.settings.LIVE_FEED_PROVIDER == "mt5":
-            mt5_p = getattr(service, "_mt5_provider", None)
-            if mt5_p and getattr(mt5_p, "is_connected", False):
+
+    if price is None or price <= 0:
+        try:
+            price = await service.get_latest_price(symbol)
+        except Exception:  # noqa: BLE001
+            pass
+
+    if bid is None or ask is None:
+        try:
+            tick = await service.registry.latest_tick(symbol)
+            if tick is None and symbol != getattr(service, "_symbol", None):
+                tick = await service.registry.latest_tick(service._symbol)
+            if tick is not None:
+                bid = tick.bid
+                ask = tick.ask
+                if price is None or price <= 0:
+                    price = tick.mid
                 status = "HEALTHY"
-            elif price is not None and price > 0:
-                status = "HEALTHY"
-        else:
-            feeds = await service.health()
-            if feeds and feeds[0].get("connected"):
-                status = "HEALTHY"
-    except Exception:  # noqa: BLE001
-        pass
+        except Exception:  # noqa: BLE001
+            pass
+
+    if status != "HEALTHY":
+        try:
+            from app.config.execution_settings import get_execution_settings
+            exec_cfg = get_execution_settings()
+            if (
+                service.settings.LIVE_FEED_PROVIDER == "mt5"
+                or service.settings.MT5_ENABLED
+                or getattr(exec_cfg, "mt5_bridge_enabled", False)
+            ):
+                if price is not None and price > 0:
+                    status = "HEALTHY"
+            else:
+                feeds = await service.health()
+                if feeds and feeds[0].get("connected"):
+                    status = "HEALTHY"
+        except Exception:  # noqa: BLE001
+            pass
 
     # Fall back to the last known close from the local research cache so the
     # topbar always shows a real (non-live) price instead of "—".

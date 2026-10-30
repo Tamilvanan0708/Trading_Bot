@@ -245,6 +245,35 @@ class MT5BridgeManager:
                 pass
         return None
 
+    def get_live_tick(self, symbol: str | None = None) -> dict[str, Any] | None:
+        """Returns live broker tick (price, bid, ask, time) directly from native MT5 terminal."""
+        mt5 = self._ensure_native_mt5()
+        if mt5 is not None:
+            try:
+                candidates = []
+                if symbol:
+                    candidates.append(symbol.strip())
+                    candidates.append(symbol.replace("-VIP", "").strip())
+                    candidates.append(f"{symbol}-VIP".strip())
+                default_sym = getattr(get_execution_settings(), "mt5_symbol", None) or "XAUUSD-VIP"
+                candidates.append(default_sym)
+                candidates.extend(["XAUUSD-VIP", "XAUUSD", "GOLD"])
+
+                for sym in candidates:
+                    tick = mt5.symbol_info_tick(sym)
+                    if tick and getattr(tick, "ask", 0) > 0 and getattr(tick, "bid", 0) > 0:
+                        mid = round((float(tick.ask) + float(tick.bid)) / 2.0, 2)
+                        return {
+                            "symbol": sym,
+                            "price": mid,
+                            "bid": float(tick.bid),
+                            "ask": float(tick.ask),
+                            "time": int(getattr(tick, "time", time.time())),
+                        }
+            except Exception as e:
+                logger.debug("[MT5-LIVE-TICK] Error fetching tick: %s", e)
+        return None
+
     def get_live_spread(self, symbol: str | None = None) -> float:
         """Returns live broker spread in points (Ask - Bid) for the given symbol, or 0.15 fallback."""
         mt5 = self._ensure_native_mt5()

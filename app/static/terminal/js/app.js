@@ -5221,21 +5221,6 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <!-- BIG ACTIVE SIGNAL BOX -->
       <div id="strat-signal-box-wrap">${renderActiveSignalBox(tfData, price, selectedTf)}</div>
 
-      <!-- LIVE MT5 CANDLESTICK & FIBONACCI CHART -->
-      <div class="card" style="margin-bottom:var(--sp-3);padding:14px">
-        <div class="row-between" style="margin-bottom:10px">
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="font-weight:700;font-size:13px;color:#fff">📊 ${strategyName} — LIVE MT5 CANDLESTICK CHART</span>
-            <span class="badge badge-green" style="font-size:10px">⚡ MT5 BROKER SYNC (XAUUSD-VIP)</span>
-            <span class="badge badge-blue" style="font-size:10px">${selectedTf.toUpperCase()}</span>
-          </div>
-          <div style="font-size:11px;color:var(--text-muted)">
-            Real-time MetaTrader 5 Terminal Candlesticks & Fibonacci Confluence Levels
-          </div>
-        </div>
-        <div id="strat-fib-chart-container" style="width:100%;height:420px;border-radius:6px;overflow:hidden;background:#0d1117;position:relative"></div>
-      </div>
-
       <!-- METRICS & FIBONACCI TABLE -->
       <div id="strat-points-metrics-wrap">${renderPointsMetrics(tfData)}</div>
 
@@ -5253,16 +5238,9 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
       <div id="strat-signals-history-wrap">${renderStrategySignalsFeed(strategyType, strategyName)}</div>
     </div>`;
   }, mount).then(() => {
-    // Initial draw of MT5 candlestick chart
-    setTimeout(() => {
-      drawFibChart("strat-fib-chart-container", selectedTf, strategyType);
-    }, 60);
-
     if (_stratTimer) clearInterval(_stratTimer);
     _stratTimer = setInterval(() => {
       updateStratInPlace();
-      // Keep MT5 candlestick chart updated with latest live bars
-      drawFibChart("strat-fib-chart-container", selectedTf, strategyType);
     }, AutoRefresh.speed || 4000);
 
     window.__viewCleanup = () => {

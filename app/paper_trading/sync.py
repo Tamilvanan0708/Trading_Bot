@@ -1393,7 +1393,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     # MT5 Bridge Live Execution Dispatch (Strictly Fib Retracement Only)
                                     try:
                                         from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                        from datetime import timedelta
                                         sl_distance = round(abs(entry_px - sl_px), 2)
                                         tp_distance = round(abs(tp_px - entry_px), 2)
                                         ist_tz = timezone(timedelta(hours=5, minutes=30))
@@ -1437,6 +1436,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 "time": datetime.now(timezone.utc).isoformat(),
                                             })
                                         elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled"):
+                                            active_setup_by_tf.pop(tf_key, None)
                                             rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
                                             new_trade.state = "CANCELLED"
                                             new_trade.exit_reason = f"MT5_REJECTED: {rej_reason}"
@@ -2245,6 +2245,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 "time": datetime.now(timezone.utc).isoformat(),
                                             })
                                         elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled"):
+                                            active_setup_by_tf.pop(tf_key, None)
                                             rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
                                             new_trade.state = "CANCELLED"
                                             new_trade.exit_reason = f"MT5_REJECTED: {rej_reason}"
@@ -2662,7 +2663,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         ot_tf = candidate
                                         break
 
-                                from datetime import timedelta
                                 ist_tz = timezone(timedelta(hours=5, minutes=30))
                                 ot_time = ot.opened_at or datetime.now(timezone.utc)
                                 if ot_time.tzinfo is None:
@@ -2863,7 +2863,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         except Exception:
                             pass
                         try:
-                            if "BREAKOUT" in (t.signal_id or "") or t.strategy == "Breakout Strategy":
+                            if "BREAKOUT" in (t.signal_id or "") or getattr(t, "strategy", "") == "Breakout Strategy":
                                 strat_name = "Breakout Strategy"
                             elif is_trend:
                                 strat_name = "Fib Go With Trend (Breakout)"

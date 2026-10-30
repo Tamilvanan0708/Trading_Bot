@@ -161,16 +161,26 @@ class LiveMarketDataService:
 
     async def _startup_async(self) -> None:
         """Background startup: connect feed immediately, then load history in background."""
-        self._feed = self._build_feed()
-        if self._feed is not None:
-            self._feed.set_on_tick_callback(self.on_tick)
-            self._feed.set_on_reconnect_callback(self._on_feed_reconnect)
-            await self.registry.register_feed(self._feed)
-        elif self.settings.LIVE_FEED_PROVIDER in ("tradingview", "mock"):
-            await self.registry.register_buffer(self._symbol)
-        elif self.settings.LIVE_FEED_PROVIDER == "mt5":
+        from app.config.execution_settings import get_execution_settings
+        exec_cfg = get_execution_settings()
+        is_mt5 = (
+            (self.settings.LIVE_FEED_PROVIDER == "mt5")
+            or self.settings.MT5_ENABLED
+            or getattr(exec_cfg, "mt5_bridge_enabled", False)
+        )
+
+        if is_mt5:
             await self.registry.register_buffer(self._symbol)
             self._mt5_task = asyncio.create_task(self._start_mt5_polling(), name="mt5-tick-poll")
+            logger.info("MT5 tick polling task initiated for symbol %s", self._symbol)
+        else:
+            self._feed = self._build_feed()
+            if self._feed is not None:
+                self._feed.set_on_tick_callback(self.on_tick)
+                self._feed.set_on_reconnect_callback(self._on_feed_reconnect)
+                await self.registry.register_feed(self._feed)
+            elif self.settings.LIVE_FEED_PROVIDER in ("tradingview", "mock"):
+                await self.registry.register_buffer(self._symbol)
 
         try:
             await self._load_historical_base()
@@ -214,7 +224,8 @@ class LiveMarketDataService:
         provider = self.settings.LIVE_FEED_PROVIDER
         try:
             if provider == "binance":
-                return BinanceGoldMarketProvider(symbol=self._symbol)
+                b_sym = "XAUUSDT" if ("XAU" in self._symbol.upper() and "-" in self._symbol) else self._symbol
+                return BinanceGoldMarketProvider(symbol=b_sym)
             if provider == "ctrader":
                 return CTraderMarketProvider(
                     symbol=self._symbol,
@@ -237,7 +248,9 @@ class LiveMarketDataService:
 
     async def _start_mt5_polling(self) -> None:
         """Poll MT5 ticks and push them through the normal aggregation pipeline."""
-        from app.data.mt5_provider import MT5MarketDataProvider
+        from app.services.mt5_bridge_manager import get_mt5_bridge
+        from app.models.tick import Tick
+        from datetime import datetime, timezone
         from app.config.execution_settings import get_execution_settings
 
         exec_cfg = get_execution_settings()
@@ -247,35 +260,25 @@ class LiveMarketDataService:
             return
 
         target_sym = getattr(exec_cfg, "mt5_symbol", None) or self.settings.MT5_SYMBOL or self._symbol
-        try:
-            provider = MT5MarketDataProvider(
-                symbol=target_sym,
-                login=self.settings.MT5_LOGIN,
-                server=self.settings.MT5_SERVER,
-                password=self.settings.MT5_PASSWORD,
-                magic=self.settings.MT5_MAGIC,
-                timezone_offset_minutes=self.settings.MT5_TZ_OFFSET_MINUTES,
-            )
-            await provider.connect_async()
-            self._mt5_provider = provider
-            self._symbol = provider._symbol
-            logger.info("[MT5-POLLING] Polling started on symbol %s", self._symbol)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("MT5 connection failed: %s", exc)
-            return
+        bridge = get_mt5_bridge()
+        logger.info("[MT5-POLLING] Polling started on symbol %s", target_sym)
 
         while self._running:
             try:
-                tick = await provider.get_tick(self._symbol)
-                if tick is not None:
-                    await self.on_tick(tick)
+                tk = bridge.get_live_tick(target_sym)
+                if tk and tk.get("bid") and tk.get("ask"):
+                    t_obj = Tick(
+                        symbol=self._symbol,
+                        timestamp=datetime.now(timezone.utc),
+                        bid=float(tk["bid"]),
+                        ask=float(tk["ask"]),
+                        last=float(tk["price"]),
+                        volume=1.0,
+                    )
+                    await self.on_tick(t_obj)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("MT5 poll error: %s", exc)
             await asyncio.sleep(1.0)
-        try:
-            await provider.disconnect_async()
-        except Exception:  # noqa: BLE001
-            pass
 
     # ------------------------------------------------------------------
     # History
@@ -904,8 +907,21 @@ class LiveMarketDataService:
         }
 
     async def get_latest_price(self, symbol: str) -> float:
+        # Prefer direct native MT5 tick if MT5 is active
+        try:
+            from app.services.mt5_bridge_manager import get_mt5_bridge
+            mt5_bridge = get_mt5_bridge()
+            tk = mt5_bridge.get_live_tick(symbol)
+            if tk and tk.get("price", 0) > 1000.0:
+                self._live_price = float(tk["price"])
+                return self._live_price
+        except Exception:
+            pass
+
         # Prefer the live feed's latest tick, then the last tick mid, then fallback.
         tick = await self.registry.latest_tick(symbol)
+        if tick is None and symbol != self._symbol:
+            tick = await self.registry.latest_tick(self._symbol)
         if tick is not None and tick.mid > 1000.0:
             return tick.mid
         if self._live_price is not None and self._live_price > 1000.0:
