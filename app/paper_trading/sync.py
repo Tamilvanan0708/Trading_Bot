@@ -294,8 +294,36 @@ def _build_hybrid_close_msg(
     exec_cfg = get_execution_settings()
     is_cent = (exec_cfg.account_currency == "cent")
 
-    is_be = exit_reason in ("BREAKEVEN_HIT", "BREAKEVEN") or (abs(pts) <= 0.5 and exit_reason not in ("TP_HIT", "SL_HIT"))
-    is_profit = pts > 0.5 or exit_reason in ("TP_HIT", "TRAILING_SL_HIT")
+    # Direction-aware points:
+    if direction in ("LONG", "BUY"):
+        dir_pts = exit_px - entry_px
+    else:
+        dir_pts = entry_px - exit_px
+
+    if exit_reason in ("BREAKEVEN_HIT", "BREAKEVEN"):
+        is_be = True
+        is_profit = False
+    elif exit_reason == "SL_HIT":
+        is_be = False
+        is_profit = False
+    elif exit_reason in ("TP_HIT", "TRAILING_SL_HIT"):
+        is_be = False
+        is_profit = True
+    elif realized_pnl < -0.01:
+        is_be = False
+        is_profit = False
+    elif realized_pnl > 0.01:
+        is_be = False
+        is_profit = True
+    elif abs(dir_pts) <= 0.5:
+        is_be = True
+        is_profit = False
+    elif dir_pts > 0:
+        is_be = False
+        is_profit = True
+    else:
+        is_be = False
+        is_profit = False
 
     if is_be:
         return (
@@ -313,18 +341,18 @@ def _build_hybrid_close_msg(
             f"━━━━━━━━━━━━━━━━━━━━"
         )
     elif is_profit:
-        realized_usd = round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
-        growth_line = f"📈 *Account Growth:* +₹{abs(realized_pnl):,.2f} INR" if is_cent else f"📈 *Account Growth:* +${abs(realized_pnl):,.2f} USD"
+        realized_usd = round(abs(realized_pnl), 2) if abs(realized_pnl) > 0.01 else round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
+        growth_line = f"📈 *Account Growth:* +₹{realized_usd:,.2f} INR" if is_cent else f"📈 *Account Growth:* +${realized_usd:,.2f} USD"
         if exit_reason == "TP_HIT":
             title_badge = "🎯 *TAKE PROFIT HIT"
         elif exit_reason in ("TRAILING_SL_HIT", "TRAILING_STOP"):
             title_badge = "🎯 *TRAILING STOP HIT"
         elif exit_reason == "MANUAL_CLOSE":
-            title_badge = "✋ *MANUAL EXIT"
+            title_badge = "✋ *MANUAL EXIT (PROFIT)"
         elif "ORPHAN" in str(exit_reason):
             title_badge = "🔄 *SLOT ROLLOVER EXIT"
         else:
-            title_badge = "🎯 *TARGET HIT"
+            title_badge = "🎯 *TAKE PROFIT HIT"
         return (
             f"{title_badge} (+{abs(pts):.2f} PTS)*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -341,8 +369,8 @@ def _build_hybrid_close_msg(
             f"━━━━━━━━━━━━━━━━━━━━"
         )
     else:
-        loss_usd = round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
-        dd_line = f"📉 *Account Drawdown:* -₹{abs(realized_pnl):,.2f} INR" if is_cent else f"📉 *Account Drawdown:* -${abs(realized_pnl):,.2f} USD"
+        loss_usd = round(abs(realized_pnl), 2) if abs(realized_pnl) > 0.01 else round(abs(pts) * (lot_size or 0.01) * 100.0, 2)
+        dd_line = f"📉 *Account Drawdown:* -₹{loss_usd:,.2f} INR" if is_cent else f"📉 *Account Drawdown:* -${loss_usd:,.2f} USD"
         if exit_reason == "SL_HIT":
             title_badge = "🛑 *STOP LOSS HIT"
         elif exit_reason == "MANUAL_CLOSE":
@@ -352,7 +380,7 @@ def _build_hybrid_close_msg(
         elif "ROLLOVER" in str(exit_reason) or "CYCLE" in str(exit_reason):
             title_badge = "🔄 *CYCLE ROLLOVER EXIT"
         else:
-            title_badge = "🛑 *TRADE CLOSED (LOSS)"
+            title_badge = "🛑 *STOP LOSS HIT"
         return (
             f"{title_badge} (-{abs(pts):.2f} PTS)*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
