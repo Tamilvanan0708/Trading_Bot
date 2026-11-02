@@ -422,6 +422,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
     _last_paper_sync_ts = now
 
     async with _sync_lock:
+        tg = TelegramService()
         # Single Unified Balance Sync: Keep Paper Trading, MT5 Bridge, and Telegram in 100% exact parity
         try:
             exec_cfg_sync = get_execution_settings()
@@ -619,10 +620,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                                 # Telegram Alert: Hybrid Close (TP / SL / BE)
                                 if _should_send_close_alert(ot.id, tkt, ot.state_logs):
-                                    _record_close_alert_sent(ot, tkt)
                                     try:
                                         pts = round(abs(close_px - (ot.entry_price or 0.0)), 2)
-                                        strat_lbl = str(ot.strategy_name or "Fib Retracement")
+                                        strat_base = str(ot.strategy_name or "Fib Retracement")
+                                        layer_suffix = f" ({ot.layer})" if getattr(ot, "layer", None) else ""
+                                        strat_lbl = f"{strat_base}{layer_suffix}"
                                         tf_lbl = str(ot.timeframe or "5m").upper()
                                         close_msg = _build_hybrid_close_msg(
                                             strategy_name=strat_lbl,
@@ -641,6 +643,9 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             ticket_override=tkt,
                                         )
                                         _dispatch_tg_alert(tg.send_raw_alert(close_msg))
+                                        _record_close_alert_sent(ot, tkt)
+                                        await db.commit()
+                                        logger.info("[MT5-RECONCILE] Dispatched Telegram alert for closed ticket #%s (%s)", tkt, ot.exit_reason)
                                     except Exception as tg_err:
                                         logger.warning("[MT5-RECONCILE] Failed to send Telegram alert for ticket #%s: %s", tkt, tg_err)
         except Exception as close_sync_err:
@@ -656,7 +661,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         except Exception:  # noqa: BLE001
             live_price = None
 
-        tg = TelegramService()
         if not live_price:
             try:
                 live_price = getattr(get_retracement_multi_tf_service("XAUUSD"), "live_price", None)
@@ -855,11 +859,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             except Exception:
                                 pass
                         if _should_send_close_alert(_ot.id, tkt, _ot.state_logs):
-                            _record_close_alert_sent(_ot, tkt)
-                            try:
-                                await db.commit()
-                            except Exception:
-                                pass
                             try:
                                 layer_name = _parts[3] if len(_parts) > 3 else "L1"
                                 orphan_msg = _build_hybrid_close_msg(
@@ -878,6 +877,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     state_logs=_ot.state_logs,
                                 )
                                 _dispatch_tg_alert(tg.send_raw_alert(orphan_msg))
+                                _record_close_alert_sent(_ot, tkt)
+                                await db.commit()
                             except Exception as tg_err:
                                 logger.warning("[PAPER-TG] Failed to send orphan close alert: %s", tg_err)
                     except Exception as _commit_err:
@@ -1550,11 +1551,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         except Exception:
                                             pass
                                     if _should_send_close_alert(existing.id, tkt, existing.state_logs):
-                                        _record_close_alert_sent(existing, tkt)
-                                        try:
-                                            await db.commit()
-                                        except Exception:
-                                            pass
                                         try:
                                             tp_msg = _build_hybrid_close_msg(
                                                 strategy_name=f"Fib Retracement ({l_key})",
@@ -1573,6 +1569,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 ticket_override=tkt,
                                             )
                                             _dispatch_tg_alert(tg.send_raw_alert(tp_msg))
+                                            _record_close_alert_sent(existing, tkt)
+                                            await db.commit()
                                         except Exception as tg_err:
                                             logger.warning("[PAPER-TG] Failed to send TP hit alert: %s", tg_err)
 
@@ -1674,11 +1672,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         except Exception:
                                             pass
                                     if _should_send_close_alert(existing.id, tkt, existing.state_logs):
-                                        _record_close_alert_sent(existing, tkt)
-                                        try:
-                                            await db.commit()
-                                        except Exception:
-                                            pass
                                         try:
                                             sl_msg = _build_hybrid_close_msg(
                                                 strategy_name=f"Fib Retracement ({l_key})",
@@ -1697,6 +1690,8 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 ticket_override=tkt,
                                             )
                                             _dispatch_tg_alert(tg.send_raw_alert(sl_msg))
+                                            _record_close_alert_sent(existing, tkt)
+                                            await db.commit()
                                         except Exception as tg_err:
                                             logger.warning("[PAPER-TG] Failed to send SL hit alert: %s", tg_err)
 
@@ -1782,11 +1777,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 except Exception:
                                     pass
                             if _should_send_close_alert(oft.id, tkt, oft.state_logs):
-                                _record_close_alert_sent(oft, tkt)
-                                try:
-                                    await db.commit()
-                                except Exception:
-                                    pass
                                 try:
                                     strat_lbl = f"Fib Retracement ({oft.layer})"
                                     close_msg = _build_hybrid_close_msg(
@@ -1803,8 +1793,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         closed_at=oft.closed_at,
                                         paper_trade_id=oft.id,
                                         state_logs=oft.state_logs,
+                                        ticket_override=tkt,
                                     )
                                     _dispatch_tg_alert(tg.send_raw_alert(close_msg))
+                                    _record_close_alert_sent(oft, tkt)
+                                    await db.commit()
                                     logger.info("[PAPER-TG] Dispatched Watchdog close alert for %s (%s)", oft.id, oft.exit_reason)
                                 except Exception as tg_err:
                                     logger.warning("[PAPER-TG] Failed to send Watchdog close alert: %s", tg_err)
@@ -1908,11 +1901,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         except Exception:
                                             pass
                                     if _should_send_close_alert(ot.id, tkt, ot.state_logs):
-                                        _record_close_alert_sent(ot, tkt)
-                                        try:
-                                            await db.commit()
-                                        except Exception:
-                                            pass
                                         try:
                                             smc_msg = _build_hybrid_close_msg(
                                                 strategy_name="SMC With Fib (0.680)",
@@ -1928,8 +1916,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 closed_at=ot.closed_at,
                                                 paper_trade_id=ot.id,
                                                 state_logs=ot.state_logs,
+                                                ticket_override=tkt,
                                             )
                                             _dispatch_tg_alert(tg.send_raw_alert(smc_msg))
+                                            _record_close_alert_sent(ot, tkt)
+                                            await db.commit()
                                         except Exception as tg_err:
                                             logger.warning("[PAPER-TG] Failed to send SMC Watchdog close alert: %s", tg_err)
                     else:
@@ -2058,11 +2049,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                             except Exception:
                                 pass
                             if _should_send_close_alert(tf_open_trade.id, tkt, tf_open_trade.state_logs):
-                                _record_close_alert_sent(tf_open_trade, tkt)
-                                try:
-                                    await db.commit()
-                                except Exception:
-                                    pass
                                 try:
                                     smc_close_msg = _build_hybrid_close_msg(
                                         strategy_name="SMC With Fib (0.680)",
@@ -2078,8 +2064,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         closed_at=tf_open_trade.closed_at,
                                         paper_trade_id=tf_open_trade.id,
                                         state_logs=tf_open_trade.state_logs,
+                                        ticket_override=tkt,
                                     )
                                     _dispatch_tg_alert(tg.send_raw_alert(smc_close_msg))
+                                    _record_close_alert_sent(tf_open_trade, tkt)
+                                    await db.commit()
                                 except Exception as tg_err:
                                     logger.warning("[PAPER-TG] Failed to send SMC close alert: %s", tg_err)
 
@@ -2886,11 +2875,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         except Exception:
                             pass
                     if _should_send_close_alert(t.id, tkt, t.state_logs):
-                        _record_close_alert_sent(t, tkt)
-                        try:
-                            await db.commit()
-                        except Exception:
-                            pass
                         try:
                             if "BREAKOUT" in (t.signal_id or "") or getattr(t, "strategy", "") == "Breakout Strategy":
                                 strat_name = "Breakout Strategy"
@@ -2926,8 +2910,11 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                 closed_at=t.closed_at,
                                 paper_trade_id=t.id,
                                 state_logs=t.state_logs,
+                                ticket_override=tkt,
                             )
                             _dispatch_tg_alert(tg.send_raw_alert(msg))
+                            _record_close_alert_sent(t, tkt)
+                            await db.commit()
                         except Exception as tg_err:  # noqa: BLE001
                             logger.warning("[PAPER-TG] Failed to send close alert: %s", tg_err)
 
