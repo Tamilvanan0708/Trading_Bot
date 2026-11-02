@@ -232,7 +232,12 @@ window.BreakoutDataService = (function () {
       // 1. Fetch current live quote fallback
       await fetchTradingViewLiveQuote();
 
-      // 2. Fallback to Binance if MT5 endpoint fails
+      // If MT5 live feed is active, do NOT fall back to Binance
+      if (liveState.source === "MT5_LIVE") {
+        return generateFallbackCandles(limit);
+      }
+
+      // 2. Fallback to Binance only if MT5 endpoint fails and MT5 is not active
       const url = `${BINANCE_REST_BASE}/klines?symbol=${BINANCE_SYMBOL}&interval=${interval}&limit=${limit}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);
@@ -375,6 +380,14 @@ window.BreakoutDataService = (function () {
   }
 
   function connectWebSocketStream(interval, onUpdate) {
+    // If running on 100% native MT5 live broker feed, do NOT connect to Binance WebSocket
+    if (liveState.source === "MT5_LIVE") {
+      if (activeWs) {
+        try { activeWs.close(); } catch (_) {}
+        activeWs = null;
+      }
+      return;
+    }
     try {
       if (activeWs) {
         try { activeWs.close(); } catch (_) {}

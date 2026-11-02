@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.validator import AIValidator, get_ai_validator
 from app.config.settings import Settings, get_settings
-from app.core.constants import MarketBias, SignalDirection, SignalQuality, StrategyType
+from app.core.constants import MarketBias, SignalDirection, SignalQuality, StrategyType, TimeFrame
 from app.core.logging import logger
 from app.data.live.service import get_live_service
 from app.database.models import PaperTradeModel, SignalModel
@@ -2492,7 +2492,6 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
         # 3.5. Breakout Strategy: Multi-Timeframe (5M, 15M, 30M, 1H)
         if getattr(exec_cfg, "strategy_breakout", True):
             try:
-                from app.backtesting.data_loader import fetch_historical_candles
                 existing_open_bo = (await db.execute(
                     select(PaperTradeModel).where(
                         PaperTradeModel.state == "OPEN",
@@ -2508,10 +2507,45 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         "30m": {"lookback": 30, "atr": 9.0, "buffer": 1.20, "tp_mult": 2.6, "sl_mult": 1.5},
                         "1h":  {"lookback": 35, "atr": 15.0, "buffer": 1.80, "tp_mult": 2.8, "sl_mult": 1.5},
                     }
-                    now_utc = datetime.now(timezone.utc)
-                    start_w = now_utc - timedelta(hours=8)
+                    bo_tf_enums = {
+                        "5m": TimeFrame.M5,
+                        "15m": TimeFrame.M15,
+                        "30m": TimeFrame.M30,
+                        "1h": TimeFrame.H1,
+                    }
+
+                    live_svc = get_live_service()
+                    settings = get_settings()
+                    is_mt5 = (settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+
+                    mt5_p = None
+                    if is_mt5:
+                        mt5_p = getattr(live_svc, "_mt5_provider", None)
+                        if mt5_p is None or not getattr(mt5_p, "_connected", False):
+                            from app.data.mt5_provider import MT5DataProvider
+                            mt5_p = MT5DataProvider(settings)
+                            try:
+                                await mt5_p.connect_async()
+                            except Exception as exc:
+                                logger.warning("[BREAKOUT-SYNC] MT5 connect failed: %s", exc)
+
                     for tf_str in bo_tfs:
-                        clist = await fetch_historical_candles("XAUUSD", tf_str, start_w, now_utc)
+                        tf_enum = bo_tf_enums.get(tf_str)
+                        clist = []
+                        if is_mt5 and mt5_p and getattr(mt5_p, "_connected", False) and tf_enum:
+                            try:
+                                clist = await mt5_p.get_ohlcv("XAUUSD", tf_enum, limit=60)
+                            except Exception as exc:
+                                logger.warning("[BREAKOUT-SYNC] MT5 get_ohlcv failed for %s: %s", tf_str, exc)
+
+                        if not clist and live_svc and tf_enum:
+                            try:
+                                series_data = await live_svc.get_chart_series("XAUUSD", tf_enum, limit=60)
+                                if series_data and series_data.get("candles"):
+                                    clist = series_data["candles"]
+                            except Exception as exc:
+                                logger.debug("[BREAKOUT-SYNC] live_svc get_chart_series failed for %s: %s", tf_str, exc)
+
                         cfg = bo_cfg[tf_str]
                         lb = cfg["lookback"]
                         if len(clist) < lb + 5:
@@ -2540,10 +2574,15 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                             compounded_bal = await _get_compounded_paper_balance(db, exec_cfg.account_balance)
                             trade_lot = calculate_lot_size(
-                                balance=compounded_bal,
-                                entry_price=entry_px,
-                                sl_price=sl_px,
-                                settings=exec_cfg,
+                                entry_px, sl_px,
+                                sizing_mode=exec_cfg.sizing_mode,
+                                target_risk_usd=exec_cfg.target_risk_usd,
+                                fixed_lot_size=exec_cfg.fixed_lot_size,
+                                max_lot=getattr(exec_cfg, "max_lot_cap", 0.50),
+                                risk_mode=exec_cfg.risk_mode,
+                                risk_percent=exec_cfg.risk_percent,
+                                account_balance=compounded_bal,
+                                account_currency=exec_cfg.account_currency,
                             )
                             new_trade = PaperTradeModel(
                                 id=str(uuid.uuid4()),
@@ -2592,13 +2631,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                         new_trade.actual_entry = fill_px
                                         if mt5_res.get("payload", {}).get("lot_size"):
                                             new_trade.lot_size = float(mt5_res["payload"]["lot_size"])
-                                        new_trade.state_logs.append({"event": "MT5_FILLED", "ticket": tkt_override, "price": fill_px})
+                                        new_logs = list(new_trade.state_logs or [])
+                                        new_logs.append({"event": "MT5_FILLED", "ticket": tkt_override, "price": fill_px})
+                                        new_trade.state_logs = new_logs
                                         await db.commit()
                                     elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled", "filtered"):
                                         rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
                                         new_trade.state = "CANCELLED"
                                         new_trade.exit_reason = f"MT5_REJECTED: {rej_reason}"
-                                        new_trade.state_logs.append({"event": "MT5_REJECTED", "reason": rej_reason})
+                                        new_logs = list(new_trade.state_logs or [])
+                                        new_logs.append({"event": "MT5_REJECTED", "reason": rej_reason})
+                                        new_trade.state_logs = new_logs
                                         await db.commit()
                                         try:
                                             rej_msg = _build_hybrid_rejected_msg(

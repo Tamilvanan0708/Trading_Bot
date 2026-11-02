@@ -1027,16 +1027,37 @@ async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
             logger.debug("Chart snapshot failed: %s", exc)
 
     if len(candles) < 50:
-        try:
-            from app.data.live.binance_history import BinanceHistoryProvider
-            provider = BinanceHistoryProvider()
-            fetched = await provider.get_ohlcv(symbol, tf_enum, limit=limit)
-            if fetched:
-                candles = fetched[-limit:]
-                if live_price is None:
-                    live_price = candles[-1].close
-        except Exception as e:
-            logger.debug("Chart REST fallback failed: %s", e)
+        from app.config.settings import get_settings
+        from app.config.execution_settings import get_execution_settings
+        _settings = get_settings()
+        _exec_cfg = get_execution_settings()
+        is_mt5 = (_settings.LIVE_FEED_PROVIDER == "mt5") or _settings.MT5_ENABLED or getattr(_exec_cfg, "mt5_bridge_enabled", False)
+
+        if is_mt5:
+            try:
+                mt5_p = getattr(svc, "_mt5_provider", None)
+                if mt5_p is None or not getattr(mt5_p, "_connected", False):
+                    from app.data.mt5_provider import MT5DataProvider
+                    mt5_p = MT5DataProvider(_settings)
+                    await mt5_p.connect_async()
+                fetched = await mt5_p.get_ohlcv(symbol, tf_enum, limit=limit)
+                if fetched:
+                    candles = fetched[-limit:]
+                    if live_price is None:
+                        live_price = candles[-1].close
+            except Exception as e:
+                logger.debug("Chart MT5 fallback failed: %s", e)
+        else:
+            try:
+                from app.data.live.binance_history import BinanceHistoryProvider
+                provider = BinanceHistoryProvider()
+                fetched = await provider.get_ohlcv(symbol, tf_enum, limit=limit)
+                if fetched:
+                    candles = fetched[-limit:]
+                    if live_price is None:
+                        live_price = candles[-1].close
+            except Exception as e:
+                logger.debug("Chart REST fallback failed: %s", e)
 
     # Serialize OHLCV (Unix timestamp in seconds for lightweight-charts)
     ohlcv = []
