@@ -398,16 +398,18 @@ class MT5BridgeManager:
         exec_cfg = get_execution_settings()
 
         allowed_strat = getattr(exec_cfg, "mt5_allowed_strategy", "ALL")
-        if allowed_strat and allowed_strat.strip().upper() not in ("ALL", "ALL STRATEGIES", "*") and allowed_strat.upper() not in strat_upper:
-            logger.info(
-                "[MT5-BRIDGE] Strategy '%s' filtered out by configuration (%s).",
-                strat,
-                allowed_strat,
-            )
-            return {
-                "status": "filtered",
-                "reason": f"Strategy '{strat}' is disabled for MT5 live execution ({allowed_strat} only).",
-            }
+        if allowed_strat and allowed_strat.strip().upper() not in ("ALL", "ALL STRATEGIES", "*"):
+            allowed_tokens = [s.strip().upper() for s in allowed_strat.split(",") if s.strip()]
+            if not any(token in strat_upper or strat_upper in token for token in allowed_tokens):
+                logger.info(
+                    "[MT5-BRIDGE] Strategy '%s' filtered out by configuration (%s).",
+                    strat,
+                    allowed_strat,
+                )
+                return {
+                    "status": "filtered",
+                    "reason": f"Strategy '{strat}' is disabled for MT5 live execution ({allowed_strat} only).",
+                }
 
         # Check individual strategy master toggle
         if ("FIB RETRACEMENT" in strat_upper or "RETR" in strat_upper) and not getattr(exec_cfg, "strategy_fib_retracement", True):
@@ -522,7 +524,8 @@ class MT5BridgeManager:
                 if pt_id:
                     self._paper_trade_to_ticket[str(pt_id)] = native_res["ticket"]
             logger.info(
-                "[MT5-NATIVE] Executed Fib Retracement order %s directly! Ticket #%d @ %.2f",
+                "[MT5-NATIVE] Executed %s order %s directly! Ticket #%d @ %.2f",
+                strat,
                 order_id,
                 native_res["ticket"],
                 native_res["price"],
@@ -536,7 +539,8 @@ class MT5BridgeManager:
             }
 
         logger.info(
-            "[MT5-BRIDGE] Enqueued Fib Retracement order %s: %s %.2f Lots @ SL=%.2f TP=%.2f",
+            "[MT5-BRIDGE] Enqueued %s order %s: %s %.2f Lots @ SL=%.2f TP=%.2f",
+            strat,
             order_id,
             order_payload["action"],
             clamped_lot,

@@ -67,6 +67,30 @@ def test_strict_strategy_filtering():
     assert pending[0]["strategy"] == "Fib Retracement"
 
 
+def test_all_strategies_allowed_when_configured():
+    """Verify that when mt5_allowed_strategy is ALL, SMC With Fib is allowed to execute on MT5."""
+    from app.config.execution_settings import get_execution_settings
+    exec_cfg = get_execution_settings()
+    exec_cfg.mt5_allowed_strategy = "ALL"
+    exec_cfg.strategy_smc_fib = True
+    mgr = get_mt5_bridge_manager()
+
+    res_smc = mgr.enqueue_order({
+        "id": "test-smc-allowed-1",
+        "strategy": "SMC with Fib",
+        "direction": "LONG",
+        "symbol": "XAUUSD-VIP",
+        "lot_size": 0.20,
+        "entry_price": 3900.0,
+        "stop_loss": 3890.0,
+        "take_profit_1": 3920.0,
+    })
+    assert res_smc["status"] == "queued"
+    assert res_smc["order_id"] == "test-smc-allowed-1"
+    pending = mgr.pop_pending_orders(symbol="XAUUSD-VIP")
+    assert any(p["id"] == "test-smc-allowed-1" for p in pending)
+
+
 def test_lot_size_clamping_on_mt5():
     """Verify that MT5 orders respect the 0.50 Lot ceiling."""
     mgr = get_mt5_bridge_manager()
@@ -102,7 +126,7 @@ def test_heartbeat_and_status():
     assert status["is_online"] is True
     assert status["connected_account"]["login"] == 1305493
     assert status["connected_account"]["server"] == "VTMarkets-Demo"
-    assert status["allowed_strategy"] == "Fib Retracement"
+    assert status["allowed_strategy"] == get_execution_settings().mt5_allowed_strategy
 
 
 def test_execution_reporting():
@@ -150,7 +174,7 @@ def test_api_endpoints():
     st_res = client.get("/api/mt5/status")
     assert st_res.status_code == 200
     assert st_res.json()["is_online"] is True
-    assert st_res.json()["allowed_strategy"] == "Fib Retracement"
+    assert st_res.json()["allowed_strategy"] == get_execution_settings().mt5_allowed_strategy
 
     # 3. Test Trade Trigger
     tt_res = client.post("/api/mt5/test-trade", json={

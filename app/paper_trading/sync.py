@@ -1457,7 +1457,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 "comment": trade_comment,
                                                 "time": datetime.now(timezone.utc).isoformat(),
                                             })
-                                        elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled"):
+                                        elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled", "filtered"):
                                             active_setup_by_tf.pop(tf_key, None)
                                             rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
                                             new_trade.state = "CANCELLED"
@@ -2261,7 +2261,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                                 "comment": trade_comment,
                                                 "time": datetime.now(timezone.utc).isoformat(),
                                             })
-                                        elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled"):
+                                        elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled", "filtered"):
                                             active_setup_by_tf.pop(tf_key, None)
                                             rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
                                             new_trade.state = "CANCELLED"
@@ -2594,7 +2594,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                             new_trade.lot_size = float(mt5_res["payload"]["lot_size"])
                                         new_trade.state_logs.append({"event": "MT5_FILLED", "ticket": tkt_override, "price": fill_px})
                                         await db.commit()
-                                    elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled"):
+                                    elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled", "filtered"):
                                         rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
                                         new_trade.state = "CANCELLED"
                                         new_trade.exit_reason = f"MT5_REJECTED: {rej_reason}"
