@@ -109,24 +109,23 @@ class SMCFibMultiTFMonitor:
 
             settings = get_settings()
             exec_cfg = get_execution_settings()
-            is_mt5 = (settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+            is_mt5 = (settings.LIVE_FEED_PROVIDER != "binance") and ((settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False))
 
             provider = None
             if is_mt5:
                 live_svc = get_live_service()
                 provider = getattr(live_svc, "_mt5_provider", None)
                 if provider is None or not getattr(provider, "_connected", False):
-                    from app.data.mt5_provider import MT5DataProvider
-                    provider = MT5DataProvider(settings)
                     try:
+                        from app.data.mt5_provider import MT5DataProvider
+                        provider = MT5DataProvider(settings)
                         await provider.connect_async()
                     except Exception as exc:
                         logger.warning("[SMC-FIB-MULTI] MT5 connect in bootstrap failed: %s", exc)
-            elif not is_mt5:
-                provider = BinanceHistoryProvider(settings)
+                        provider = None
 
             if provider is None:
-                return getattr(self, "_cached_hist_candles", {})
+                provider = BinanceHistoryProvider(settings)
 
             result = {}
             for tf in self.timeframes:

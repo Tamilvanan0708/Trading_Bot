@@ -86,7 +86,7 @@ class LiveMarketDataService:
         try:
             from app.config.execution_settings import get_execution_settings
             exec_cfg = get_execution_settings()
-            if getattr(exec_cfg, "mt5_bridge_enabled", False) or self.settings.LIVE_FEED_PROVIDER == "mt5" or self.settings.MT5_ENABLED:
+            if self.settings.LIVE_FEED_PROVIDER != "binance" and (getattr(exec_cfg, "mt5_bridge_enabled", False) or self.settings.LIVE_FEED_PROVIDER == "mt5" or self.settings.MT5_ENABLED):
                 if getattr(exec_cfg, "mt5_symbol", None):
                     self._symbol = exec_cfg.mt5_symbol
                 elif getattr(self.settings, "MT5_SYMBOL", None):
@@ -143,6 +143,24 @@ class LiveMarketDataService:
         """The latest price received from a real live feed tick."""
         return self._live_price
 
+    @property
+    def is_mt5_active(self) -> bool:
+        """True only if MT5 provider is selected and MetaTrader5 package is natively available."""
+        if self.settings.LIVE_FEED_PROVIDER == "binance":
+            return False
+        if self.settings.LIVE_FEED_PROVIDER == "mock":
+            return False
+        from app.config.execution_settings import get_execution_settings
+        exec_cfg = get_execution_settings()
+        mt5_wanted = (self.settings.LIVE_FEED_PROVIDER == "mt5") or self.settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+        if not mt5_wanted:
+            return False
+        try:
+            import MetaTrader5  # type: ignore
+            return True
+        except (ImportError, Exception):
+            return False
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -161,13 +179,7 @@ class LiveMarketDataService:
 
     async def _startup_async(self) -> None:
         """Background startup: connect feed immediately, then load history in background."""
-        from app.config.execution_settings import get_execution_settings
-        exec_cfg = get_execution_settings()
-        is_mt5 = (
-            (self.settings.LIVE_FEED_PROVIDER == "mt5")
-            or self.settings.MT5_ENABLED
-            or getattr(exec_cfg, "mt5_bridge_enabled", False)
-        )
+        is_mt5 = self.is_mt5_active
 
         if is_mt5:
             await self.registry.register_buffer(self._symbol)
@@ -377,15 +389,15 @@ class LiveMarketDataService:
     async def _load_historical_base(self) -> None:
         """Load a REAL base 15M series (MT5 or Binance REST) with validation."""
         candles: list[Candle] = []
-        from app.config.execution_settings import get_execution_settings
-        exec_cfg = get_execution_settings()
-        is_mt5 = (self.settings.LIVE_FEED_PROVIDER == "mt5") or self.settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+        is_mt5 = self.is_mt5_active
 
         if is_mt5:
             try:
                 from app.data.mt5_provider import MT5MarketDataProvider
                 mt5_p = getattr(self, "_mt5_provider", None)
                 if mt5_p is None:
+                    from app.config.execution_settings import get_execution_settings
+                    exec_cfg = get_execution_settings()
                     target_sym = getattr(exec_cfg, "mt5_symbol", None) or self.settings.MT5_SYMBOL or self._symbol
                     mt5_p = MT5MarketDataProvider(
                         symbol=target_sym,
@@ -407,7 +419,7 @@ class LiveMarketDataService:
             except Exception as exc:  # noqa: BLE001
                 logger.error("[MT5-HISTORY] Failed to load from MT5: %s", exc)
 
-        if not candles and not is_mt5:
+        if not candles:
             provider = self._historical_provider
             if provider is None:
                 provider = BinanceHistoryProvider(self.settings)
@@ -477,9 +489,7 @@ class LiveMarketDataService:
     async def _load_5m_base(self) -> None:
         """Load a REAL 5M base series (MT5 or Binance REST) for the 5m live chart."""
         candles: list[Candle] = []
-        from app.config.execution_settings import get_execution_settings
-        exec_cfg = get_execution_settings()
-        is_mt5 = (self.settings.LIVE_FEED_PROVIDER == "mt5") or self.settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+        is_mt5 = self.is_mt5_active
 
         if is_mt5:
             try:
@@ -491,7 +501,7 @@ class LiveMarketDataService:
             except Exception as exc:  # noqa: BLE001
                 logger.error("[MT5-HISTORY] Failed to load 5M candles from MT5: %s", exc)
 
-        if not candles and not is_mt5:
+        if not candles:
             provider = self._historical_provider
             if provider is None:
                 provider = BinanceHistoryProvider(self.settings)
@@ -551,9 +561,7 @@ class LiveMarketDataService:
 
         Returns a dict with ``status`` (SUCCESS / FAILED) and metadata.
         """
-        from app.config.execution_settings import get_execution_settings
-        exec_cfg = get_execution_settings()
-        is_mt5 = (self.settings.LIVE_FEED_PROVIDER == "mt5") or self.settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+        is_mt5 = self.is_mt5_active
 
         provider = getattr(self, "_historical_provider", None)
         if provider is None and not is_mt5:
@@ -850,9 +858,7 @@ class LiveMarketDataService:
         the analysis pipeline always uses ``get_multi_timeframe_snapshot``
         (closed-only, lookahead-safe).
         """
-        from app.config.execution_settings import get_execution_settings
-        exec_cfg = get_execution_settings()
-        is_mt5 = (self.settings.LIVE_FEED_PROVIDER == "mt5") or self.settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+        is_mt5 = self.is_mt5_active
 
         if is_mt5:
             mt5_p = getattr(self, "_mt5_provider", None)

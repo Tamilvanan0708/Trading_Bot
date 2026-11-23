@@ -1031,7 +1031,7 @@ async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
         from app.config.execution_settings import get_execution_settings
         _settings = get_settings()
         _exec_cfg = get_execution_settings()
-        is_mt5 = (_settings.LIVE_FEED_PROVIDER == "mt5") or _settings.MT5_ENABLED or getattr(_exec_cfg, "mt5_bridge_enabled", False)
+        is_mt5 = getattr(svc, "is_mt5_active", False)
 
         if is_mt5:
             try:
@@ -1047,7 +1047,8 @@ async def get_chart_data(symbol: str, timeframe: str, limit: int = 150):
                         live_price = candles[-1].close
             except Exception as e:
                 logger.debug("Chart MT5 fallback failed: %s", e)
-        else:
+
+        if not candles:
             try:
                 from app.data.live.binance_history import BinanceHistoryProvider
                 provider = BinanceHistoryProvider()

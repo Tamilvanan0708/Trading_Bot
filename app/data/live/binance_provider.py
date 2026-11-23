@@ -20,6 +20,7 @@ BINANCE_FUTURES_STREAM_URL = "wss://fstream.binance.com/stream"
 BINANCE_SYMBOL_MAP = {
     "XAUUSD": "xauusdt",
     "XAUUSDT": "xauusdt",
+    "XAUUSD-VIP": "xauusdt",
 }
 
 STREAM_BOOK_TICKER = "bookTicker"

@@ -2544,7 +2544,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                     live_svc = get_live_service()
                     settings = get_settings()
-                    is_mt5 = (settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
+                    is_mt5 = (settings.LIVE_FEED_PROVIDER != "binance") and ((settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False))
 
                     mt5_p = None
                     if is_mt5:

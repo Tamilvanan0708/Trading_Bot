@@ -54,6 +54,7 @@ _INTERVAL_MAP = {
 _SYMBOL_MAP = {
     "XAUUSD": "XAUUSDT",
     "XAUUSDT": "XAUUSDT",
+    "XAUUSD-VIP": "XAUUSDT",
 }
 
 
@@ -69,7 +70,10 @@ class BinanceHistoryProvider(MarketDataProvider):
         self._base_url = base_url
 
     def _binance_symbol(self, symbol: str) -> str:
-        return _SYMBOL_MAP.get(symbol.upper(), symbol.upper())
+        s_upper = (symbol or "XAUUSD").upper()
+        if "XAU" in s_upper:
+            return "XAUUSDT"
+        return _SYMBOL_MAP.get(s_upper, s_upper)
 
     def _interval(self, timeframe: TimeFrame) -> str:
         try:
