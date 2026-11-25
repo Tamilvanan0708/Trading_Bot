@@ -930,15 +930,35 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                     if tf_key.lower() not in allowed_tfs:
                         continue
                     f_state = fib_states.get(tf_key)
-                    if not f_state or not getattr(f_state, "layers", None) or not getattr(f_state, "point_2_price", None):
+                    if not f_state or not getattr(f_state, "point_2_price", None):
                         try:
                             from app.retracement.repository import RetracementRepository
                             db_state = await RetracementRepository(db).load_latest_active("XAUUSD", strategy="RETRACEMENT_BOS_V1", timeframe=tf_key)
-                            if db_state and getattr(db_state, "layers", None) and getattr(db_state, "point_2_price", None):
+                            if db_state and getattr(db_state, "point_2_price", None):
                                 f_state = db_state
                         except Exception:
                             pass
-                    if not f_state or not getattr(f_state, "layers", None) or not getattr(f_state, "point_2_price", None):
+                    if not f_state or not getattr(f_state, "point_2_price", None):
+                        continue
+
+                    # Self-healing: If setup has touched entry or is active, ensure L1 is populated in layers
+                    if getattr(f_state, "entry_touched", False) or str(getattr(f_state, "state", "")).upper() in ("ENTRY_TOUCHED", "TRADE_ACTIVE"):
+                        if getattr(f_state, "layers", None) is None:
+                            f_state.layers = {}
+                        if "L1" not in f_state.layers and getattr(f_state, "entry_price", None):
+                            f_state.layers["L1"] = {
+                                "layer": "L1",
+                                "entry_ratio": 0.618,
+                                "entry_price": round(float(f_state.entry_price), 2),
+                                "tp": round(float(f_state.fib_1_000), 2) if getattr(f_state, "fib_1_000", None) else round(float(f_state.dynamic_tp or f_state.entry_price), 2),
+                                "sl": round(float(f_state.sl_price), 2) if getattr(f_state, "sl_price", None) else None,
+                                "initial_sl": round(float(f_state.sl_price), 2) if getattr(f_state, "sl_price", None) else None,
+                                "lots": 0.01,
+                                "state": "FILLED",
+                                "filled_at": (f_state.entry_timestamp or datetime.now(timezone.utc)).isoformat() if hasattr(f_state.entry_timestamp or datetime.now(timezone.utc), "isoformat") else str(f_state.entry_timestamp),
+                            }
+
+                    if not getattr(f_state, "layers", None):
                         continue
                     p2_ts = getattr(f_state, "point_2_timestamp", None)
                     anchor_ts = int(p2_ts.timestamp()) if (p2_ts and hasattr(p2_ts, "timestamp")) else int(f_state.point_2_price)
@@ -1151,7 +1171,17 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                                     # Idea 1: Entry Chase Guard (Do Not Chase if market has moved too far past Fib entry towards TP)
                                     if getattr(exec_cfg, "chase_filter_enabled", True):
-                                        max_chase = float(getattr(exec_cfg, "max_chase_points", 2.0))
+                                        base_chase = float(getattr(exec_cfg, "max_chase_points", 2.0))
+                                        # Scale chase tolerance by timeframe: on higher TFs (15M, 30M, 1H), swings and targets are 15-40 pts,
+                                        # so a natural 2-3 pt bounce after touching 0.618 must not abort the entry.
+                                        if tf_key.lower() == "15m":
+                                            max_chase = max(base_chase, 5.0)
+                                        elif tf_key.lower() == "30m":
+                                            max_chase = max(base_chase, 7.5)
+                                        elif tf_key.lower() in ("1h", "4h"):
+                                            max_chase = max(base_chase, 12.0)
+                                        else:
+                                            max_chase = base_chase
                                         if f_state.direction in ("LONG", "BUY") and effective_check_price > (entry_px + max_chase):
                                             logger.info(
                                                 "[PAPER-AUTO] Chase Guard: skipping %s: live price %.2f drifted %.2f pts past entry %.2f (max allowed: %.2f)",
@@ -1441,85 +1471,86 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                                     )
 
                                     # MT5 Bridge Live Execution Dispatch (Strictly Fib Retracement Only)
-                                    try:
-                                        from app.services.mt5_bridge_manager import get_mt5_bridge_manager
-                                        sl_distance = round(abs(entry_px - sl_px), 2)
-                                        tp_distance = round(abs(tp_px - entry_px), 2)
-                                        ist_tz = timezone(timedelta(hours=5, minutes=30))
-                                        open_time_ist = (new_trade.opened_at or datetime.now(timezone.utc)).astimezone(ist_tz).strftime("%H:%M")
-                                        # Include paper_trade_id prefix (6 chars) to ensure 100% deterministic, unambiguous matching
-                                        trade_comment = f"{new_trade.id[:6]}_{tf_key.upper()}_{l_key}_{open_time_ist}"[:31]
+                                    if getattr(exec_cfg, "mt5_bridge_enabled", False):
+                                        try:
+                                            from app.services.mt5_bridge_manager import get_mt5_bridge_manager
+                                            sl_distance = round(abs(entry_px - sl_px), 2)
+                                            tp_distance = round(abs(tp_px - entry_px), 2)
+                                            ist_tz = timezone(timedelta(hours=5, minutes=30))
+                                            open_time_ist = (new_trade.opened_at or datetime.now(timezone.utc)).astimezone(ist_tz).strftime("%H:%M")
+                                            # Include paper_trade_id prefix (6 chars) to ensure 100% deterministic, unambiguous matching
+                                            trade_comment = f"{new_trade.id[:6]}_{tf_key.upper()}_{l_key}_{open_time_ist}"[:31]
 
-                                        mt5_res = get_mt5_bridge_manager().enqueue_order({
-                                            "id": f"mt5-{new_trade.id[:8]}",
-                                            "paper_trade_id": new_trade.id,
-                                            "strategy": "Fib Retracement",
-                                            "layer": l_key,
-                                            "timeframe": tf_key.upper(),
-                                            "comment": trade_comment,
-                                            "direction": f_state.direction,
-                                            "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
-                                            "lot_size": trade_lot,
-                                            "entry_price": entry_px,
-                                            "stop_loss": sl_px,
-                                            "take_profit_1": tp_px,
-                                            "sl_points": sl_distance,
-                                            "tp_points": tp_distance,
-                                            "execution_mode": "POINTS_DISTANCE",
-                                        })
-
-                                        trade_logs = list(new_trade.state_logs or [])
-                                        tkt_override = None
-                                        # Synchronize actual_entry and lot_size with real MT5 execution
-                                        if mt5_res and mt5_res.get("status") == "filled_native":
-                                            tkt_override = mt5_res.get("ticket")
-                                            fill_px = float(mt5_res.get("price") or entry_px)
-                                            new_trade.actual_entry = fill_px
-                                            if mt5_res.get("payload", {}).get("lot_size"):
-                                                new_trade.lot_size = float(mt5_res["payload"]["lot_size"])
-                                            trade_logs.append({
-                                                "event": "MT5_FILLED",
-                                                "ticket": tkt_override,
-                                                "price": fill_px,
-                                                "lot_size": new_trade.lot_size,
+                                            mt5_res = get_mt5_bridge_manager().enqueue_order({
+                                                "id": f"mt5-{new_trade.id[:8]}",
+                                                "paper_trade_id": new_trade.id,
+                                                "strategy": "Fib Retracement",
+                                                "layer": l_key,
+                                                "timeframe": tf_key.upper(),
                                                 "comment": trade_comment,
-                                                "time": datetime.now(timezone.utc).isoformat(),
+                                                "direction": f_state.direction,
+                                                "symbol": exec_cfg.mt5_symbol or "XAUUSD-VIP",
+                                                "lot_size": trade_lot,
+                                                "entry_price": entry_px,
+                                                "stop_loss": sl_px,
+                                                "take_profit_1": tp_px,
+                                                "sl_points": sl_distance,
+                                                "tp_points": tp_distance,
+                                                "execution_mode": "POINTS_DISTANCE",
                                             })
-                                        elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "disabled", "filtered"):
-                                            active_setup_by_tf.pop(tf_key, None)
-                                            rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
-                                            new_trade.state = "CANCELLED"
-                                            new_trade.exit_reason = f"MT5_REJECTED: {rej_reason}"
-                                            trade_logs.append({
-                                                "event": "MT5_REJECTED",
-                                                "status": mt5_res.get("status"),
-                                                "reason": rej_reason,
-                                                "time": datetime.now(timezone.utc).isoformat(),
-                                            })
+
+                                            trade_logs = list(new_trade.state_logs or [])
+                                            tkt_override = None
+                                            # Synchronize actual_entry and lot_size with real MT5 execution
+                                            if mt5_res and mt5_res.get("status") == "filled_native":
+                                                tkt_override = mt5_res.get("ticket")
+                                                fill_px = float(mt5_res.get("price") or entry_px)
+                                                new_trade.actual_entry = fill_px
+                                                if mt5_res.get("payload", {}).get("lot_size"):
+                                                    new_trade.lot_size = float(mt5_res["payload"]["lot_size"])
+                                                trade_logs.append({
+                                                    "event": "MT5_FILLED",
+                                                    "ticket": tkt_override,
+                                                    "price": fill_px,
+                                                    "lot_size": new_trade.lot_size,
+                                                    "comment": trade_comment,
+                                                    "time": datetime.now(timezone.utc).isoformat(),
+                                                })
+                                            elif mt5_res and mt5_res.get("status") in ("rejected", "REJECTED_BY_BROKER", "blocked_chase", "blocked_spread", "filtered"):
+                                                active_setup_by_tf.pop(tf_key, None)
+                                                rej_reason = mt5_res.get("error") or mt5_res.get("reason") or "Broker rejected order"
+                                                new_trade.state = "CANCELLED"
+                                                new_trade.exit_reason = f"MT5_REJECTED: {rej_reason}"
+                                                trade_logs.append({
+                                                    "event": "MT5_REJECTED",
+                                                    "status": mt5_res.get("status"),
+                                                    "reason": rej_reason,
+                                                    "time": datetime.now(timezone.utc).isoformat(),
+                                                })
+                                                new_trade.state_logs = trade_logs
+                                                await db.commit()
+                                                try:
+                                                    rej_msg = _build_hybrid_rejected_msg(
+                                                        strategy_name=f"Fib Retracement ({l_key})",
+                                                        symbol_tf=f"XAU/USD ({tf_key.upper()})",
+                                                        direction=f_state.direction,
+                                                        reason=rej_reason,
+                                                        entry_px=entry_px,
+                                                    )
+                                                    _dispatch_tg_alert(tg.send_raw_alert(rej_msg))
+                                                except Exception:
+                                                    pass
+                                                continue
+                                            else:
+                                                trade_logs.append({
+                                                    "event": "MT5_DISPATCHED",
+                                                    "comment": trade_comment,
+                                                    "time": datetime.now(timezone.utc).isoformat(),
+                                                })
                                             new_trade.state_logs = trade_logs
                                             await db.commit()
-                                            try:
-                                                rej_msg = _build_hybrid_rejected_msg(
-                                                    strategy_name=f"Fib Retracement ({l_key})",
-                                                    symbol_tf=f"XAU/USD ({tf_key.upper()})",
-                                                    direction=f_state.direction,
-                                                    reason=rej_reason,
-                                                    entry_px=entry_px,
-                                                )
-                                                _dispatch_tg_alert(tg.send_raw_alert(rej_msg))
-                                            except Exception:
-                                                pass
-                                            continue
-                                        else:
-                                            trade_logs.append({
-                                                "event": "MT5_DISPATCHED",
-                                                "comment": trade_comment,
-                                                "time": datetime.now(timezone.utc).isoformat(),
-                                            })
-                                        new_trade.state_logs = trade_logs
-                                        await db.commit()
-                                    except Exception as mt5_err:  # noqa: BLE001
-                                        logger.warning("[MT5-BRIDGE] Failed to dispatch order to MT5 queue: %s", mt5_err)
+                                        except Exception as mt5_err:  # noqa: BLE001
+                                            logger.warning("[MT5-BRIDGE] Failed to dispatch order to MT5 queue: %s", mt5_err)
 
                                     # Telegram: Dispatch Hybrid Trade Opened Alert
                                     try:

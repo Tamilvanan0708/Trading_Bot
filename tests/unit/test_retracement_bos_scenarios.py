@@ -546,8 +546,9 @@ def test_active_trade_timeout_expires_after_max_candles():
         ts += timedelta(minutes=1)
 
     assert any(e.event_type == RetracementEventType.COMPLETED and e.metadata.get("reason") == "TIMEOUT" for e in final_events)
-    assert engine.setup.state == RetracementState.COMPLETED
-    assert engine.setup.outcome == "TIMEOUT"
+    res_setup = engine.setup or engine.last_completed
+    assert res_setup.state == RetracementState.COMPLETED
+    assert res_setup.outcome == "TIMEOUT"
 
 
 def test_instant_live_price_sl_hit_without_waiting_candle_close():

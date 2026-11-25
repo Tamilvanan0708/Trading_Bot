@@ -1044,12 +1044,6 @@ class DualRetracementEngine:
             if entry_level is None:
                 continue
 
-            # Idea 2: True Pullback Condition:
-            # An impulse expansion candle that pushes to a new high cannot falsely trigger
-            # a retracement fill with its starting low. Price must pull back down into the entry.
-            if setup.current_high_timestamp == candle.timestamp and candle.close > entry_level:
-                continue
-
             if candle.low <= entry_level:
                 if layer == "L1":
                     tp = setup.fib_1_000
@@ -1098,12 +1092,6 @@ class DualRetracementEngine:
             attr = f"fib_{ratio:.3f}".replace(".", "_")
             entry_level = getattr(setup, attr, None)
             if entry_level is None:
-                continue
-
-            # Idea 2: True Pullback Condition:
-            # An impulse dump candle that pushes to a new low cannot falsely trigger
-            # a retracement fill with its starting high. Price must pull back up into the entry.
-            if setup.current_high_timestamp == candle.timestamp and candle.close < entry_level:
                 continue
 
             if candle.high >= entry_level:
@@ -1585,6 +1573,22 @@ class DualRetracementEngine:
         # 2. TRADE_ACTIVE: Active trade monitoring for Stop Loss & Take Profit
         # ------------------------------------------------------------------
         if setup.state == RetracementState.TRADE_ACTIVE:
+            # Self-healing: Ensure L1 is always populated for any active trade
+            if getattr(setup, "layers", None) is None:
+                setup.layers = {}
+            if "L1" not in setup.layers and setup.entry_price is not None:
+                setup.layers["L1"] = {
+                    "layer": "L1",
+                    "entry_ratio": 0.618,
+                    "entry_price": round(setup.entry_price, 2),
+                    "tp": round(setup.fib_1_000, 2) if setup.fib_1_000 else round(setup.dynamic_tp or setup.entry_price, 2),
+                    "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                    "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                    "lots": 0.01,
+                    "state": "FILLED",
+                    "filled_at": (setup.entry_timestamp or ts).isoformat() if hasattr(setup.entry_timestamp or ts, "isoformat") else str(setup.entry_timestamp or ts),
+                    "filled_candle_ts": curr_candle_ts,
+                }
             # Check and fill deeper layers (L2, L3) on live pullback
             # ±0.02 pt tolerance on all layer checks to handle tick-feed float rounding
             _L2_TOL = 0.02

@@ -90,6 +90,20 @@ def _serialize_setup(setup, live_price=None, data_status=None, symbol="XAUUSD",
                     if not setup.tp_locked and setup.fib_1_000 is not None:
                         setup.locked_tp = setup.fib_1_000
                         setup.tp_locked = True
+                    if getattr(setup, "layers", None) is None:
+                        setup.layers = {}
+                    if "L1" not in setup.layers:
+                        setup.layers["L1"] = {
+                            "layer": "L1",
+                            "entry_ratio": 0.618,
+                            "entry_price": round(setup.entry_price, 2),
+                            "tp": round(setup.fib_1_000, 2) if setup.fib_1_000 else round(setup.dynamic_tp or setup.entry_price, 2),
+                            "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "lots": 0.01,
+                            "state": "FILLED",
+                            "filled_at": datetime.now(timezone.utc).isoformat(),
+                        }
             elif setup.direction == "SHORT":
                 if setup.sl_price is not None and live_price >= setup.sl_price:
                     setup.state = RetracementState.INVALIDATED
@@ -100,6 +114,20 @@ def _serialize_setup(setup, live_price=None, data_status=None, symbol="XAUUSD",
                     if not setup.tp_locked and setup.fib_1_000 is not None:
                         setup.locked_tp = setup.fib_1_000
                         setup.tp_locked = True
+                    if getattr(setup, "layers", None) is None:
+                        setup.layers = {}
+                    if "L1" not in setup.layers:
+                        setup.layers["L1"] = {
+                            "layer": "L1",
+                            "entry_ratio": 0.618,
+                            "entry_price": round(setup.entry_price, 2),
+                            "tp": round(setup.fib_1_000, 2) if setup.fib_1_000 else round(setup.dynamic_tp or setup.entry_price, 2),
+                            "sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "initial_sl": round(setup.sl_price, 2) if setup.sl_price else None,
+                            "lots": 0.01,
+                            "state": "FILLED",
+                            "filled_at": datetime.now(timezone.utc).isoformat(),
+                        }
 
     ai_status = getattr(setup, "ai_status", None)
     if not ai_status:

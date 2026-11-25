@@ -606,7 +606,16 @@ class MT5BridgeManager:
             # Idea 1: Entry Chase Guard (Prevent late market orders when price has already drifted far from Fib level)
             entry_target = float(order_payload.get("entry_price") or 0.0)
             if getattr(exec_cfg, "chase_filter_enabled", True) and entry_target > 0 and not order_payload.get("is_test", False):
-                max_chase = float(getattr(exec_cfg, "max_chase_points", 2.0))
+                base_chase = float(getattr(exec_cfg, "max_chase_points", 2.0))
+                tf_order = str(order_payload.get("timeframe", "5M")).upper()
+                if tf_order == "15M":
+                    max_chase = max(base_chase, 5.0)
+                elif tf_order == "30M":
+                    max_chase = max(base_chase, 7.5)
+                elif tf_order in ("1H", "4H"):
+                    max_chase = max(base_chase, 12.0)
+                else:
+                    max_chase = base_chase
                 gap = round(abs(price - entry_target), 2)
                 is_chasing = False
                 if is_buy and price > (entry_target + max_chase):

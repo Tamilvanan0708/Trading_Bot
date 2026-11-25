@@ -4844,7 +4844,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
               🛡️ Set SL to Break-Even
             </button>
             <button class="btn btn-sm btn-primary btn-cockpit-close" data-id="${tradeId}" style="font-weight:700;background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.4);cursor:pointer">
-              🎯 Close Position / Settle P&L
+              🎯 Close Position / Settle Trade
             </button>
           </div>
           <div style="font-size:11px;color:var(--text-muted)">
@@ -5307,7 +5307,7 @@ function buildRichStrategyView(mount, endpoint, strategyName, strategySub, strat
         } catch (err) {
           UI.toast("Close Error", err.message || "Failed to close position.", "rose");
           btn.disabled = false;
-          btn.textContent = "🎯 Close Position / Settle P&L";
+          btn.textContent = "🎯 Close Position / Settle Trade";
         }
       };
     });
