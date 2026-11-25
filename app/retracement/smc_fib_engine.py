@@ -291,6 +291,11 @@ class SMCFibEngine:
             self.pocket_price = round(lo + span * 0.210, 2)   # 0.790 retracement from top = (1 - 0.790) = 0.210 from base
             self.sl_price = round(lo + span * 0.080, 2)       # 0.920 retracement from top = (1 - 0.920) = 0.080 from base
 
+            # Protect against micro-noise on Gold: enforce minimum SL distance of 4.5 pts
+            if hi > 1000.0 and self.entry_price and self.sl_price:
+                if (self.entry_price - self.sl_price) < 4.5:
+                    self.sl_price = round(self.entry_price - 4.5, 2)
+
             self.levels = {
                 "1.000": RetracementLevel(ratio=1.000, price=lo, label="SWING_ANCHOR"),
                 "0.920": RetracementLevel(ratio=0.920, price=self.sl_price, label="STOP_LOSS"),
@@ -312,6 +317,11 @@ class SMCFibEngine:
             self.entry_price = round(lo + span * 0.680, 2)    # 0.680 retracement up from bottom
             self.pocket_price = round(lo + span * 0.790, 2)   # 0.790 retracement up from bottom (Order Block)
             self.sl_price = round(lo + span * 0.920, 2)       # 0.920 retracement up from bottom (SL)
+
+            # Protect against micro-noise on Gold: enforce minimum SL distance of 4.5 pts
+            if hi > 1000.0 and self.entry_price and self.sl_price:
+                if (self.sl_price - self.entry_price) < 4.5:
+                    self.sl_price = round(self.entry_price + 4.5, 2)
 
             self.levels = {
                 "1.000": RetracementLevel(ratio=1.000, price=hi, label="SWING_ANCHOR"),

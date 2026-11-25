@@ -13,6 +13,7 @@ def reset_bridge():
     # Enable bridge in settings for test
     cfg = get_execution_settings()
     cfg.mt5_bridge_enabled = True
+    cfg.strategy_fib_retracement = True
     save_execution_settings(cfg)
     yield
     mgr.clear_all()

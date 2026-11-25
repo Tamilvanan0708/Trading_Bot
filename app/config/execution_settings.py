@@ -31,10 +31,10 @@ class ExecutionSettings(BaseModel):
         description="percent of balance | fixed_amount"
     )
     risk_percent: float = Field(
-        default=5.0,
+        default=2.0,
         ge=0.1,
         le=10.0,
-        description="Risk percentage of account balance per trade (e.g. 5.0 = 5%)"
+        description="Risk percentage of account balance per trade (e.g. 2.0 = 2%)"
     )
     account_balance: float = Field(
         default=10000.0,
@@ -89,7 +89,7 @@ class ExecutionSettings(BaseModel):
         description="Enable SMC With Fib strategy execution"
     )
     strategy_breakout: bool = Field(
-        default=True,
+        default=False,
         description="Enable Breakout Strategy execution"
     )
     strategy_fib_trend: bool = Field(
@@ -117,8 +117,8 @@ class ExecutionSettings(BaseModel):
         description="Filter out micro sideways chop when setup impulse range is below threshold"
     )
     trend_filter_enabled: bool = Field(
-        default=False,
-        description="Filter counter-trend setups against macro trend alignment (default False for pure BOS Fib)"
+        default=True,
+        description="Filter counter-trend setups against macro trend alignment (default True for trend protection)"
     )
     cross_tf_dedup_enabled: bool = Field(
         default=False,
@@ -147,13 +147,13 @@ class ExecutionSettings(BaseModel):
         description="Block MT5 orders when live spread exceeds max_spread_points"
     )
     max_spread_points: float = Field(
-        default=2.0,
+        default=3.0,
         ge=0.1,
         le=10.0,
         description="Maximum allowed spread in points for 15M/30M/1H. Orders blocked when spread exceeds this value."
     )
     max_spread_points_5m: float = Field(
-        default=1.50,
+        default=2.50,
         ge=0.1,
         le=5.0,
         description="Strict maximum allowed spread in points for 5M scalp trades. Blocks Asian open/rollover spikes."

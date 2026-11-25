@@ -2113,6 +2113,19 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         )).scalars().first()
 
                         if not existing and entry_px > 0:
+                            # --- SMC MINIMUM IMPULSE RANGE FILTER ---
+                            if getattr(exec_cfg, "min_impulse_filter_enabled", True):
+                                p1_smc = float(s_card.get("point_1", {}).get("price") or 0.0)
+                                p2_smc = float(s_card.get("point_2", {}).get("price") or 0.0)
+                                smc_span = abs(p1_smc - p2_smc)
+                                min_req = 3.5 if tf_key in ("1m", "3m", "5m") else (6.0 if tf_key == "15m" else (8.0 if tf_key == "30m" else 12.0))
+                                if smc_span > 0 and smc_span < min_req and entry_px > 500.0:
+                                    logger.info(
+                                        "[PAPER-AUTO] SMC Min Impulse Filter: Setup range $%.2f is below min required $%.2f on %s — skipping noisy trade.",
+                                        smc_span, min_req, tf_key.upper(),
+                                    )
+                                    continue
+
                             # --- SMC MACRO TREND ALIGNMENT FILTER (EMA) ---
                             if getattr(exec_cfg, "trend_filter_enabled", True):
                                 tf_slot = smc_svc.slots.get(tf_key) if hasattr(smc_svc, "slots") else None
@@ -2544,7 +2557,7 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
 
                     live_svc = get_live_service()
                     settings = get_settings()
-                    is_mt5 = (settings.LIVE_FEED_PROVIDER != "binance") and ((settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False))
+                    is_mt5 = (settings.LIVE_FEED_PROVIDER == "mt5") or settings.MT5_ENABLED or getattr(exec_cfg, "mt5_bridge_enabled", False)
 
                     mt5_p = None
                     if is_mt5:
@@ -2590,14 +2603,20 @@ async def sync_strategy_paper_trades(db: AsyncSession, force: bool = False) -> N
                         bullish_trig = highest + cfg["buffer"]
                         bearish_trig = lowest - cfg["buffer"]
 
-                        is_bull = (last_c.close >= bullish_trig or last_c.high >= bullish_trig) and last_c.close >= ema50
-                        is_bear = (last_c.close <= bearish_trig or last_c.low <= bearish_trig) and last_c.close <= ema50
+                        is_bull = (last_c.close >= bullish_trig) and last_c.close >= ema50
+                        is_bear = (last_c.close <= bearish_trig) and last_c.close <= ema50
 
                         if is_bull or is_bear:
                             dir_str = "LONG" if is_bull else "SHORT"
                             entry_px = round(last_c.close, 2)
                             tp_px = round(entry_px + (calc_atr * cfg["tp_mult"]), 2) if is_bull else round(entry_px - (calc_atr * cfg["tp_mult"]), 2)
                             sl_px = round(entry_px - (calc_atr * cfg["sl_mult"]), 2) if is_bull else round(entry_px + (calc_atr * cfg["sl_mult"]), 2)
+                            # Protect against micro-noise on Gold: enforce minimum SL distance of 4.5 pts
+                            if entry_px > 1000.0:
+                                if is_bull and (entry_px - sl_px) < 4.5:
+                                    sl_px = round(entry_px - 4.5, 2)
+                                elif is_bear and (sl_px - entry_px) < 4.5:
+                                    sl_px = round(entry_px + 4.5, 2)
                             sig_id = f"BREAKOUT_{tf_str.upper()}_{dir_str}_{int(last_c.timestamp.timestamp())}"
 
                             compounded_bal = await _get_compounded_paper_balance(db, exec_cfg.account_balance)
