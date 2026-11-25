@@ -18,6 +18,10 @@ CONFIG_FILE = Path("data/execution_settings.json")
 
 
 class ExecutionSettings(BaseModel):
+    config_version: int = Field(
+        default=2,
+        description="Configuration migration schema version"
+    )
     sizing_mode: Literal["fixed", "broker_risk"] = Field(
         default="broker_risk",
         description="fixed | broker_risk"
@@ -191,8 +195,31 @@ def get_execution_settings() -> ExecutionSettings:
                 return _CURRENT_SETTINGS
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                dirty = False
                 if data.get("smart_shield_level") == "0.618":
                     data["smart_shield_level"] = "0.500"
+                    dirty = True
+
+                # Migrate older configurations (v0/v1) to safe defaults:
+                # 1. Enable Fib Retracement
+                # 2. Disable Breakout (unconfirmed wick noise)
+                # 3. Enable Trend Filter
+                # 4. Safe spread tolerances (Gold overnight spread)
+                # 5. Cap risk to 2.0%
+                if data.get("config_version", 0) < 2:
+                    data["strategy_fib_retracement"] = True
+                    data["strategy_breakout"] = False
+                    data["trend_filter_enabled"] = True
+                    if float(data.get("max_spread_points", 0.0)) < 3.0:
+                        data["max_spread_points"] = 3.0
+                    if float(data.get("max_spread_points_5m", 0.0)) < 2.5:
+                        data["max_spread_points_5m"] = 2.50
+                    if float(data.get("risk_percent", 0.0)) > 3.0:
+                        data["risk_percent"] = 2.0
+                    data["config_version"] = 2
+                    dirty = True
+
+                if dirty:
                     try:
                         with open(CONFIG_FILE, "w", encoding="utf-8") as fw:
                             json.dump(data, fw, indent=2)
